@@ -2,28 +2,33 @@ const express = require('express');
 const logger = require('../utils/logger');
 const paystack = require('../services/paystack.service');
 const hubtel = require('../services/hubtel.service');
-const subService = require('../services/subscription.service');
-const notification = require('../services/notification.service');
 const conversation = require('../services/conversation.handler');
-const { query } = require('../config/database');
+const queue = require('../services/webhook.queue');
 
 const router = express.Router();
 
 /**
- * Paystack webhook: x-paystack-signature is HMAC-SHA512 over the raw body.
- * IMPORTANT: this route is mounted with express.raw() in server.js — req.body is a Buffer here.
+ * Paystack webhook: HMAC-SHA512 over the raw body. Mounted with express.raw()
+ * in server.js so req.body is a Buffer here.
+ *
+ * Strategy: verify signature, persist to webhook_events (idempotent on event id),
+ * acknowledge 200 OK. A worker drains the queue durably — a crash after the 200
+ * cannot lose the event.
  */
-router.post('/paystack/webhook', (req, res) => {
+router.post('/paystack/webhook', async (req, res) => {
   const signature = req.headers['x-paystack-signature'];
   const rawBody = req.body; // Buffer
-  const valid = paystack.verifyPaystackWebhook(rawBody, signature);
 
-  // Always respond 200 fast — never let Paystack retry due to slow processing.
-  res.status(200).send('OK');
+  let valid = false;
+  try {
+    valid = paystack.verifyPaystackWebhook(rawBody, signature);
+  } catch (err) {
+    logger.warn('Paystack signature verify threw: %s', err.message);
+  }
 
   if (!valid) {
     logger.warn('Paystack webhook signature invalid');
-    return;
+    return res.status(401).send('invalid signature');
   }
 
   let event;
@@ -31,35 +36,33 @@ router.post('/paystack/webhook', (req, res) => {
     event = JSON.parse(rawBody.toString('utf8'));
   } catch (err) {
     logger.error('Paystack webhook: invalid JSON body: %s', err.message);
-    return;
+    return res.status(400).send('invalid json');
   }
 
-  setImmediate(async () => {
-    try {
-      const eventType = event.event;
-      const data = event.data || {};
-      const reference = data.reference;
-      const gatewayRef = data.id ? String(data.id) : null;
-      const amount = (data.amount || 0) / 100;
+  // Paystack events expose a unique `id` per event; reference also unique per charge.
+  const externalId = event.id ? String(event.id)
+    : `${event.event}:${event.data?.reference || event.data?.id || ''}`;
 
-      logger.info('Paystack event=%s ref=%s status=%s', eventType, reference, data.status);
-
-      if (eventType === 'charge.success' && data.status === 'success' && reference) {
-        await conversation.handlePaymentSuccess({ reference, gatewayRef, amount });
-      } else if (eventType === 'charge.failed' || data.status === 'failed') {
-        if (reference) await conversation.handlePaymentFailure({ reference });
-      } else {
-        logger.debug('Paystack event ignored: %s', eventType);
-      }
-    } catch (err) {
-      logger.error('Paystack webhook handler error: %s', err.message, { stack: err.stack });
+  try {
+    const { duplicate } = await queue.enqueue({
+      source: 'paystack',
+      externalId,
+      payload: event,
+      signatureValid: true
+    });
+    if (duplicate) {
+      logger.info('Paystack webhook duplicate ignored: %s', externalId);
     }
-  });
+    res.status(200).send('OK');
+  } catch (err) {
+    logger.error('Paystack enqueue failed: %s', err.message);
+    res.status(500).send('enqueue failed');
+  }
 });
 
 /**
- * Paystack browser callback after card payment. Used as `callback_url` in initialize.
- * Verify on the server, then redirect / acknowledge.
+ * Browser callback after a card payment. Used as `callback_url` in initialize.
+ * Verify on the server and enqueue a synthetic event so the worker handles it.
  */
 router.get('/paystack/callback', async (req, res) => {
   const reference = req.query.reference || req.query.trxref;
@@ -67,13 +70,24 @@ router.get('/paystack/callback', async (req, res) => {
 
   const verification = await paystack.verifyTransaction(reference);
   if (verification.success && verification.status === 'success') {
-    setImmediate(() => {
-      conversation.handlePaymentSuccess({
-        reference,
-        gatewayRef: verification.gateway_ref,
-        amount: verification.amount_ghs
-      }).catch(err => logger.error('callback handlePaymentSuccess: %s', err.message));
-    });
+    try {
+      await queue.enqueue({
+        source: 'paystack',
+        externalId: `callback:${reference}`,
+        payload: {
+          event: 'charge.success',
+          data: {
+            reference,
+            id: verification.gateway_ref,
+            status: 'success',
+            amount: Math.round((verification.amount_ghs || 0) * 100)
+          }
+        },
+        signatureValid: true
+      });
+    } catch (err) {
+      logger.error('Paystack callback enqueue failed: %s', err.message);
+    }
     return res.status(200).send('Payment received. You can return to WhatsApp now.');
   }
   return res.status(200).send('Payment is still processing. We will update you on WhatsApp.');
@@ -83,16 +97,20 @@ router.get('/paystack/callback', async (req, res) => {
  * Hubtel callback: signed with HMAC-SHA256 (`x-hubtel-signature`) when configured.
  * Mounted with express.raw() so we can verify the raw body.
  */
-router.post('/hubtel/callback', (req, res) => {
+router.post('/hubtel/callback', async (req, res) => {
   const signature = req.headers['x-hubtel-signature'] || req.headers['hubtel-signature'];
   const rawBody = req.body;
-  const valid = hubtel.verifyHubtelWebhook(rawBody, signature);
 
-  res.status(200).send('OK');
+  let valid = false;
+  try {
+    valid = hubtel.verifyHubtelWebhook(rawBody, signature);
+  } catch (err) {
+    logger.warn('Hubtel signature verify threw: %s', err.message);
+  }
 
   if (!valid) {
     logger.warn('Hubtel webhook signature invalid');
-    return;
+    return res.status(401).send('invalid signature');
   }
 
   let event;
@@ -100,67 +118,34 @@ router.post('/hubtel/callback', (req, res) => {
     event = JSON.parse(rawBody.toString('utf8'));
   } catch (err) {
     logger.error('Hubtel webhook: invalid JSON body: %s', err.message);
-    return;
+    return res.status(400).send('invalid json');
   }
 
-  setImmediate(async () => {
-    try {
-      const parsed = hubtel.parseHubtelCallback(event);
-      logger.info('Hubtel callback ref=%s success=%s status=%s', parsed.reference, parsed.success, parsed.status);
+  const parsed = hubtel.parseHubtelCallback(event);
+  const externalId = parsed.transactionId
+    ? `tx:${parsed.transactionId}`
+    : (parsed.reference ? `ref:${parsed.reference}` : null);
 
-      if (!parsed.reference) {
-        logger.warn('Hubtel callback missing ClientReference');
-        return;
-      }
+  if (!externalId) {
+    logger.warn('Hubtel callback missing reference and transactionId; dropping');
+    return res.status(400).send('missing identifiers');
+  }
 
-      if (parsed.success) {
-        const result = await subService.applySuccessfulPayment({
-          reference: parsed.reference,
-          transactionId: parsed.transactionId,
-          amount: parsed.amount
-        });
-        if (result.applied) {
-          const businessRes = await query('SELECT * FROM businesses WHERE id = $1',
-            [result.subscription.business_id]);
-          const business = businessRes.rows[0];
-          await notification.notifySubscriptionRenewed({
-            business,
-            planName: result.planName,
-            amountGhs: parsed.amount || result.billing.amount_ghs,
-            periodEnd: result.periodEnd
-          });
-        } else if (result.reason !== 'already_applied') {
-          logger.warn('applySuccessfulPayment skipped: %s', result.reason);
-        }
-      } else {
-        const billingRes = await query(
-          `SELECT bt.*, b.id AS biz_id, b.whatsapp_number, b.name AS business_name,
-                  p.display_name AS plan_display_name
-             FROM billing_transactions bt
-             JOIN subscriptions s ON s.id = bt.subscription_id
-             JOIN businesses b   ON b.id = bt.business_id
-             JOIN plans p        ON p.id = s.plan_id
-            WHERE bt.reference = $1`,
-          [parsed.reference]
-        );
-        const billing = billingRes.rows[0];
-        await subService.markPaymentFailed({
-          reference: parsed.reference,
-          errorPayload: event
-        });
-        if (billing) {
-          await notification.notifySubscriptionFailed({
-            business: { id: billing.biz_id, whatsapp_number: billing.whatsapp_number, name: billing.business_name },
-            planName: billing.plan_display_name,
-            amountGhs: billing.amount_ghs,
-            reason: parsed.status || 'declined'
-          });
-        }
-      }
-    } catch (err) {
-      logger.error('Hubtel webhook handler error: %s', err.message, { stack: err.stack });
+  try {
+    const { duplicate } = await queue.enqueue({
+      source: 'hubtel',
+      externalId,
+      payload: event,
+      signatureValid: true
+    });
+    if (duplicate) {
+      logger.info('Hubtel webhook duplicate ignored: %s', externalId);
     }
-  });
+    res.status(200).send('OK');
+  } catch (err) {
+    logger.error('Hubtel enqueue failed: %s', err.message);
+    res.status(500).send('enqueue failed');
+  }
 });
 
 module.exports = router;

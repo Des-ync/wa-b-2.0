@@ -124,16 +124,34 @@ async function resetState(customerId) {
   await saveState(customerId, { flow: 'idle', step: 'start', data: {} });
 }
 
+/**
+ * Insert into message_log. Returns true if a NEW row was written, false if this
+ * wa_message_id was already logged (duplicate inbound, processed before).
+ * The unique index on message_log.wa_message_id is what enforces this.
+ */
 async function logInbound({ businessId, customerId, type, content, waMessageId }) {
   try {
+    if (waMessageId) {
+      const res = await query(
+        `INSERT INTO message_log
+          (business_id, customer_id, direction, message_type, content, wa_message_id, status)
+         VALUES ($1,$2,'inbound',$3,$4,$5,'received')
+         ON CONFLICT (wa_message_id) WHERE wa_message_id IS NOT NULL DO NOTHING
+         RETURNING id`,
+        [businessId || null, customerId || null, type || 'text', content || '', waMessageId]
+      );
+      return res.rowCount > 0;
+    }
     await query(
       `INSERT INTO message_log
         (business_id, customer_id, direction, message_type, content, wa_message_id, status)
-       VALUES ($1,$2,'inbound',$3,$4,$5,'delivered')`,
-      [businessId || null, customerId || null, type || 'text', content || '', waMessageId || null]
+       VALUES ($1,$2,'inbound',$3,$4,NULL,'received')`,
+      [businessId || null, customerId || null, type || 'text', content || '']
     );
+    return true;
   } catch (err) {
     logger.warn('logInbound failed: %s', err.message);
+    return true; // best-effort: don't drop a real message because logging failed
   }
 }
 
@@ -149,39 +167,42 @@ async function handleInbound(payload) {
   }
 
   const fromWa = inbound.from;
+  const phoneNumberId = inbound.businessPhoneId;
 
-  // Is this WhatsApp number a registered SME (SaaS customer)?
-  const business = await subService.getBusinessByWhatsApp(fromWa);
-
-  if (business) {
-    // SaaS billing flow (the SME is talking to us)
-    return handleSaasBilling({ business, inbound });
-  }
-
-  // Otherwise: this is an end-customer texting an SME's WhatsApp.
-  // Determine which business owns the number that received the message.
-  const ownerBusiness = await getBusinessByPhoneNumberId(inbound.businessPhoneId);
-  if (!ownerBusiness) {
-    logger.warn('No business mapped to phone_number_id=%s; falling back to first business.', inbound.businessPhoneId);
-  }
-  const targetBusiness = ownerBusiness || (await getFirstBusinessOrNull());
-  if (!targetBusiness) {
-    await wa.sendText(fromWa, 'Sorry, this WhatsApp business is not active right now.');
+  // Locate the tenant business by the Meta phone_number_id that RECEIVED
+  // the message. This is the only reliable multi-tenant routing key —
+  // never fall back to "first business", which would leak messages
+  // between tenants.
+  const tenant = await getBusinessByPhoneNumberId(phoneNumberId);
+  if (!tenant) {
+    logger.warn(
+      'Inbound from %s on phone_number_id=%s — no matching tenant; dropping.',
+      fromWa, phoneNumberId
+    );
     return;
   }
 
-  return handleCommerce({ business: targetBusiness, inbound });
+  // SaaS billing flow only fires when the SENDER is the tenant's own owner
+  // number AND no other tenant owns that sender. This blocks one tenant
+  // from impersonating SaaS commands against another tenant's inbox.
+  if (
+    tenant.whatsapp_number === fromWa &&
+    inbound.businessPhoneId &&
+    tenant.wa_phone_number_id === inbound.businessPhoneId
+  ) {
+    return handleSaasBilling({ business: tenant, inbound });
+  }
+
+  // Otherwise this is an end-customer texting the SME — commerce flow.
+  return handleCommerce({ business: tenant, inbound });
 }
 
 async function getBusinessByPhoneNumberId(phoneNumberId) {
-  // We don't store phone_number_id mapping yet; in production add a column.
-  // For now, return null so we fall back to the first business.
   if (!phoneNumberId) return null;
-  return null;
-}
-
-async function getFirstBusinessOrNull() {
-  const res = await query(`SELECT * FROM businesses ORDER BY created_at ASC LIMIT 1`);
+  const res = await query(
+    `SELECT * FROM businesses WHERE wa_phone_number_id = $1 LIMIT 1`,
+    [phoneNumberId]
+  );
   return res.rows[0] || null;
 }
 
@@ -193,12 +214,16 @@ async function handleSaasBilling({ business, inbound }) {
   const text = inbound.text;
   const upper = text.toUpperCase().trim();
 
-  await logInbound({
+  const isNew = await logInbound({
     businessId: business.id,
     type: inbound.type,
     content: text,
     waMessageId: inbound.messageId
   });
+  if (!isNew) {
+    logger.info('Duplicate inbound %s for business %s — skipping', inbound.messageId, business.id);
+    return;
+  }
   if (inbound.messageId) wa.markAsRead(inbound.messageId);
 
   if (upper === 'STATUS') return saasStatus(business);
@@ -296,10 +321,16 @@ async function saasPay(business) {
 }
 
 async function saasCancel(business) {
-  await subService.cancelSubscription(business.id);
-  await wa.sendText(business.whatsapp_number,
-    `Your subscription has been cancelled. You'll keep access until the end of your current billing period. Reply *PAY* anytime to reactivate.`,
-    { businessId: business.id });
+  const result = await subService.cancelSubscription(business.id);
+  let body;
+  if (result.mode === 'period_end' && result.endsAt) {
+    body =
+`Your subscription is set to cancel on *${formatDate(result.endsAt)}*.\n\nYou'll keep full access until then. Reply *PAY* anytime to keep your subscription active.`;
+  } else {
+    body =
+`Your subscription is now cancelled. Reply *PAY* anytime to reactivate.`;
+  }
+  await wa.sendText(business.whatsapp_number, body, { businessId: business.id });
 }
 
 async function saasUpgradeMenu(business) {
@@ -365,6 +396,26 @@ async function saasSupport(business) {
    Commerce flow (end-customer ↔ SME)
    ================================================================= */
 
+/**
+ * A business can serve customers only if:
+ *  - status is 'trial' AND trial has not expired, OR
+ *  - status is 'active', OR
+ *  - status is 'grace' (still within grace period before suspension)
+ * Suspended/cancelled businesses are blocked.
+ */
+async function hasCommerceAccess(business) {
+  if (!business) return false;
+  if (business.status === 'suspended' || business.status === 'cancelled') return false;
+  if (business.status === 'trial') {
+    if (business.trial_ends_at && new Date(business.trial_ends_at) < new Date()) {
+      return false;
+    }
+    return true;
+  }
+  if (business.status === 'active' || business.status === 'grace') return true;
+  return false;
+}
+
 async function handleCommerce({ business, inbound }) {
   const fromWa = inbound.from;
   const network = detectNetwork(fromWa);
@@ -376,14 +427,26 @@ async function handleCommerce({ business, inbound }) {
     phoneNetwork: network
   });
 
-  await logInbound({
+  const isNew = await logInbound({
     businessId: business.id,
     customerId: customer.id,
     type: inbound.type,
     content: inbound.text,
     waMessageId: inbound.messageId
   });
+  if (!isNew) {
+    logger.info('Duplicate inbound %s for customer %s — skipping', inbound.messageId, customer.id);
+    return;
+  }
   if (inbound.messageId) wa.markAsRead(inbound.messageId);
+
+  // Enforce subscription/trial access before serving any commerce flow.
+  if (!await hasCommerceAccess(business)) {
+    await wa.sendText(fromWa,
+      `Sorry, ${business.name} is not accepting orders right now. Please check back later.`,
+      { businessId: business.id, customerId: customer.id });
+    return;
+  }
 
   const state = await loadOrCreateState(customer.id);
   const upper = (inbound.text || '').toUpperCase().trim();
@@ -845,16 +908,35 @@ async function handlePaymentSuccess({ reference, gatewayRef, amount }) {
     logger.warn('handlePaymentSuccess: no order with payment_ref=%s', reference);
     return { handled: false };
   }
-  if (order.payment_status === 'paid') {
-    logger.info('handlePaymentSuccess: order %s already paid (idempotent skip)', order.order_number);
+
+  const result = await orderService.markOrderPaid({
+    orderId: order.id,
+    paymentRef: reference,
+    amount
+  });
+  if (!result) return { handled: false };
+
+  if (result.alreadyPaid) {
+    logger.info('handlePaymentSuccess: order %s already paid (idempotent skip)', result.order.order_number);
     return { handled: true, alreadyPaid: true };
   }
+  if (result.mismatch) {
+    logger.warn(
+      'handlePaymentSuccess: amount mismatch for order %s expected=%s got=%s reason=%s',
+      result.order.order_number, result.expected, result.received, result.reason
+    );
+    // Notify customer that the payment did not satisfy the order.
+    const customerRes = await query('SELECT * FROM customers WHERE id = $1', [result.order.customer_id]);
+    const customer = customerRes.rows[0];
+    if (customer) {
+      await wa.sendText(customer.whatsapp_number,
+        `⚠️ The payment received for order *${result.order.order_number}* did not match the order total. Our team will be in touch.`,
+        { businessId: result.order.business_id, customerId: customer.id });
+    }
+    return { handled: true, mismatch: true };
+  }
 
-  const updated = await orderService.markOrderPaid({
-    orderId: order.id,
-    paymentRef: reference
-  });
-
+  const updated = result.order;
   const businessRes = await query('SELECT * FROM businesses WHERE id = $1', [updated.business_id]);
   const business = businessRes.rows[0];
   const customerRes = await query('SELECT * FROM customers WHERE id = $1', [updated.customer_id]);

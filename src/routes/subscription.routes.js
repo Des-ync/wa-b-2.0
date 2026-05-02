@@ -2,8 +2,15 @@ const express = require('express');
 const logger = require('../utils/logger');
 const subService = require('../services/subscription.service');
 const { normalizeGhanaPhone } = require('../utils/helpers');
+const { requireAuth } = require('../middleware/auth');
 
 const router = express.Router();
+
+function tenantBlocksBusinessId(req, businessId) {
+  if (req.auth?.scope === 'admin') return false;
+  if (!req.auth?.businessId) return true;
+  return businessId && businessId !== req.auth.businessId;
+}
 
 const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || '';
 
@@ -13,7 +20,7 @@ function callbackUrl() {
     : undefined;
 }
 
-/** GET /api/subscriptions/plans — list active SaaS plans. */
+/** GET /api/subscriptions/plans — list active SaaS plans (public). */
 router.get('/plans', async (_req, res) => {
   try {
     const plans = await subService.listPlans();
@@ -29,7 +36,7 @@ router.get('/plans', async (_req, res) => {
  * Body: { name, owner_name, whatsapp_number, industry, plan_name }
  * Creates (or finds) a business and initiates the first MoMo charge.
  */
-router.post('/', async (req, res) => {
+router.post('/', requireAuth('admin'), async (req, res) => {
   try {
     const { name, owner_name, whatsapp_number, industry, plan_name } = req.body || {};
     const wa = normalizeGhanaPhone(whatsapp_number);
@@ -65,8 +72,11 @@ router.post('/', async (req, res) => {
 });
 
 /** GET /api/subscriptions/:businessId — current subscription for a business. */
-router.get('/:businessId', async (req, res) => {
+router.get('/:businessId', requireAuth('any'), async (req, res) => {
   try {
+    if (tenantBlocksBusinessId(req, req.params.businessId)) {
+      return res.status(403).json({ success: false, error: 'Key does not match business' });
+    }
     const business = await subService.getBusinessById(req.params.businessId);
     if (!business) return res.status(404).json({ success: false, error: 'Business not found' });
     const sub = await subService.getActiveSubscription(business.id);
@@ -78,8 +88,11 @@ router.get('/:businessId', async (req, res) => {
 });
 
 /** POST /api/subscriptions/:businessId/renew — manually trigger a renewal charge. */
-router.post('/:businessId/renew', async (req, res) => {
+router.post('/:businessId/renew', requireAuth('any'), async (req, res) => {
   try {
+    if (tenantBlocksBusinessId(req, req.params.businessId)) {
+      return res.status(403).json({ success: false, error: 'Key does not match business' });
+    }
     const business = await subService.getBusinessById(req.params.businessId);
     if (!business) return res.status(404).json({ success: false, error: 'Business not found' });
 
@@ -99,13 +112,21 @@ router.post('/:businessId/renew', async (req, res) => {
   }
 });
 
-/** POST /api/subscriptions/:businessId/cancel — cancel subscription. */
-router.post('/:businessId/cancel', async (req, res) => {
+/** POST /api/subscriptions/:businessId/cancel — cancel subscription (at period end if active). */
+router.post('/:businessId/cancel', requireAuth('any'), async (req, res) => {
   try {
+    if (tenantBlocksBusinessId(req, req.params.businessId)) {
+      return res.status(403).json({ success: false, error: 'Key does not match business' });
+    }
     const business = await subService.getBusinessById(req.params.businessId);
     if (!business) return res.status(404).json({ success: false, error: 'Business not found' });
-    const cancelled = await subService.cancelSubscription(business.id);
-    res.json({ success: true, cancelled });
+    const result = await subService.cancelSubscription(business.id);
+    res.json({
+      success: true,
+      mode: result.mode,                  // 'period_end' | 'immediate'
+      ends_at: result.endsAt,
+      subscriptions: result.subscriptions
+    });
   } catch (err) {
     logger.error('POST cancel failed: %s', err.message);
     res.status(500).json({ success: false, error: err.message });

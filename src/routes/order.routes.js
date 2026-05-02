@@ -3,8 +3,20 @@ const logger = require('../utils/logger');
 const orderService = require('../services/order.service');
 const { query } = require('../config/database');
 const { normalizeGhanaPhone, detectNetwork } = require('../utils/helpers');
+const { requireAuth } = require('../middleware/auth');
 
 const router = express.Router();
+
+// Every order route requires authentication. Admin keys see anything; tenant
+// keys are restricted to their own business_id (enforced inline below since
+// business_id arrives in the query string or body, not as a route param).
+router.use(requireAuth('any'));
+
+function tenantBlocksBusinessId(req, businessId) {
+  if (req.auth?.scope === 'admin') return false;
+  if (!req.auth?.businessId) return true;
+  return businessId && businessId !== req.auth.businessId;
+}
 
 /**
  * GET /api/orders?business_id=&status=&limit=
@@ -13,6 +25,9 @@ router.get('/', async (req, res) => {
   try {
     const { business_id, status, limit } = req.query;
     if (!business_id) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (tenantBlocksBusinessId(req, business_id)) {
+      return res.status(403).json({ success: false, error: 'Key does not match business' });
+    }
     const orders = await orderService.listOrdersForBusiness(business_id, { status, limit });
     res.json({ success: true, orders });
   } catch (err) {
@@ -26,6 +41,9 @@ router.get('/:id', async (req, res) => {
   try {
     const order = await orderService.getOrderById(req.params.id);
     if (!order) return res.status(404).json({ success: false, error: 'Order not found' });
+    if (tenantBlocksBusinessId(req, order.business_id)) {
+      return res.status(403).json({ success: false, error: 'Key does not match business' });
+    }
     res.json({ success: true, order });
   } catch (err) {
     logger.error('GET /orders/:id failed: %s', err.message);
@@ -51,6 +69,9 @@ router.post('/', async (req, res) => {
     } = req.body || {};
 
     if (!business_id) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (tenantBlocksBusinessId(req, business_id)) {
+      return res.status(403).json({ success: false, error: 'Key does not match business' });
+    }
     const wa = normalizeGhanaPhone(customer_whatsapp);
     if (!wa) return res.status(400).json({ success: false, error: 'Invalid customer_whatsapp' });
     if (!Array.isArray(items) || !items.length) {
@@ -114,8 +135,12 @@ router.patch('/:id/status', async (req, res) => {
         error: `status must be one of: ${orderService.VALID_STATUSES.join(', ')}`
       });
     }
+    const existing = await orderService.getOrderById(req.params.id);
+    if (!existing) return res.status(404).json({ success: false, error: 'Order not found' });
+    if (tenantBlocksBusinessId(req, existing.business_id)) {
+      return res.status(403).json({ success: false, error: 'Key does not match business' });
+    }
     const order = await orderService.updateOrderStatus(req.params.id, status);
-    if (!order) return res.status(404).json({ success: false, error: 'Order not found' });
     res.json({ success: true, order });
   } catch (err) {
     logger.error('PATCH /orders/:id/status failed: %s', err.message);

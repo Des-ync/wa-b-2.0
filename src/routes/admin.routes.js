@@ -1,8 +1,12 @@
 const express = require('express');
 const logger = require('../utils/logger');
 const { query } = require('../config/database');
+const { requireAuth } = require('../middleware/auth');
 
 const router = express.Router();
+
+// All admin routes require an admin-scoped API key.
+router.use(requireAuth('admin'));
 
 /**
  * GET /api/admin/stats — high-level dashboard counters.

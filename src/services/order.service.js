@@ -156,14 +156,54 @@ async function attachPaymentReference(orderId, paymentRef, paymentMethod) {
 }
 
 /**
- * Mark an order as paid. Atomically updates order + customer spend totals.
+ * Mark an order as paid. Idempotent + amount-validated:
+ *
+ *   - Locks the order row (FOR UPDATE) — concurrent webhook deliveries serialize.
+ *   - Refuses to double-apply (returns { alreadyPaid: true } if already 'paid').
+ *   - Refuses to credit a refunded order.
+ *   - Verifies the gateway-reported amount matches the order total within 1 pesewa.
+ *     Mismatches leave the order unpaid and return { mismatch: true }.
+ *   - Customer total_spent_ghs is incremented exactly once.
+ *
+ * Returns:
+ *   { order, alreadyPaid?, mismatch?, expected?, received? } or null if order missing.
  */
-async function markOrderPaid({ orderId, paymentRef, paymentMethod }) {
-  if (!VALID_PAYMENT_STATUSES.includes('paid')) {
-    throw new Error('Invariant violated: paid is not a valid payment status');
-  }
-
+async function markOrderPaid({ orderId, paymentRef, paymentMethod, amount }) {
   return transaction(async client => {
+    const lock = await client.query(
+      `SELECT * FROM orders WHERE id = $1 FOR UPDATE`,
+      [orderId]
+    );
+    const existing = lock.rows[0];
+    if (!existing) return null;
+
+    if (existing.payment_status === 'paid') {
+      return { order: existing, alreadyPaid: true };
+    }
+    if (existing.payment_status === 'refunded') {
+      return { order: existing, alreadyPaid: false, refunded: true };
+    }
+
+    // Bind the payment_ref to this order BEFORE accepting the payment, so a
+    // second order using the same ref cannot also be marked paid.
+    if (paymentRef && existing.payment_ref && existing.payment_ref !== paymentRef) {
+      return { order: existing, mismatch: true, reason: 'payment_ref_conflict' };
+    }
+
+    if (amount != null) {
+      const expected = Number(existing.total_ghs);
+      const collected = Number(amount);
+      if (!Number.isFinite(collected) || collected < expected - 0.01) {
+        return {
+          order: existing,
+          mismatch: true,
+          expected,
+          received: collected,
+          reason: 'amount_mismatch'
+        };
+      }
+    }
+
     const orderRes = await client.query(
       `UPDATE orders
           SET payment_status = 'paid',
@@ -175,7 +215,6 @@ async function markOrderPaid({ orderId, paymentRef, paymentMethod }) {
       [orderId, paymentRef || null, paymentMethod || null]
     );
     const order = orderRes.rows[0];
-    if (!order) return null;
 
     if (order.customer_id) {
       await client.query(
@@ -187,7 +226,7 @@ async function markOrderPaid({ orderId, paymentRef, paymentMethod }) {
       );
     }
 
-    return order;
+    return { order };
   });
 }
 

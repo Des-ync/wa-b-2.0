@@ -6,8 +6,11 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
+    "worker": "node src/worker.js",
+    "worker:dev": "nodemon src/worker.js",
     "migrate": "node src/models/migrate.js",
-    "seed": "node src/models/seed.js"
+    "seed": "node src/models/seed.js",
+    "issue-key": "node src/models/issue-key.js"
   },
   "engines": {
     "node": ">=18.0.0"

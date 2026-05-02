@@ -139,13 +139,31 @@ async function verifyTransaction(reference) {
 /**
  * Verify x-paystack-signature header (HMAC-SHA512 of raw body).
  *   rawBody MUST be the raw request body (Buffer or string), not the parsed JSON.
+ *
+ * Fails closed: missing secret, missing signature, malformed signature, or
+ * length mismatch all return false. Comparison is timing-safe.
  */
 function verifyPaystackWebhook(rawBody, signature, secret = PAYSTACK_SECRET_KEY) {
-  if (!signature || !secret) return false;
+  if (!secret) {
+    logger.error('Paystack webhook verification skipped: PAYSTACK_SECRET_KEY not configured');
+    return false;
+  }
+  if (typeof signature !== 'string' || !/^[a-f0-9]{128}$/i.test(signature)) {
+    return false;
+  }
+  if (rawBody == null) return false;
   const body = Buffer.isBuffer(rawBody) ? rawBody : Buffer.from(String(rawBody), 'utf8');
-  const expected = crypto.createHmac('sha512', secret).update(body).digest('hex');
+  const expectedHex = crypto.createHmac('sha512', secret).update(body).digest('hex');
+  const expectedBuf = Buffer.from(expectedHex, 'hex');
+  let providedBuf;
   try {
-    return crypto.timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(signature, 'hex'));
+    providedBuf = Buffer.from(signature, 'hex');
+  } catch (_e) {
+    return false;
+  }
+  if (providedBuf.length !== expectedBuf.length) return false;
+  try {
+    return crypto.timingSafeEqual(expectedBuf, providedBuf);
   } catch (_e) {
     return false;
   }

@@ -1,98 +1,114 @@
 const logger = require('../utils/logger');
 const wa = require('./whatsapp.service');
 const subService = require('./subscription.service');
+const lock = require('./worker.lock');
 const { formatGhs } = require('../utils/helpers');
 
 const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || '';
 
 /**
- * Cron: charge subscriptions due today.
+ * Cron: charge subscriptions due today. Single-leader via worker_locks.
  */
 async function runRenewalJob() {
-  logger.info('[cron] runRenewalJob starting');
-  const due = await subService.getDueRenewals();
-  logger.info('[cron] %d subscription(s) due for renewal', due.length);
+  await lock.withLock('renewal_job', 600, async () => {
+    logger.info('[cron] runRenewalJob starting');
+    const due = await subService.getDueRenewals();
+    logger.info('[cron] %d subscription(s) due for renewal', due.length);
 
-  let ok = 0, fail = 0;
-  for (const row of due) {
-    try {
-      const business = await subService.getBusinessById(row.business_id);
-      const plan = await subService.getPlanById(row.plan_id);
-      if (!business || !plan) continue;
+    let ok = 0, fail = 0, skipped = 0;
+    for (const row of due) {
+      try {
+        const business = await subService.getBusinessById(row.business_id);
+        const plan = await subService.getPlanById(row.plan_id);
+        if (!business || !plan) continue;
 
-      const callbackUrl = PUBLIC_BASE_URL
-        ? `${PUBLIC_BASE_URL.replace(/\/$/, '')}/api/payments/hubtel/callback`
-        : undefined;
+        const callbackUrl = PUBLIC_BASE_URL
+          ? `${PUBLIC_BASE_URL.replace(/\/$/, '')}/api/payments/hubtel/callback`
+          : undefined;
 
-      const result = await subService.initiateRenewal({ business, plan, callbackUrl });
-      if (result.success) {
-        ok++;
-        logger.info('[cron] Renewal initiated for %s ref=%s', business.whatsapp_number, result.reference);
-      } else {
+        const result = await subService.initiateRenewal({ business, plan, callbackUrl });
+        if (result.alreadyPending) {
+          skipped++;
+          logger.info('[cron] Renewal already pending for %s ref=%s', business.whatsapp_number, result.reference);
+        } else if (result.success) {
+          ok++;
+          logger.info('[cron] Renewal initiated for %s ref=%s', business.whatsapp_number, result.reference);
+        } else {
+          fail++;
+          logger.warn('[cron] Renewal failed for %s: %s', business.whatsapp_number, result.error);
+        }
+      } catch (err) {
         fail++;
-        logger.warn('[cron] Renewal failed for %s: %s', business.whatsapp_number, result.error);
+        logger.error('[cron] renewal error for business %s: %s', row.business_id, err.message);
       }
-    } catch (err) {
-      fail++;
-      logger.error('[cron] renewal error for business %s: %s', row.business_id, err.message);
     }
-  }
-  logger.info('[cron] runRenewalJob done. ok=%d fail=%d', ok, fail);
+    logger.info('[cron] runRenewalJob done. ok=%d skipped=%d fail=%d', ok, skipped, fail);
 
-  // Opportunistically clear stale conversation states.
-  try {
-    const cleared = await subService.clearStaleConversationStates();
-    if (cleared) logger.info('[cron] Cleared %d stale conversation state(s)', cleared);
-  } catch (err) {
-    logger.warn('[cron] clearStaleConversationStates failed: %s', err.message);
-  }
+    try {
+      const finalized = await subService.finalizeExpiredCancellations();
+      if (finalized) logger.info('[cron] Finalized %d cancel-at-period-end subscription(s)', finalized);
+    } catch (err) {
+      logger.warn('[cron] finalizeExpiredCancellations failed: %s', err.message);
+    }
+
+    try {
+      const cleared = await subService.clearStaleConversationStates();
+      if (cleared) logger.info('[cron] Cleared %d stale conversation state(s)', cleared);
+    } catch (err) {
+      logger.warn('[cron] clearStaleConversationStates failed: %s', err.message);
+    }
+  });
 }
 
 /**
- * Cron: send 3-day renewal reminders.
+ * Cron: send 3-day renewal reminders. Single-leader via worker_locks.
  */
 async function runReminderJob() {
-  logger.info('[cron] runReminderJob starting');
-  const upcoming = await subService.getUpcomingRenewalsForReminder();
-  logger.info('[cron] %d business(es) need a renewal reminder', upcoming.length);
+  await lock.withLock('reminder_job', 600, async () => {
+    logger.info('[cron] runReminderJob starting');
+    const upcoming = await subService.getUpcomingRenewalsForReminder();
+    logger.info('[cron] %d business(es) need a renewal reminder', upcoming.length);
 
-  for (const row of upcoming) {
-    try {
-      const daysLeft = Math.max(
-        1,
-        Math.ceil((new Date(row.next_billing_date) - new Date()) / (24 * 3600 * 1000))
-      );
-      await wa.sendRenewalReminder(row.whatsapp_number, {
-        planName: row.plan_display_name,
-        amountGhs: row.price_ghs,
-        daysLeft
-      }, { businessId: row.business_id });
-    } catch (err) {
-      logger.error('[cron] reminder send failed for %s: %s', row.whatsapp_number, err.message);
+    for (const row of upcoming) {
+      try {
+        const daysLeft = Math.max(
+          1,
+          Math.ceil((new Date(row.next_billing_date) - new Date()) / (24 * 3600 * 1000))
+        );
+        await wa.sendRenewalReminder(row.whatsapp_number, {
+          planName: row.plan_display_name,
+          amountGhs: row.price_ghs,
+          daysLeft
+        }, { businessId: row.business_id });
+      } catch (err) {
+        logger.error('[cron] reminder send failed for %s: %s', row.whatsapp_number, err.message);
+      }
     }
-  }
-  logger.info('[cron] runReminderJob done');
+    logger.info('[cron] runReminderJob done');
+  });
 }
 
 /**
- * Cron: suspend businesses past the grace period.
+ * Cron: suspend businesses past the grace period. Single-leader via worker_locks.
  */
 async function runSuspensionJob() {
-  logger.info('[cron] runSuspensionJob starting');
-  const overdue = await subService.getOverdueForSuspension();
-  logger.info('[cron] %d business(es) past grace period', overdue.length);
+  await lock.withLock('suspension_job', 600, async () => {
+    logger.info('[cron] runSuspensionJob starting');
+    const overdue = await subService.getOverdueForSuspension();
+    logger.info('[cron] %d business(es) past grace period', overdue.length);
 
-  for (const row of overdue) {
-    try {
-      await subService.suspendBusiness(row.business_id);
-      await wa.sendSuspensionNotice(row.whatsapp_number, {
-        businessName: row.business_name
-      }, { businessId: row.business_id });
-    } catch (err) {
-      logger.error('[cron] suspension failed for %s: %s', row.whatsapp_number, err.message);
+    for (const row of overdue) {
+      try {
+        await subService.suspendBusiness(row.business_id);
+        await wa.sendSuspensionNotice(row.whatsapp_number, {
+          businessName: row.business_name
+        }, { businessId: row.business_id });
+      } catch (err) {
+        logger.error('[cron] suspension failed for %s: %s', row.whatsapp_number, err.message);
+      }
     }
-  }
-  logger.info('[cron] runSuspensionJob done');
+    logger.info('[cron] runSuspensionJob done');
+  });
 }
 
 /**

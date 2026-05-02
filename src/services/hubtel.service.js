@@ -106,21 +106,37 @@ async function checkTransactionStatus(clientReference) {
 
 /**
  * Verify Hubtel webhook signature using HMAC-SHA256 of raw body.
- * Hubtel typically sends the signature in `x-hubtel-signature` (configurable per merchant).
+ * Hubtel sends the signature in `x-hubtel-signature` (configurable per merchant).
+ *
+ * Fails closed in all environments — including missing secret. Operators MUST
+ * set HUBTEL_WEBHOOK_SECRET. The previous "skip when secret missing" behavior
+ * has been removed because it was a footgun in production.
  *
  *   rawBody MUST be the raw request body (Buffer or string), not the parsed JSON.
  */
 function verifyHubtelWebhook(rawBody, signature, secret = HUBTEL_WEBHOOK_SECRET) {
-  if (!secret) return true; // No secret configured → accept (dev). In production, configure it.
-  if (!signature) return false;
+  if (!secret) {
+    logger.error('Hubtel webhook verification skipped: HUBTEL_WEBHOOK_SECRET not configured');
+    return false;
+  }
+  if (typeof signature !== 'string' || !signature) return false;
+  if (rawBody == null) return false;
+
+  const provided = signature.replace(/^sha256=/i, '').trim();
+  if (!/^[a-f0-9]{64}$/i.test(provided)) return false;
+
   const body = Buffer.isBuffer(rawBody) ? rawBody : Buffer.from(String(rawBody), 'utf8');
-  const expected = crypto.createHmac('sha256', secret).update(body).digest('hex');
-  const provided = String(signature).replace(/^sha256=/i, '');
+  const expectedHex = crypto.createHmac('sha256', secret).update(body).digest('hex');
+  const expectedBuf = Buffer.from(expectedHex, 'hex');
+  let providedBuf;
   try {
-    return crypto.timingSafeEqual(
-      Buffer.from(expected, 'hex'),
-      Buffer.from(provided, 'hex')
-    );
+    providedBuf = Buffer.from(provided, 'hex');
+  } catch (_e) {
+    return false;
+  }
+  if (providedBuf.length !== expectedBuf.length) return false;
+  try {
+    return crypto.timingSafeEqual(expectedBuf, providedBuf);
   } catch (_e) {
     return false;
   }

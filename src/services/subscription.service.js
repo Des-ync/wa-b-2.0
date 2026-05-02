@@ -86,17 +86,23 @@ async function createPendingSubscription({ businessId, planId }) {
 }
 
 /**
- * Initiate a Hubtel MoMo charge for a SaaS subscription. Creates a billing_transactions
- * record + subscription (if missing), all in a single transaction.
+ * Initiate a Hubtel MoMo charge for a SaaS subscription. Creates a
+ * billing_transactions row (status='pending') + subscription (if missing),
+ * all in a single transaction.
+ *
+ * Idempotency: at most ONE pending billing_transaction per subscription is
+ * allowed (enforced by uq_billing_pending_per_subscription). If a pending
+ * charge already exists we return it instead of starting a second one.
+ *
+ *   { success, reference, subscriptionId, status, alreadyPending? }
  */
 async function initiateRenewal({ business, plan, callbackUrl }) {
   if (!business || !plan) throw new Error('business and plan required');
 
-  const reference = generateReference('SUB');
-
+  let alreadyPending = false;
   const billingRow = await transaction(async client => {
     let subRes = await client.query(
-      'SELECT * FROM subscriptions WHERE business_id = $1 ORDER BY created_at DESC LIMIT 1',
+      'SELECT * FROM subscriptions WHERE business_id = $1 ORDER BY created_at DESC LIMIT 1 FOR UPDATE',
       [business.id]
     );
     let subscription = subRes.rows[0];
@@ -115,6 +121,19 @@ async function initiateRenewal({ business, plan, callbackUrl }) {
       subscription = upd.rows[0];
     }
 
+    // Guard: is there already a pending charge for this subscription?
+    const existingPending = await client.query(
+      `SELECT * FROM billing_transactions
+        WHERE subscription_id = $1 AND status = 'pending'
+        LIMIT 1`,
+      [subscription.id]
+    );
+    if (existingPending.rows[0]) {
+      alreadyPending = true;
+      return { billing: existingPending.rows[0], subscription };
+    }
+
+    const reference = generateReference('SUB');
     const ins = await client.query(
       `INSERT INTO billing_transactions
          (business_id, subscription_id, amount_ghs, gateway, reference, status)
@@ -124,6 +143,19 @@ async function initiateRenewal({ business, plan, callbackUrl }) {
     );
     return { billing: ins.rows[0], subscription };
   });
+
+  const reference = billingRow.billing.reference;
+
+  if (alreadyPending) {
+    logger.info('initiateRenewal: pending charge already exists ref=%s — returning existing', reference);
+    return {
+      success: true,
+      alreadyPending: true,
+      reference,
+      subscriptionId: billingRow.subscription.id,
+      status: 'pending'
+    };
+  }
 
   const charge = await hubtel.chargeSubscription({
     phoneNumber: business.whatsapp_number,
@@ -163,12 +195,21 @@ async function initiateRenewal({ business, plan, callbackUrl }) {
 }
 
 /**
- * Apply a successful payment to the subscription: extend the period by one billing cycle.
+ * Apply a successful payment to the subscription: extend the period by one
+ * billing cycle. Idempotent + amount-validated:
+ *
+ *   - Locks the billing row (FOR UPDATE) — concurrent webhook deliveries serialize.
+ *   - Refuses to apply twice (status='success' returns already_applied).
+ *   - Refuses to apply a previously failed/cancelled charge.
+ *   - Verifies the gateway-reported amount matches the row's amount_ghs
+ *     within 1 pesewa. Mismatches mark the row as failed and do NOT extend
+ *     the subscription — this blocks "$0.01 paid, full month granted" attacks.
  */
 async function applySuccessfulPayment({ reference, transactionId, amount }) {
   return transaction(async client => {
     const billingRes = await client.query(
-      `SELECT bt.*, s.business_id AS sub_business_id, s.plan_id, p.billing_cycle, p.display_name AS plan_display_name
+      `SELECT bt.*, s.business_id AS sub_business_id, s.plan_id, p.billing_cycle,
+              p.display_name AS plan_display_name, p.price_ghs AS plan_price_ghs
          FROM billing_transactions bt
          JOIN subscriptions s ON s.id = bt.subscription_id
          JOIN plans p ON p.id = s.plan_id
@@ -185,6 +226,36 @@ async function applySuccessfulPayment({ reference, transactionId, amount }) {
     if (billing.status === 'success') {
       return { applied: false, reason: 'already_applied', billing };
     }
+    if (billing.status === 'failed' || billing.status === 'cancelled') {
+      logger.warn(
+        'applySuccessfulPayment: refusing to apply success to %s billing row ref=%s',
+        billing.status, reference
+      );
+      return { applied: false, reason: `billing_${billing.status}`, billing };
+    }
+
+    // Amount check: gateway must have collected at least the row's amount.
+    // Also reject overpayments wildly larger than expected (likely confusion).
+    const expected = Number(billing.amount_ghs);
+    const collected = amount != null ? Number(amount) : expected;
+    if (!Number.isFinite(collected) || collected < expected - 0.01) {
+      logger.warn(
+        'applySuccessfulPayment: amount mismatch ref=%s expected=%s got=%s — marking failed',
+        reference, expected, collected
+      );
+      await client.query(
+        `UPDATE billing_transactions
+            SET status = 'failed',
+                completed_at = NOW(),
+                gateway_response = COALESCE(gateway_response, '{}'::jsonb) ||
+                                   jsonb_build_object('amount_mismatch', true,
+                                                      'expected', $2::numeric,
+                                                      'received', $3::numeric)
+          WHERE id = $1`,
+        [billing.id, expected, collected]
+      );
+      return { applied: false, reason: 'amount_mismatch', expected, received: collected };
+    }
 
     await client.query(
       `UPDATE billing_transactions
@@ -194,7 +265,7 @@ async function applySuccessfulPayment({ reference, transactionId, amount }) {
               gateway_response = COALESCE(gateway_response, '{}'::jsonb) ||
                                  jsonb_build_object('amount', $3::numeric)
         WHERE id = $1`,
-      [billing.id, transactionId || null, amount || billing.amount_ghs]
+      [billing.id, transactionId || null, collected]
     );
 
     const now = new Date();
@@ -257,15 +328,98 @@ async function markPaymentFailed({ reference, errorPayload }) {
   });
 }
 
+/**
+ * Cancel a subscription with cancel-at-period-end semantics.
+ *  - If the subscription has an active period, mark cancel_at_period_end=TRUE
+ *    and move to status='pending_cancel'. The business retains access until
+ *    current_period_end; the daily cron will finalize the cancellation.
+ *  - If no active period exists yet (pending/grace/etc. with no period_end in
+ *    the future), the cancellation takes effect immediately.
+ *
+ * Returns: { mode: 'period_end' | 'immediate', endsAt, subscriptions }
+ */
 async function cancelSubscription(businessId) {
-  const res = await query(
-    `UPDATE subscriptions
-        SET status = 'cancelled'
-      WHERE business_id = $1
-      RETURNING *`,
-    [businessId]
-  );
-  return res.rows;
+  return transaction(async client => {
+    const subs = await client.query(
+      `SELECT * FROM subscriptions WHERE business_id = $1 FOR UPDATE`,
+      [businessId]
+    );
+
+    const now = new Date();
+    let mode = 'immediate';
+    let endsAt = null;
+    const updated = [];
+
+    for (const sub of subs.rows) {
+      if (sub.current_period_end && new Date(sub.current_period_end) > now && sub.status !== 'cancelled') {
+        const r = await client.query(
+          `UPDATE subscriptions
+              SET status = 'pending_cancel',
+                  cancel_at_period_end = TRUE,
+                  cancelled_at = NOW(),
+                  next_billing_date = NULL
+            WHERE id = $1
+            RETURNING *`,
+          [sub.id]
+        );
+        updated.push(r.rows[0]);
+        mode = 'period_end';
+        endsAt = sub.current_period_end;
+      } else {
+        const r = await client.query(
+          `UPDATE subscriptions
+              SET status = 'cancelled',
+                  cancel_at_period_end = TRUE,
+                  cancelled_at = NOW(),
+                  next_billing_date = NULL
+            WHERE id = $1
+            RETURNING *`,
+          [sub.id]
+        );
+        updated.push(r.rows[0]);
+      }
+    }
+
+    // If everything is hard-cancelled, demote the business as well.
+    const stillActive = updated.some(s => s.status === 'pending_cancel');
+    if (!stillActive) {
+      await client.query(
+        `UPDATE businesses SET status = 'cancelled' WHERE id = $1 AND status NOT IN ('suspended')`,
+        [businessId]
+      );
+    }
+
+    return { mode, endsAt, subscriptions: updated };
+  });
+}
+
+/**
+ * Finalize cancellations whose period has elapsed. Called by the daily cron.
+ */
+async function finalizeExpiredCancellations() {
+  return transaction(async client => {
+    const subRes = await client.query(
+      `UPDATE subscriptions
+          SET status = 'cancelled'
+        WHERE status = 'pending_cancel'
+          AND (current_period_end IS NULL OR current_period_end <= NOW())
+        RETURNING business_id, id`
+    );
+    for (const row of subRes.rows) {
+      await client.query(
+        `UPDATE businesses
+            SET status = 'cancelled'
+          WHERE id = $1
+            AND status NOT IN ('suspended','cancelled')
+            AND NOT EXISTS (
+              SELECT 1 FROM subscriptions
+               WHERE business_id = $1 AND status NOT IN ('cancelled','suspended')
+            )`,
+        [row.business_id]
+      );
+    }
+    return subRes.rowCount;
+  });
 }
 
 async function suspendBusiness(businessId) {
@@ -300,9 +454,14 @@ async function getDueRenewals() {
        JOIN businesses b ON b.id = s.business_id
        JOIN plans p      ON p.id = s.plan_id
       WHERE s.status IN ('active','grace')
+        AND s.cancel_at_period_end = FALSE
         AND s.next_billing_date IS NOT NULL
         AND s.next_billing_date <= NOW()
-        AND b.status NOT IN ('cancelled','suspended')`
+        AND b.status NOT IN ('cancelled','suspended')
+        AND NOT EXISTS (
+          SELECT 1 FROM billing_transactions bt
+           WHERE bt.subscription_id = s.id AND bt.status = 'pending'
+        )`
   );
   return res.rows;
 }
@@ -363,6 +522,7 @@ module.exports = {
   applySuccessfulPayment,
   markPaymentFailed,
   cancelSubscription,
+  finalizeExpiredCancellations,
   suspendBusiness,
   getDueRenewals,
   getUpcomingRenewalsForReminder,
