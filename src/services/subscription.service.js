@@ -1,7 +1,8 @@
+const { v4: uuidv4 } = require('uuid');
 const { query, transaction } = require('../config/database');
 const logger = require('../utils/logger');
-const { generateReference, addDays } = require('../utils/helpers');
-const hubtel = require('./hubtel.service');
+const { addDays } = require('../utils/helpers');
+const pawapay = require('./pawapay.service');
 
 const SUSPENSION_GRACE_DAYS = parseInt(process.env.SUSPENSION_GRACE_DAYS || '3', 10);
 const DEFAULT_TRIAL_DAYS = parseInt(process.env.DEFAULT_TRIAL_DAYS || '14', 10);
@@ -88,9 +89,13 @@ async function createPendingSubscription({ businessId, planId }) {
 }
 
 /**
- * Initiate a Hubtel MoMo charge for a SaaS subscription. Creates a
+ * Initiate a pawaPay MoMo deposit for a SaaS subscription. Creates a
  * billing_transactions row (status='pending') + subscription (if missing),
  * all in a single transaction.
+ *
+ * The billing reference IS the pawaPay depositId (a UUID we generate), so
+ * deposit callbacks map straight back to the billing row. The callback URL
+ * is configured once in the pawaPay dashboard, not per-request.
  *
  * Idempotency: at most ONE pending billing_transaction per subscription is
  * allowed (enforced by uq_billing_pending_per_subscription). If a pending
@@ -98,7 +103,7 @@ async function createPendingSubscription({ businessId, planId }) {
  *
  *   { success, reference, subscriptionId, status, alreadyPending? }
  */
-async function initiateRenewal({ business, plan, callbackUrl }) {
+async function initiateRenewal({ business, plan }) {
   if (!business || !plan) throw new Error('business and plan required');
 
   let alreadyPending = false;
@@ -148,11 +153,12 @@ async function initiateRenewal({ business, plan, callbackUrl }) {
       subscription = upd.rows[0];
     }
 
-    const reference = generateReference('SUB');
+    // The reference doubles as the pawaPay depositId, which must be a UUID.
+    const reference = uuidv4();
     const ins = await client.query(
       `INSERT INTO billing_transactions
          (business_id, subscription_id, amount_ghs, gateway, reference, status)
-       VALUES ($1,$2,$3,'hubtel',$4,'pending')
+       VALUES ($1,$2,$3,'pawapay',$4,'pending')
        RETURNING *`,
       [business.id, subscription.id, plan.price_ghs, reference]
     );
@@ -172,12 +178,12 @@ async function initiateRenewal({ business, plan, callbackUrl }) {
     };
   }
 
-  const charge = await hubtel.chargeSubscription({
+  const charge = await pawapay.chargeSubscription({
     phoneNumber: business.whatsapp_number,
     amountGhs: plan.price_ghs,
-    reference,
-    description: `${plan.display_name} plan renewal`,
-    callbackUrl
+    depositId: reference,
+    description: `${plan.display_name} renewal`,
+    clientReferenceId: billingRow.subscription.id
   });
 
   if (!charge.success) {
@@ -194,10 +200,9 @@ async function initiateRenewal({ business, plan, callbackUrl }) {
 
   await query(
     `UPDATE billing_transactions
-        SET gateway_response = $2::jsonb,
-            gateway_ref = $3
+        SET gateway_response = $2::jsonb
       WHERE reference = $1`,
-    [reference, JSON.stringify(charge.raw || {}), charge.transactionId || null]
+    [reference, JSON.stringify(charge.raw || {})]
   );
 
   return {

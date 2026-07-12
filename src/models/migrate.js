@@ -85,7 +85,7 @@ CREATE TABLE IF NOT EXISTS billing_transactions (
   business_id      UUID NOT NULL REFERENCES businesses(id),
   subscription_id  UUID NOT NULL REFERENCES subscriptions(id),
   amount_ghs       NUMERIC(10,2) NOT NULL CHECK (amount_ghs >= 0),
-  gateway          TEXT NOT NULL CHECK (gateway IN ('hubtel','paystack')),
+  gateway          TEXT NOT NULL CHECK (gateway IN ('hubtel','paystack','pawapay')),
   reference        TEXT UNIQUE NOT NULL,
   status           TEXT NOT NULL DEFAULT 'pending'
                    CHECK (status IN ('pending','success','failed','cancelled')),
@@ -213,7 +213,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_msglog_wa_message_id
 -- =========================================================================
 CREATE TABLE IF NOT EXISTS webhook_events (
   id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  source          TEXT NOT NULL CHECK (source IN ('whatsapp','paystack','hubtel')),
+  source          TEXT NOT NULL CHECK (source IN ('whatsapp','paystack','hubtel','pawapay')),
   external_id     TEXT NOT NULL,
   payload         JSONB NOT NULL,
   signature_valid BOOLEAN NOT NULL DEFAULT TRUE,
@@ -261,6 +261,17 @@ CREATE TABLE IF NOT EXISTS api_keys (
 );
 CREATE INDEX IF NOT EXISTS idx_api_keys_business ON api_keys(business_id);
 CREATE INDEX IF NOT EXISTS idx_api_keys_active   ON api_keys(scope) WHERE revoked_at IS NULL;
+
+-- =========================================================================
+-- Upgrade path: databases created before the pawaPay gateway existed carry
+-- CHECK constraints without 'pawapay'. Drop-and-recreate is re-runnable.
+-- =========================================================================
+ALTER TABLE billing_transactions DROP CONSTRAINT IF EXISTS billing_transactions_gateway_check;
+ALTER TABLE billing_transactions ADD CONSTRAINT billing_transactions_gateway_check
+  CHECK (gateway IN ('hubtel','paystack','pawapay'));
+ALTER TABLE webhook_events DROP CONSTRAINT IF EXISTS webhook_events_source_check;
+ALTER TABLE webhook_events ADD CONSTRAINT webhook_events_source_check
+  CHECK (source IN ('whatsapp','paystack','hubtel','pawapay'));
 
 -- =========================================================================
 -- updated_at trigger

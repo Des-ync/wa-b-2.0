@@ -4,6 +4,7 @@ const conversation = require('./conversation.handler');
 const subService = require('./subscription.service');
 const notification = require('./notification.service');
 const hubtel = require('./hubtel.service');
+const pawapay = require('./pawapay.service');
 const { query } = require('../config/database');
 
 /**
@@ -38,52 +39,44 @@ async function processPaystack(payload) {
   logger.debug('Paystack event ignored: %s status=%s', eventType, data.status);
 }
 
-async function processHubtel(payload) {
-  const parsed = hubtel.parseHubtelCallback(payload);
-  if (!parsed.reference) {
-    logger.warn('Hubtel callback missing reference; dropping');
-    return;
-  }
-
-  if (parsed.success) {
-    const result = await subService.applySuccessfulPayment({
-      reference: parsed.reference,
-      transactionId: parsed.transactionId,
-      amount: parsed.amount
+/**
+ * Shared SaaS-billing success path: extend the subscription and notify.
+ */
+async function applyBillingSuccess({ reference, transactionId, amount }) {
+  const result = await subService.applySuccessfulPayment({ reference, transactionId, amount });
+  if (result.applied) {
+    const businessRes = await query(
+      'SELECT * FROM businesses WHERE id = $1',
+      [result.subscription.business_id]
+    );
+    const business = businessRes.rows[0];
+    await notification.notifySubscriptionRenewed({
+      business,
+      planName: result.planName,
+      amountGhs: amount || result.billing.amount_ghs,
+      periodEnd: result.periodEnd
     });
-    if (result.applied) {
-      const businessRes = await query(
-        'SELECT * FROM businesses WHERE id = $1',
-        [result.subscription.business_id]
-      );
-      const business = businessRes.rows[0];
-      await notification.notifySubscriptionRenewed({
-        business,
-        planName: result.planName,
-        amountGhs: parsed.amount || result.billing.amount_ghs,
-        periodEnd: result.periodEnd
-      });
-    }
-    return;
   }
+  return result;
+}
 
-  // Failure path
+/**
+ * Shared SaaS-billing failure path: mark failed and notify.
+ */
+async function applyBillingFailure({ reference, errorPayload, reason }) {
   const billingRes = await query(
     `SELECT bt.*, b.id AS biz_id, b.whatsapp_number, b.name AS business_name,
             p.display_name AS plan_display_name
        FROM billing_transactions bt
        JOIN subscriptions s ON s.id = bt.subscription_id
        JOIN businesses b   ON b.id = bt.business_id
-       JOIN plans p        ON p.id = s.plan_id
+       JOIN plans p        ON p.id = COALESCE(s.pending_plan_id, s.plan_id)
       WHERE bt.reference = $1`,
-    [parsed.reference]
+    [reference]
   );
   const billing = billingRes.rows[0];
-  await subService.markPaymentFailed({
-    reference: parsed.reference,
-    errorPayload: payload
-  });
-  if (billing) {
+  const result = await subService.markPaymentFailed({ reference, errorPayload });
+  if (billing && result.applied) {
     await notification.notifySubscriptionFailed({
       business: {
         id: billing.biz_id,
@@ -92,15 +85,88 @@ async function processHubtel(payload) {
       },
       planName: billing.plan_display_name,
       amountGhs: billing.amount_ghs,
-      reason: parsed.status || 'declined'
+      reason: reason || 'declined'
     });
   }
+  return result;
+}
+
+async function processHubtel(payload) {
+  const parsed = hubtel.parseHubtelCallback(payload);
+  if (!parsed.reference) {
+    logger.warn('Hubtel callback missing reference; dropping');
+    return;
+  }
+
+  if (parsed.success) {
+    await applyBillingSuccess({
+      reference: parsed.reference,
+      transactionId: parsed.transactionId,
+      amount: parsed.amount
+    });
+    return;
+  }
+
+  await applyBillingFailure({
+    reference: parsed.reference,
+    errorPayload: payload,
+    reason: parsed.status
+  });
+}
+
+/**
+ * pawaPay deposit callbacks are a TRIGGER only. The deposit's true state is
+ * fetched from pawaPay's status API before anything is applied, so callback
+ * forgery is harmless. A deposit still in flight throws → queue backoff retry.
+ */
+async function processPawapay(payload) {
+  const parsed = pawapay.parseCallback(payload);
+  if (!parsed.depositId) {
+    logger.warn('pawaPay callback missing depositId; dropping');
+    return;
+  }
+
+  const verified = await pawapay.checkDepositStatus(parsed.depositId);
+  if (!verified.success) {
+    throw new Error(`pawaPay status check failed for ${parsed.depositId}: ${verified.error}`);
+  }
+  if (!verified.found) {
+    logger.warn('pawaPay callback for unknown depositId %s; dropping', parsed.depositId);
+    return;
+  }
+
+  if (verified.completed) {
+    if (verified.currency && verified.currency !== 'GHS') {
+      logger.error('pawaPay deposit %s completed in unexpected currency %s; dropping',
+        parsed.depositId, verified.currency);
+      return;
+    }
+    await applyBillingSuccess({
+      reference: parsed.depositId,
+      transactionId: verified.providerTransactionId,
+      amount: verified.amount
+    });
+    return;
+  }
+
+  if (verified.failed) {
+    await applyBillingFailure({
+      reference: parsed.depositId,
+      errorPayload: verified.failureReason || payload,
+      reason: verified.failureReason?.failureCode || 'declined'
+    });
+    return;
+  }
+
+  // ACCEPTED / PROCESSING / IN_RECONCILIATION — not final yet; retry later.
+  throw new Error(`pawaPay deposit ${parsed.depositId} not finalized yet (${verified.status})`);
 }
 
 const PROCESSORS = {
   whatsapp: processWhatsApp,
   paystack: processPaystack,
-  hubtel:   processHubtel
+  hubtel:   processHubtel,
+  pawapay:  processPawapay
 };
 
 let _running = false;

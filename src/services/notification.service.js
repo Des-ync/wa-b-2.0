@@ -4,8 +4,6 @@ const subService = require('./subscription.service');
 const lock = require('./worker.lock');
 const { formatGhs } = require('../utils/helpers');
 
-const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || '';
-
 /**
  * Cron: charge subscriptions due today. Single-leader via worker_locks.
  */
@@ -22,11 +20,7 @@ async function runRenewalJob() {
         const plan = await subService.getPlanById(row.plan_id);
         if (!business || !plan) continue;
 
-        const callbackUrl = PUBLIC_BASE_URL
-          ? `${PUBLIC_BASE_URL.replace(/\/$/, '')}/api/payments/hubtel/callback`
-          : undefined;
-
-        const result = await subService.initiateRenewal({ business, plan, callbackUrl });
+        const result = await subService.initiateRenewal({ business, plan });
         if (result.alreadyPending) {
           skipped++;
           logger.info('[cron] Renewal already pending for %s ref=%s', business.whatsapp_number, result.reference);

@@ -308,11 +308,7 @@ async function saasPay(business) {
     `Initiating MoMo charge for *${plan.display_name}* — ${formatGhs(plan.price_ghs)}.\n\nYou'll receive a MoMo prompt on ${business.whatsapp_number}. Approve it to activate.`,
     { businessId: business.id });
 
-  const callbackUrl = PUBLIC_BASE_URL
-    ? `${PUBLIC_BASE_URL.replace(/\/$/, '')}/api/payments/hubtel/callback`
-    : undefined;
-
-  const result = await subService.initiateRenewal({ business, plan, callbackUrl });
+  const result = await subService.initiateRenewal({ business, plan });
   if (!result.success) {
     await wa.sendText(business.whatsapp_number,
       `⚠️ Could not start the MoMo charge: ${result.error || 'unknown error'}.\n\nReply *RETRY* to try again or *SUPPORT* for help.`,
@@ -374,11 +370,7 @@ async function saasUpgradeSelect(business, planName) {
     `Selected *${plan.display_name}* — ${formatGhs(plan.price_ghs)}/month.\n\nInitiating MoMo charge…`,
     { businessId: business.id });
 
-  const callbackUrl = PUBLIC_BASE_URL
-    ? `${PUBLIC_BASE_URL.replace(/\/$/, '')}/api/payments/hubtel/callback`
-    : undefined;
-
-  const result = await subService.initiateRenewal({ business, plan, callbackUrl });
+  const result = await subService.initiateRenewal({ business, plan });
   if (!result.success) {
     await wa.sendText(business.whatsapp_number,
       `⚠️ Could not start the MoMo charge: ${result.error || 'unknown error'}.`,

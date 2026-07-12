@@ -12,14 +12,6 @@ function tenantBlocksBusinessId(req, businessId) {
   return businessId && businessId !== req.auth.businessId;
 }
 
-const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || '';
-
-function callbackUrl() {
-  return PUBLIC_BASE_URL
-    ? `${PUBLIC_BASE_URL.replace(/\/$/, '')}/api/payments/hubtel/callback`
-    : undefined;
-}
-
 /** GET /api/subscriptions/plans — list active SaaS plans (public). */
 router.get('/plans', async (_req, res) => {
   try {
@@ -50,9 +42,7 @@ router.post('/', requireAuth('admin'), async (req, res) => {
       name, ownerName: owner_name, whatsappNumber: wa, industry
     });
 
-    const result = await subService.initiateRenewal({
-      business, plan, callbackUrl: callbackUrl()
-    });
+    const result = await subService.initiateRenewal({ business, plan });
 
     const { wa_access_token: _omit, ...safeBusiness } = business;
     if (!result.success) {
@@ -103,9 +93,7 @@ router.post('/:businessId/renew', requireAuth('any'), async (req, res) => {
     const plan = await subService.getPlanById(sub.plan_id);
     if (!plan) return res.status(404).json({ success: false, error: 'Plan not found' });
 
-    const result = await subService.initiateRenewal({
-      business, plan, callbackUrl: callbackUrl()
-    });
+    const result = await subService.initiateRenewal({ business, plan });
     if (!result.success) return res.status(502).json({ success: false, error: result.error });
     res.json({ success: true, reference: result.reference, status: result.status });
   } catch (err) {
