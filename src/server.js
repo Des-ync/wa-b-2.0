@@ -29,6 +29,10 @@ const RUN_PROCESSOR = process.env.RUN_PROCESSOR !== 'false';
    ------------------------------------------------------------------------- */
 
 app.use(
+  '/api/webhooks/whatsapp',
+  express.raw({ type: '*/*', limit: '1mb' })
+);
+app.use(
   '/api/payments/paystack/webhook',
   express.raw({ type: '*/*', limit: '1mb' })
 );
@@ -65,7 +69,8 @@ app.get('/health', async (_req, res) => {
     const r = await pool.query('SELECT 1 AS ok');
     res.json({ status: 'ok', db: r.rows[0].ok === 1 });
   } catch (err) {
-    res.status(503).json({ status: 'degraded', db: false, error: err.message });
+    logger.error('Health check DB probe failed: %s', err.message);
+    res.status(503).json({ status: 'degraded', db: false });
   }
 });
 

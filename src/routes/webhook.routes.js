@@ -6,6 +6,24 @@ const queue = require('../services/webhook.queue');
 const router = express.Router();
 
 const VERIFY_TOKEN = process.env.WA_VERIFY_TOKEN;
+const APP_SECRET = process.env.WA_APP_SECRET;
+
+function verifyWhatsAppSignature(rawBody, signature) {
+  if (!APP_SECRET) {
+    logger.error('WA_APP_SECRET is not set — rejecting all inbound webhooks');
+    return false;
+  }
+  if (!signature || !signature.startsWith('sha256=')) return false;
+  const expected = 'sha256=' + crypto
+    .createHmac('sha256', APP_SECRET)
+    .update(rawBody)
+    .digest('hex');
+  try {
+    return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
+  } catch (_e) {
+    return false;
+  }
+}
 
 /**
  * GET /api/webhooks/whatsapp
@@ -47,11 +65,27 @@ function externalIdFor(payload) {
 
 /**
  * POST /api/webhooks/whatsapp
- * Persist to webhook_events (idempotent on (source, external_id)) BEFORE responding.
- * A worker drains the queue durably — a crash after the 200 cannot lose the event.
+ * Verify Meta x-hub-signature-256, persist to webhook_events (idempotent on
+ * (source, external_id)) BEFORE responding. A worker drains the queue durably —
+ * a crash after the 200 cannot lose the event.
  */
 router.post('/whatsapp', async (req, res) => {
-  const payload = req.body;
+  const rawBody = req.body; // Buffer from express.raw() mounted in server.js
+  const signature = req.headers['x-hub-signature-256'];
+
+  if (!verifyWhatsAppSignature(rawBody, signature)) {
+    logger.warn('WhatsApp webhook signature invalid — dropping request');
+    return res.status(401).send('invalid signature');
+  }
+
+  let payload;
+  try {
+    payload = JSON.parse(rawBody.toString('utf8'));
+  } catch (err) {
+    logger.error('WhatsApp webhook: invalid JSON body: %s', err.message);
+    return res.status(400).send('invalid json');
+  }
+
   const externalId = externalIdFor(payload);
 
   try {

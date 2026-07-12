@@ -35,7 +35,7 @@ router.get('/stats', async (_req, res) => {
     res.json({ success: true, stats: result.rows[0] });
   } catch (err) {
     logger.error('GET /admin/stats failed: %s', err.message);
-    res.status(500).json({ success: false, error: err.message });
+    res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });
 
@@ -46,7 +46,8 @@ router.get('/businesses', async (req, res) => {
   try {
     const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
     const result = await query(
-      `SELECT b.*,
+      `SELECT b.id, b.name, b.owner_name, b.whatsapp_number, b.wa_phone_number_id,
+              b.industry, b.status, b.trial_ends_at, b.created_at, b.updated_at,
               (SELECT s.status FROM subscriptions s WHERE s.business_id = b.id
                 ORDER BY s.created_at DESC LIMIT 1) AS subscription_status,
               (SELECT p.display_name FROM subscriptions s
@@ -61,7 +62,7 @@ router.get('/businesses', async (req, res) => {
     res.json({ success: true, businesses: result.rows });
   } catch (err) {
     logger.error('GET /admin/businesses failed: %s', err.message);
-    res.status(500).json({ success: false, error: err.message });
+    res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });
 
@@ -82,7 +83,7 @@ router.get('/billing', async (req, res) => {
     res.json({ success: true, transactions: result.rows });
   } catch (err) {
     logger.error('GET /admin/billing failed: %s', err.message);
-    res.status(500).json({ success: false, error: err.message });
+    res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });
 
@@ -99,7 +100,7 @@ router.get('/messages', async (req, res) => {
     res.json({ success: true, messages: result.rows });
   } catch (err) {
     logger.error('GET /admin/messages failed: %s', err.message);
-    res.status(500).json({ success: false, error: err.message });
+    res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });
 

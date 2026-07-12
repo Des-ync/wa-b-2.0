@@ -115,9 +115,27 @@ async function markFailed(eventId, errorMsg, attempts) {
 
 /**
  * Re-queue events stuck in 'processing' for longer than the lock TTL
- * (typically because the worker crashed mid-flight).
+ * (typically because the worker crashed mid-flight). Attempts are counted at
+ * claim time, so an event that repeatedly kills its worker still respects
+ * MAX_ATTEMPTS: once exhausted it is marked 'failed' instead of re-queued.
  */
 async function reclaimStuck() {
+  const failed = await query(
+    `UPDATE webhook_events
+        SET status = 'failed',
+            locked_at = NULL,
+            locked_by = NULL,
+            last_error = COALESCE(last_error, 'worker died mid-processing; attempts exhausted')
+      WHERE status = 'processing'
+        AND locked_at < NOW() - ($1 || ' seconds')::interval
+        AND attempts >= $2
+      RETURNING id`,
+    [String(LOCK_TTL_SECONDS), MAX_ATTEMPTS]
+  );
+  if (failed.rowCount) {
+    logger.error('Gave up on %d stuck webhook event(s) after %d attempts', failed.rowCount, MAX_ATTEMPTS);
+  }
+
   const res = await query(
     `UPDATE webhook_events
         SET status = 'pending',
@@ -125,13 +143,14 @@ async function reclaimStuck() {
             locked_by = NULL
       WHERE status = 'processing'
         AND locked_at < NOW() - ($1 || ' seconds')::interval
+        AND attempts < $2
       RETURNING id`,
-    [String(LOCK_TTL_SECONDS)]
+    [String(LOCK_TTL_SECONDS), MAX_ATTEMPTS]
   );
   if (res.rowCount) {
     logger.warn('Reclaimed %d stuck webhook event(s)', res.rowCount);
   }
-  return res.rowCount;
+  return res.rowCount + failed.rowCount;
 }
 
 /**

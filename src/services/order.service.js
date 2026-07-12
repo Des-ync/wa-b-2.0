@@ -236,6 +236,7 @@ async function markOrderFailed({ orderId, paymentRef }) {
         SET payment_status = 'unpaid',
             payment_ref    = COALESCE($2, payment_ref)
       WHERE id = $1
+        AND payment_status NOT IN ('paid', 'refunded')
       RETURNING *`,
     [orderId, paymentRef || null]
   );

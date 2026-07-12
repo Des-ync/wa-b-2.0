@@ -27,7 +27,7 @@ router.get('/plans', async (_req, res) => {
     res.json({ success: true, plans });
   } catch (err) {
     logger.error('GET /plans failed: %s', err.message);
-    res.status(500).json({ success: false, error: err.message });
+    res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });
 
@@ -54,20 +54,21 @@ router.post('/', requireAuth('admin'), async (req, res) => {
       business, plan, callbackUrl: callbackUrl()
     });
 
+    const { wa_access_token: _omit, ...safeBusiness } = business;
     if (!result.success) {
-      return res.status(502).json({ success: false, error: result.error, business });
+      return res.status(502).json({ success: false, error: result.error, business: safeBusiness });
     }
 
     res.status(201).json({
       success: true,
-      business,
+      business: safeBusiness,
       reference: result.reference,
       subscription_id: result.subscriptionId,
       payment_status: result.status
     });
   } catch (err) {
     logger.error('POST /subscriptions failed: %s', err.message, { stack: err.stack });
-    res.status(500).json({ success: false, error: err.message });
+    res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });
 
@@ -80,10 +81,11 @@ router.get('/:businessId', requireAuth('any'), async (req, res) => {
     const business = await subService.getBusinessById(req.params.businessId);
     if (!business) return res.status(404).json({ success: false, error: 'Business not found' });
     const sub = await subService.getActiveSubscription(business.id);
-    res.json({ success: true, business, subscription: sub });
+    const { wa_access_token: _omit, ...safeBusiness } = business;
+    res.json({ success: true, business: safeBusiness, subscription: sub });
   } catch (err) {
     logger.error('GET /subscriptions/:id failed: %s', err.message);
-    res.status(500).json({ success: false, error: err.message });
+    res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });
 
@@ -108,7 +110,7 @@ router.post('/:businessId/renew', requireAuth('any'), async (req, res) => {
     res.json({ success: true, reference: result.reference, status: result.status });
   } catch (err) {
     logger.error('POST renew failed: %s', err.message);
-    res.status(500).json({ success: false, error: err.message });
+    res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });
 
@@ -129,7 +131,7 @@ router.post('/:businessId/cancel', requireAuth('any'), async (req, res) => {
     });
   } catch (err) {
     logger.error('POST cancel failed: %s', err.message);
-    res.status(500).json({ success: false, error: err.message });
+    res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });
 

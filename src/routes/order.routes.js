@@ -32,7 +32,7 @@ router.get('/', async (req, res) => {
     res.json({ success: true, orders });
   } catch (err) {
     logger.error('GET /orders failed: %s', err.message);
-    res.status(500).json({ success: false, error: err.message });
+    res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });
 
@@ -47,7 +47,7 @@ router.get('/:id', async (req, res) => {
     res.json({ success: true, order });
   } catch (err) {
     logger.error('GET /orders/:id failed: %s', err.message);
-    res.status(500).json({ success: false, error: err.message });
+    res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });
 
@@ -76,6 +76,10 @@ router.post('/', async (req, res) => {
     if (!wa) return res.status(400).json({ success: false, error: 'Invalid customer_whatsapp' });
     if (!Array.isArray(items) || !items.length) {
       return res.status(400).json({ success: false, error: 'items must be a non-empty array' });
+    }
+    const fee = Number(delivery_fee);
+    if (!Number.isFinite(fee) || fee < 0) {
+      return res.status(400).json({ success: false, error: 'delivery_fee must be a non-negative number' });
     }
 
     const customer = await orderService.getOrCreateCustomer({
@@ -113,7 +117,7 @@ router.post('/', async (req, res) => {
       customerId: customer.id,
       cart,
       deliveryAddress: delivery_address,
-      deliveryFee: Number(delivery_fee) || 0,
+      deliveryFee: fee,
       paymentMethod: payment_method,
       notes
     });
@@ -121,7 +125,7 @@ router.post('/', async (req, res) => {
     res.status(201).json({ success: true, order, customer });
   } catch (err) {
     logger.error('POST /orders failed: %s', err.message, { stack: err.stack });
-    res.status(500).json({ success: false, error: err.message });
+    res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });
 
@@ -144,7 +148,7 @@ router.patch('/:id/status', async (req, res) => {
     res.json({ success: true, order });
   } catch (err) {
     logger.error('PATCH /orders/:id/status failed: %s', err.message);
-    res.status(500).json({ success: false, error: err.message });
+    res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });
 

@@ -224,7 +224,7 @@ async function handleSaasBilling({ business, inbound }) {
     logger.info('Duplicate inbound %s for business %s — skipping', inbound.messageId, business.id);
     return;
   }
-  if (inbound.messageId) wa.markAsRead(inbound.messageId);
+  if (inbound.messageId) wa.markAsRead(inbound.messageId, { businessId: business.id });
 
   if (upper === 'STATUS') return saasStatus(business);
   if (upper === 'PAY' || upper === 'RENEW' || upper === 'RETRY') return saasPay(business);
@@ -438,7 +438,7 @@ async function handleCommerce({ business, inbound }) {
     logger.info('Duplicate inbound %s for customer %s — skipping', inbound.messageId, customer.id);
     return;
   }
-  if (inbound.messageId) wa.markAsRead(inbound.messageId);
+  if (inbound.messageId) wa.markAsRead(inbound.messageId, { businessId: business.id });
 
   // Enforce subscription/trial access before serving any commerce flow.
   if (!await hasCommerceAccess(business)) {

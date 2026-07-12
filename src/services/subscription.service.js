@@ -4,6 +4,7 @@ const { generateReference, addDays } = require('../utils/helpers');
 const hubtel = require('./hubtel.service');
 
 const SUSPENSION_GRACE_DAYS = parseInt(process.env.SUSPENSION_GRACE_DAYS || '3', 10);
+const DEFAULT_TRIAL_DAYS = parseInt(process.env.DEFAULT_TRIAL_DAYS || '14', 10);
 
 /* =================================================================
    Lookups
@@ -68,9 +69,10 @@ async function ensureBusiness({ name, ownerName, whatsappNumber, industry }) {
   const existing = await getBusinessByWhatsApp(whatsappNumber);
   if (existing) return existing;
   const inserted = await query(
-    `INSERT INTO businesses (name, owner_name, whatsapp_number, industry, status)
-     VALUES ($1,$2,$3,$4,'trial') RETURNING *`,
-    [name || 'Unnamed Business', ownerName || null, whatsappNumber, industry || 'retail']
+    `INSERT INTO businesses (name, owner_name, whatsapp_number, industry, status, trial_ends_at)
+     VALUES ($1,$2,$3,$4,'trial', NOW() + ($5 || ' days')::interval) RETURNING *`,
+    [name || 'Unnamed Business', ownerName || null, whatsappNumber, industry || 'retail',
+     String(DEFAULT_TRIAL_DAYS)]
   );
   return inserted.rows[0];
 }
@@ -113,15 +115,11 @@ async function initiateRenewal({ business, plan, callbackUrl }) {
         [business.id, plan.id]
       );
       subscription = ins.rows[0];
-    } else if (subscription.plan_id !== plan.id) {
-      const upd = await client.query(
-        `UPDATE subscriptions SET plan_id = $2 WHERE id = $1 RETURNING *`,
-        [subscription.id, plan.id]
-      );
-      subscription = upd.rows[0];
     }
 
-    // Guard: is there already a pending charge for this subscription?
+    // Guard: is there already a pending charge for this subscription? Checked
+    // BEFORE recording any plan change, so an unpaid earlier charge keeps its
+    // original plan/amount pairing.
     const existingPending = await client.query(
       `SELECT * FROM billing_transactions
         WHERE subscription_id = $1 AND status = 'pending'
@@ -131,6 +129,23 @@ async function initiateRenewal({ business, plan, callbackUrl }) {
     if (existingPending.rows[0]) {
       alreadyPending = true;
       return { billing: existingPending.rows[0], subscription };
+    }
+
+    // A different plan is only a REQUEST until its charge succeeds: park it in
+    // pending_plan_id. plan_id switches when the payment confirms.
+    if (subscription.plan_id !== plan.id) {
+      const upd = await client.query(
+        `UPDATE subscriptions SET pending_plan_id = $2 WHERE id = $1 RETURNING *`,
+        [subscription.id, plan.id]
+      );
+      subscription = upd.rows[0];
+    } else if (subscription.pending_plan_id) {
+      // Re-charging the current plan supersedes any stale unpaid change request.
+      const upd = await client.query(
+        `UPDATE subscriptions SET pending_plan_id = NULL WHERE id = $1 RETURNING *`,
+        [subscription.id]
+      );
+      subscription = upd.rows[0];
     }
 
     const reference = generateReference('SUB');
@@ -209,10 +224,13 @@ async function applySuccessfulPayment({ reference, transactionId, amount }) {
   return transaction(async client => {
     const billingRes = await client.query(
       `SELECT bt.*, s.business_id AS sub_business_id, s.plan_id, p.billing_cycle,
+              s.current_period_end AS sub_period_end,
               p.display_name AS plan_display_name, p.price_ghs AS plan_price_ghs
          FROM billing_transactions bt
          JOIN subscriptions s ON s.id = bt.subscription_id
-         JOIN plans p ON p.id = s.plan_id
+         -- The charge was created for the pending plan when a change is in
+         -- flight, so cycle/name must come from that plan, not the current one.
+         JOIN plans p ON p.id = COALESCE(s.pending_plan_id, s.plan_id)
         WHERE bt.reference = $1
         FOR UPDATE`,
       [reference]
@@ -269,15 +287,27 @@ async function applySuccessfulPayment({ reference, transactionId, amount }) {
     );
 
     const now = new Date();
-    const periodEnd = addDays(now, billing.billing_cycle === 'monthly' ? 30 : 30);
+    const cycleDays = billing.billing_cycle === 'yearly' ? 365
+      : billing.billing_cycle === 'quarterly' ? 90
+      : 30;
+    // Paying early must not forfeit already-paid days: extend from the current
+    // period end when it is still in the future, otherwise from now.
+    const base = billing.sub_period_end && new Date(billing.sub_period_end) > now
+      ? new Date(billing.sub_period_end)
+      : now;
+    const periodEnd = addDays(base, cycleDays);
 
     const subRes = await client.query(
       `UPDATE subscriptions
           SET status = 'active',
+              plan_id              = COALESCE(pending_plan_id, plan_id),
+              pending_plan_id      = NULL,
               current_period_start = $2,
               current_period_end   = $3,
               next_billing_date    = $3,
               retry_count          = 0,
+              cancel_at_period_end = FALSE,
+              cancelled_at         = NULL,
               last_payment_ref     = $4
         WHERE id = $1
         RETURNING *`,
@@ -301,21 +331,34 @@ async function applySuccessfulPayment({ reference, transactionId, amount }) {
 
 async function markPaymentFailed({ reference, errorPayload }) {
   return transaction(async client => {
+    const lockRes = await client.query(
+      `SELECT id, status, subscription_id FROM billing_transactions
+        WHERE reference = $1 FOR UPDATE`,
+      [reference]
+    );
+    const existing = lockRes.rows[0];
+    if (!existing) return { applied: false, reason: 'unknown_reference' };
+
+    if (existing.status === 'success') {
+      logger.warn('markPaymentFailed: ignoring failure for already-successful billing ref=%s', reference);
+      return { applied: false, reason: 'already_succeeded' };
+    }
+
     const billingRes = await client.query(
       `UPDATE billing_transactions
           SET status = 'failed',
               completed_at = NOW(),
               gateway_response = COALESCE(gateway_response, '{}'::jsonb) || $2::jsonb
-        WHERE reference = $1
+        WHERE id = $1
         RETURNING *`,
-      [reference, JSON.stringify(errorPayload || {})]
+      [existing.id, JSON.stringify(errorPayload || {})]
     );
     const billing = billingRes.rows[0];
-    if (!billing) return { applied: false, reason: 'unknown_reference' };
 
     await client.query(
       `UPDATE subscriptions
           SET retry_count = retry_count + 1,
+              pending_plan_id = NULL,
               status = CASE
                          WHEN status = 'active' THEN 'grace'
                          ELSE status
@@ -466,7 +509,11 @@ async function getDueRenewals() {
   return res.rows;
 }
 
-/** Subscriptions whose next_billing_date is in (2,4) days from now → 3-day reminder window. */
+/**
+ * Subscriptions whose next_billing_date falls in (now+2d, now+3d] — the ~3-day
+ * reminder. The half-open 1-day window means a once-daily job matches each
+ * subscription exactly once per cycle instead of reminding on consecutive days.
+ */
 async function getUpcomingRenewalsForReminder() {
   const res = await query(
     `SELECT s.id          AS subscription_id,
@@ -480,7 +527,8 @@ async function getUpcomingRenewalsForReminder() {
        JOIN businesses b ON b.id = s.business_id
        JOIN plans p      ON p.id = s.plan_id
       WHERE s.status = 'active'
-        AND s.next_billing_date BETWEEN NOW() + INTERVAL '2 days' AND NOW() + INTERVAL '4 days'
+        AND s.next_billing_date >  NOW() + INTERVAL '2 days'
+        AND s.next_billing_date <= NOW() + INTERVAL '3 days'
         AND b.status = 'active'`
   );
   return res.rows;

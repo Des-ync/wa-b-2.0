@@ -16,14 +16,26 @@ const http = axios.create({
   headers: { 'Content-Type': 'application/json' }
 });
 
-function authHeaders() {
-  return { Authorization: `Bearer ${WA_ACCESS_TOKEN}` };
-}
-
-function ensureConfigured() {
-  if (!WA_PHONE_NUMBER_ID || !WA_ACCESS_TOKEN) {
-    throw new Error('WhatsApp Cloud API not configured (WA_PHONE_NUMBER_ID / WA_ACCESS_TOKEN missing)');
+/**
+ * Resolve per-tenant WhatsApp credentials, falling back to global env vars.
+ * Tenant credentials are stored in businesses.wa_phone_number_id / wa_access_token.
+ */
+async function resolveCredentials(businessId) {
+  if (businessId) {
+    try {
+      const res = await query(
+        `SELECT wa_phone_number_id, wa_access_token FROM businesses WHERE id = $1`,
+        [businessId]
+      );
+      const biz = res.rows[0];
+      if (biz && biz.wa_phone_number_id && biz.wa_access_token) {
+        return { phoneNumberId: biz.wa_phone_number_id, accessToken: biz.wa_access_token };
+      }
+    } catch (err) {
+      logger.warn('resolveCredentials: DB lookup failed for businessId=%s, falling back to global: %s', businessId, err.message);
+    }
   }
+  return { phoneNumberId: WA_PHONE_NUMBER_ID, accessToken: WA_ACCESS_TOKEN };
 }
 
 async function logOutbound({ businessId, customerId, type, content, waMessageId, status }) {
@@ -43,12 +55,15 @@ async function logOutbound({ businessId, customerId, type, content, waMessageId,
  * Low-level send. Returns the WhatsApp message id on success.
  */
 async function sendRaw(payload, meta = {}) {
-  ensureConfigured();
+  const { phoneNumberId, accessToken } = await resolveCredentials(meta.businessId);
+  if (!phoneNumberId || !accessToken) {
+    throw new Error('WhatsApp Cloud API not configured (WA_PHONE_NUMBER_ID / WA_ACCESS_TOKEN missing)');
+  }
   try {
     const res = await http.post(
-      `/${WA_PHONE_NUMBER_ID}/messages`,
+      `/${phoneNumberId}/messages`,
       payload,
-      { headers: authHeaders() }
+      { headers: { Authorization: `Bearer ${accessToken}` } }
     );
     const waId = res.data?.messages?.[0]?.id;
     await logOutbound({
@@ -62,8 +77,7 @@ async function sendRaw(payload, meta = {}) {
     return { success: true, messageId: waId, raw: res.data };
   } catch (err) {
     const status = err.response?.status;
-    const data = err.response?.data;
-    logger.error('WhatsApp send failed (%s): %s | payload=%j', status, err.message, payload);
+    logger.error('WhatsApp send failed (%s): %s | type=%s to=%s', status, err.message, payload.type, payload.to);
     await logOutbound({
       businessId: meta.businessId,
       customerId: meta.customerId,
@@ -71,7 +85,7 @@ async function sendRaw(payload, meta = {}) {
       content: meta.content || JSON.stringify(payload).slice(0, 1000),
       status: 'failed'
     });
-    return { success: false, error: err.message, status, data };
+    return { success: false, error: err.message, status };
   }
 }
 
@@ -151,14 +165,15 @@ async function sendList(to, header, body, sections = [], meta = {}) {
 /**
  * Mark an inbound message as read.
  */
-async function markAsRead(messageId) {
+async function markAsRead(messageId, meta = {}) {
   if (!messageId) return;
-  ensureConfigured();
+  const { phoneNumberId, accessToken } = await resolveCredentials(meta.businessId);
+  if (!phoneNumberId || !accessToken) return;
   try {
     await http.post(
-      `/${WA_PHONE_NUMBER_ID}/messages`,
+      `/${phoneNumberId}/messages`,
       { messaging_product: 'whatsapp', status: 'read', message_id: messageId },
-      { headers: authHeaders() }
+      { headers: { Authorization: `Bearer ${accessToken}` } }
     );
   } catch (err) {
     logger.debug('markAsRead failed: %s', err.message);

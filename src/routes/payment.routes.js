@@ -2,7 +2,6 @@ const express = require('express');
 const logger = require('../utils/logger');
 const paystack = require('../services/paystack.service');
 const hubtel = require('../services/hubtel.service');
-const conversation = require('../services/conversation.handler');
 const queue = require('../services/webhook.queue');
 
 const router = express.Router();
@@ -68,7 +67,14 @@ router.get('/paystack/callback', async (req, res) => {
   const reference = req.query.reference || req.query.trxref;
   if (!reference) return res.status(400).send('Missing reference');
 
-  const verification = await paystack.verifyTransaction(reference);
+  let verification;
+  try {
+    verification = await paystack.verifyTransaction(reference);
+  } catch (err) {
+    logger.error('Paystack callback: verifyTransaction threw for ref=%s: %s', reference, err.message);
+    return res.status(200).send('Payment is still processing. We will update you on WhatsApp.');
+  }
+
   if (verification.success && verification.status === 'success') {
     try {
       await queue.enqueue({

@@ -55,6 +55,10 @@ CREATE TABLE IF NOT EXISTS subscriptions (
   id                   UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   business_id          UUID NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
   plan_id              INT  NOT NULL REFERENCES plans(id),
+  -- Plan change requested but not yet paid for. Applied to plan_id when the
+  -- charge succeeds; cleared when it fails. plan_id itself only ever reflects
+  -- a plan the business has actually paid for (or the initial signup choice).
+  pending_plan_id      INT REFERENCES plans(id),
   status               TEXT NOT NULL DEFAULT 'pending'
                        CHECK (status IN ('pending','active','grace','suspended','cancelled','pending_cancel')),
   current_period_start TIMESTAMPTZ,
@@ -67,6 +71,8 @@ CREATE TABLE IF NOT EXISTS subscriptions (
   created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+-- Upgrade path for databases created before pending_plan_id existed.
+ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS pending_plan_id INT REFERENCES plans(id);
 CREATE INDEX IF NOT EXISTS idx_subscriptions_business ON subscriptions(business_id);
 CREATE INDEX IF NOT EXISTS idx_subscriptions_status ON subscriptions(status);
 CREATE INDEX IF NOT EXISTS idx_subscriptions_next_billing ON subscriptions(next_billing_date);

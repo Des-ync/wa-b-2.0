@@ -7,13 +7,16 @@ if (!process.env.DATABASE_URL) {
 }
 
 const useSsl = process.env.DATABASE_SSL === 'true' || /sslmode=require/i.test(process.env.DATABASE_URL || '');
+// Only disable certificate verification when explicitly opted in for local dev.
+// Never set DATABASE_SSL_REJECT_UNAUTHORIZED=false in production.
+const rejectUnauthorized = process.env.DATABASE_SSL_REJECT_UNAUTHORIZED !== 'false';
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   max: parseInt(process.env.DB_POOL_MAX || '10', 10),
   idleTimeoutMillis: 30_000,
   connectionTimeoutMillis: 10_000,
-  ssl: useSsl ? { rejectUnauthorized: false } : false
+  ssl: useSsl ? { rejectUnauthorized } : false
 });
 
 pool.on('error', err => {
