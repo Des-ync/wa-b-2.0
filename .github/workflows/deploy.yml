@@ -1,0 +1,26 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Oracle Cloud app VM
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.ORACLE_APP_HOST }}
+          username: ${{ secrets.ORACLE_APP_USER }}
+          key: ${{ secrets.ORACLE_APP_SSH_KEY }}
+          script: |
+            set -e
+            cd /opt/wa-b-2.0
+            git fetch origin main
+            git reset --hard origin/main
+            npm ci --omit=dev
+            npm run migrate
+            pm2 reload deploy/ecosystem.config.js --update-env
+            pm2 save
