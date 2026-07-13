@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Security — WA-B Solutions</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<header class="nav"><div class="wrap nav-row">
+  <a href="index.html" class="brand"><span class="brand-mark">W</span><span>WA-B Solutions</span></a>
+  <nav><ul class="nav-links"><li><a href="features.html">Features</a></li><li><a href="pricing.html">Pricing</a></li><li><a href="docs.html">Docs</a></li><li><a href="blog.html">Blog</a></li></ul></nav>
+  <div class="nav-cta"><a href="signup.html" class="btn btn-ghost btn-sm hide-on-mobile">Sign in</a><a href="signup.html" class="btn btn-primary btn-sm">Book a demo <span class="arr">→</span></a></div>
+</div></header>
+
+<section class="page-hero"><div class="wrap">
+  <span class="eyebrow">Security</span>
+  <h1 style="margin-top:18px">Designed for money. Built like it.</h1>
+  <p>WA-B handles real cedis through real merchants every day. Here's exactly how we keep that money — and your customers' data — safe.</p>
+</div></section>
+
+<section class="section section--tight"><div class="wrap">
+  <h2 class="h-section" style="font-size:28px;margin-bottom:24px">Controls at a glance.</h2>
+  <div class="feat-grid">
+    <article class="feat"><h3 class="h-card">Encryption</h3><p>TLS 1.2+ in transit. AES-256 at rest, including backups. PII columns separately encrypted at the application layer.</p></article>
+    <article class="feat"><h3 class="h-card">Webhook integrity</h3><p>Every payment callback from Hubtel and Paystack is HMAC-verified with constant-time comparison. No spoofed payments — ever.</p></article>
+    <article class="feat"><h3 class="h-card">API key hashing</h3><p>API keys are stored as SHA-256 hashes. Even our database admins cannot read them in plaintext.</p></article>
+    <article class="feat"><h3 class="h-card">Multi-tenant isolation</h3><p>Every query is row-level-security scoped to the merchant's tenant ID. Zero cross-tenant data exposure by construction.</p></article>
+    <article class="feat"><h3 class="h-card">Idempotency &amp; replay protection</h3><p>Webhook processor uses idempotency keys; duplicate events are detected and dropped. Replay windows enforced on signed payloads.</p></article>
+    <article class="feat"><h3 class="h-card">RBAC &amp; audit log</h3><p>Owner / Manager / Cashier roles. Every action — login, payment, refund, settings change — is logged with actor, IP, and timestamp.</p></article>
+    <article class="feat"><h3 class="h-card">Secrets management</h3><p>All credentials live in a dedicated secret store (HashiCorp Vault). Rotated quarterly. Never in code or env files.</p></article>
+    <article class="feat"><h3 class="h-card">SSO &amp; 2FA</h3><p>2FA available for all merchant accounts. SSO (Google, Microsoft) on Market plan. WA-B staff use SSO + hardware keys.</p></article>
+    <article class="feat"><h3 class="h-card">Backups</h3><p>Encrypted point-in-time backups every 5 minutes. Quarterly restore drills. 30-day retention.</p></article>
+  </div>
+</div></section>
+
+<section class="section"><div class="wrap split" style="align-items:start">
+  <div>
+    <h2 class="h-section" style="font-size:30px">Compliance &amp; certifications.</h2>
+    <p style="color:var(--muted);font-size:15.5px;margin-top:12px">We are early-stage and don't pretend otherwise. We've built our controls to map to industry frameworks and are actively pursuing formal certification.</p>
+    <ul class="price-features" style="margin-top:24px">
+      <li><b style="color:var(--ink)">SOC 2 Type II</b> — controls implemented; audit window opens Q3 2026.</li>
+      <li><b style="color:var(--ink)">PCI-DSS SAQ-A</b> — we never touch raw card data; tokenization handled by Paystack.</li>
+      <li><b style="color:var(--ink)">Ghana DPA 2012 (Act 843)</b> — registered with the Data Protection Commission.</li>
+      <li><b style="color:var(--ink)">GDPR</b> — applicable when serving EU data subjects; SCCs in place.</li>
+      <li><b style="color:var(--ink)">Bank of Ghana</b> — operating as a Payment Service Provider partner via Hubtel.</li>
+    </ul>
+  </div>
+
+  <div>
+    <h2 class="h-section" style="font-size:30px">Operational practices.</h2>
+    <ul class="price-features" style="margin-top:36px">
+      <li>Quarterly internal security reviews.</li>
+      <li>Annual third-party penetration test.</li>
+      <li>Public bug bounty program (see below).</li>
+      <li>Mandatory code review on every PR; no direct pushes to main.</li>
+      <li>Branch-protected production deploys with reviewer + CI green required.</li>
+      <li>Background checks on all engineering hires before access provisioning.</li>
+      <li>Annual security training for the entire team.</li>
+      <li>Incident response runbook with on-call rotation 24/7.</li>
+    </ul>
+  </div>
+</div></section>
+
+<section class="section"><div class="wrap" style="max-width:780px">
+  <div style="background:var(--bg-2);border:1px solid var(--line);border-radius:var(--r-xl);padding:40px">
+    <span class="eyebrow">Responsible disclosure</span>
+    <h2 class="h-section" style="font-size:30px;margin-top:14px">Found something? Tell us.</h2>
+    <p style="color:var(--muted);font-size:15.5px;margin-top:8px">We run a bug bounty for security researchers. Disclose responsibly and we will respond fast, fix faster, and pay fairly.</p>
+    <ul class="price-features" style="margin-top:24px">
+      <li><b style="color:var(--ink)">Critical</b> (auth bypass, payment manipulation): up to GHS 50,000</li>
+      <li><b style="color:var(--ink)">High</b> (cross-tenant leak, RCE): up to GHS 20,000</li>
+      <li><b style="color:var(--ink)">Medium</b> (XSS, IDOR): up to GHS 5,000</li>
+      <li><b style="color:var(--ink)">Low</b> (CSP, info disclosure): GHS 500–1,500</li>
+    </ul>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:28px">
+      <a href="mailto:security@wa-b.com" class="btn btn-primary">security@wa-b.com <span class="arr">→</span></a>
+      <a href="#" class="btn btn-ghost">PGP public key</a>
+    </div>
+    <p style="font-family:var(--font-mono);font-size:12.5px;color:var(--muted);margin-top:24px;text-transform:uppercase;letter-spacing:0.06em">First response within 24h · No legal action against good-faith researchers</p>
+  </div>
+</div></section>
+
+<footer class="footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a href="index.html" class="brand"><span class="brand-mark">W</span><span>WA-B Solutions</span></a>
+        <p style="margin-top:14px;max-width:32ch;color:var(--muted);font-size:14px">
+          The automated WhatsApp B2P sales bot for Ghanaian SMEs. Built in Accra, made for Africa.
+        </p>
+      </div>
+      <div>
+        <h4>Product</h4>
+        <ul>
+          <li><a href="features.html">Features</a></li>
+          <li><a href="pricing.html">Pricing</a></li>
+          <li><a href="integrations.html">Integrations</a></li>
+          <li><a href="docs.html">Documentation</a></li>
+          <li><a href="changelog.html">Changelog</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Company</h4>
+        <ul>
+          <li><a href="about.html">About</a></li>
+          <li><a href="blog.html">Blog</a></li>
+          <li><a href="careers.html">Careers</a></li>
+          <li><a href="press.html">Press kit</a></li>
+          <li><a href="contact.html">Contact</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Legal</h4>
+        <ul>
+          <li><a href="privacy.html">Privacy policy</a></li>
+          <li><a href="terms.html">Terms of service</a></li>
+          <li><a href="data-processing.html">Data processing</a></li>
+          <li><a href="cookies.html">Cookies</a></li>
+          <li><a href="security.html">Security</a></li>
+          <li><a href="status.html">Status</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Contact</h4>
+        <ul>
+          <li>Osu, Accra &middot; GH</li>
+          <li><a href="contact.html">+233 30 000 0000</a></li>
+          <li><a href="mailto:hello@wa-b.com">hello@wa-b.com</a></li>
+          <li><a href="contact.html">WhatsApp us &rarr;</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>&copy; 2026 WA-B Solutions Ltd. All rights reserved.</span>
+      <span class="footer-tag">v2.0 &middot; Built in Accra &#127684;&#127686;</span>
+    </div>
+  </div>
+</footer>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="tweaks.jsx"></script>
+<script src="script.js"></script>
+</body>
+</html>

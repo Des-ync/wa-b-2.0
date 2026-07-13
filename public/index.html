@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>WA-B Solutions — Sell on WhatsApp. Get paid via MoMo.</title>
+<meta name="description" content="WA-B Solutions is the automated WhatsApp B2P sales bot for Ghanaian businesses. Customers order, pay via MoMo, and you get paid — all inside WhatsApp." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<!-- ============== NAV ============== -->
+<header class="nav">
+  <div class="wrap nav-row">
+    <a href="index.html" class="brand">
+      <span class="brand-mark">W</span>
+      <span>WA-B Solutions</span>
+    </a>
+    <nav>
+      <ul class="nav-links">
+        <li><a href="features.html">Features</a></li>
+        <li><a href="pricing.html">Pricing</a></li>
+        <li><a href="docs.html">Docs</a></li>
+        <li><a href="blog.html">Blog</a></li>
+      </ul>
+    </nav>
+    <div class="nav-cta">
+      <a href="signup.html" class="btn btn-ghost btn-sm hide-on-mobile">Sign in</a>
+      <a href="signup.html" class="btn btn-primary btn-sm">Book a demo <span class="arr">→</span></a>
+    </div>
+  </div>
+</header>
+
+<!-- ============== HERO ============== -->
+<section class="hero" data-screen-label="01 Hero">
+  <div class="wrap hero-grid">
+    <div>
+      <span class="eyebrow">Automated WhatsApp Sales · Ghana</span>
+      <h1 class="h-display" style="margin-top:18px">
+        Sell on WhatsApp.<br />
+        Get paid <em>instantly</em><br />
+        via Mobile Money.
+      </h1>
+      <p class="lead" style="margin-top:22px">
+        WA-B Solutions turns your WhatsApp number into a 24/7 sales bot. Customers browse, order, and pay through chat — you watch orders land while the platform bills itself on MoMo every month.
+      </p>
+      <div class="hero-cta">
+        <a href="signup.html" class="btn btn-primary btn-lg">Start 14-day free trial <span class="arr">→</span></a>
+        <a href="signup.html" class="btn btn-ghost btn-lg">Book a demo</a>
+      </div>
+      <div class="hero-meta">
+        <span>No credit card</span>
+        <span class="hero-meta-dot"></span>
+        <span>Live in 10 minutes</span>
+        <span class="hero-meta-dot"></span>
+        <span>MoMo &amp; Card ready</span>
+      </div>
+    </div>
+
+    <!-- WhatsApp chat mockup -->
+    <div class="wa-frame" aria-hidden="true">
+      <div class="wa-window">
+        <div class="wa-bar">
+          <span class="wa-back">‹</span>
+          <span class="wa-avatar">AK</span>
+          <div class="wa-who"><b>Auntie Akos Kitchen</b><span>online · typically replies instantly</span></div>
+          <div class="wa-icons"><span>📞</span><span>⋮</span></div>
+        </div>
+        <div class="wa-thread" data-wa-thread>
+          <div class="wa-day">TODAY</div>
+          <div class="wa-msg out">Hi, I'd like to order lunch please<span class="wa-time">12:04</span></div>
+          <div class="wa-msg in" data-delay="600">
+            <b>Akwaaba! 👋</b>
+            Welcome to Auntie Akos Kitchen. Tap below to see today's menu.
+            <div class="wa-cta-btn">📋 View Menu</div>
+            <span class="wa-time">12:04</span>
+          </div>
+          <div class="wa-msg out" data-delay="500">Jollof + chicken, 2 plates<span class="wa-time">12:05</span></div>
+          <div class="wa-msg in" data-delay="700">
+            <b>Order summary</b>
+            <div class="wa-card">
+              <div class="wa-list-item"><span>Jollof &amp; Chicken × 2</span><span class="price">GHS 80.00</span></div>
+              <div class="wa-list-item"><span>Delivery (East Legon)</span><span class="price">GHS 15.00</span></div>
+              <div class="wa-list-item"><b>Total</b><b class="price">GHS 95.00</b></div>
+            </div>
+            Confirm to pay via MoMo?
+            <span class="wa-time">12:05</span>
+          </div>
+          <div class="wa-msg out" data-delay="500">Yes, confirm ✅<span class="wa-time">12:05</span></div>
+          <div class="wa-msg in" data-delay="700">
+            Sending MoMo prompt to <b>+233 24 *** 4421</b>… approve on your phone.
+            <span class="wa-time">12:06</span>
+          </div>
+          <div class="wa-msg in" data-delay="1100">
+            <b>✓ Payment received — GHS 95.00</b>
+            Order <b class="price">#A-2317</b> is being prepared. ETA 28 mins. We'll ping you when our rider sets out.
+            <span class="wa-time">12:06</span>
+          </div>
+        </div>
+        <div class="wa-input">
+          <span style="font-size:18px;color:var(--muted);">😊</span>
+          <div class="wa-input-pill">Message</div>
+          <span style="font-size:18px;color:var(--muted);">📎</span>
+          <div class="wa-mic">🎤</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============== TRUST STRIP ============== -->
+<section class="trust">
+  <div class="wrap trust-row">
+    <span class="trust-label">Powered by trusted Ghanaian payment rails</span>
+    <div class="trust-logos">
+      <span class="trust-logo">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.6"/><path d="M7 11l3 3 7-7" stroke="currentColor" stroke-width="1.6" fill="none"/></svg>
+        Paystack
+      </span>
+      <span class="trust-logo">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect x="3" y="6" width="18" height="13" rx="2" stroke="currentColor" stroke-width="1.6"/><path d="M3 10h18" stroke="currentColor" stroke-width="1.6"/></svg>
+        Hubtel
+      </span>
+      <span class="trust-logo">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 2a10 10 0 00-8.6 15l-1.4 5 5.2-1.3A10 10 0 1012 2z" stroke="currentColor" stroke-width="1.6" fill="none"/></svg>
+        WhatsApp Cloud API
+      </span>
+      <span class="trust-logo">MTN MoMo</span>
+      <span class="trust-logo">Vodafone Cash</span>
+      <span class="trust-logo">AirtelTigo</span>
+    </div>
+  </div>
+</section>
+
+<!-- ============== FEATURES (3-up) ============== -->
+<section class="section" data-screen-label="02 Features">
+  <div class="wrap">
+    <div class="section-head">
+      <div>
+        <span class="eyebrow">What you get</span>
+        <h2 class="h-section" style="margin-top:18px">
+          Three things <em>every</em><br />
+          Ghanaian SME needs.
+        </h2>
+      </div>
+      <p class="lead">
+        We didn't build another POS or another website. WA-B sits inside the place your customers already are — WhatsApp — and handles the boring parts so you can keep cooking, stocking, or styling.
+      </p>
+    </div>
+
+    <div class="feat-grid">
+      <article class="feat">
+        <span class="feat-num">01</span>
+        <span class="feat-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 7h18M3 12h18M3 17h12"/></svg>
+        </span>
+        <h3 class="h-card">Automatic MoMo billing</h3>
+        <p>Subscriptions renew themselves on the 1st of every month via Hubtel MoMo Collections. No invoices to chase, no manual reminders, no awkward "I'll pay tomorrow."</p>
+        <a href="features.html#billing" class="more">Read more <span class="arr">→</span></a>
+      </article>
+
+      <article class="feat">
+        <span class="feat-num">02</span>
+        <span class="feat-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 12l4 4L21 6"/></svg>
+        </span>
+        <h3 class="h-card">Order tracking that just works</h3>
+        <p>Every order is timestamped, status-tracked, and tied to a customer. Riders update in one tap. Customers get pings without you lifting a finger.</p>
+        <a href="features.html#orders" class="more">Read more <span class="arr">→</span></a>
+      </article>
+
+      <article class="feat">
+        <span class="feat-num">03</span>
+        <span class="feat-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+        </span>
+        <h3 class="h-card">Customizable to your business</h3>
+        <p>Menu, opening hours, delivery zones, follow-up messages, branded greetings. Configure in a dashboard, see it live in WhatsApp 30 seconds later.</p>
+        <a href="features.html#custom" class="more">Read more <span class="arr">→</span></a>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ============== SPLIT: DASHBOARD ============== -->
+<section class="section section--tight" data-screen-label="03 Dashboard">
+  <div class="wrap split">
+    <div>
+      <span class="eyebrow">SME dashboard</span>
+      <h2 class="h-section" style="margin-top:18px">Every order, in one place — without leaving Accra.</h2>
+      <p class="lead" style="margin-top:18px">Live order feed, MoMo reconciliation, customer history, and SaaS billing — together in a dashboard built for low-bandwidth phones first.</p>
+      <ul class="price-features" style="margin-top:24px;font-size:15px">
+        <li>Real-time order status &amp; rider updates</li>
+        <li>Customer profiles built automatically</li>
+        <li>One-tap refunds &amp; receipts</li>
+        <li>Webhook event log with retry</li>
+      </ul>
+      <a href="features.html" class="btn btn-ghost btn-sm" style="margin-top:28px">See all features <span class="arr">→</span></a>
+    </div>
+
+    <div class="dash">
+      <div class="dash-bar">
+        <div class="dash-dots"><span></span><span></span><span></span></div>
+        <div class="dash-url">app.wa-b.com / orders</div>
+      </div>
+      <div class="dash-body">
+        <div class="dash-row">
+          <div class="dash-stat"><div class="dash-stat-label">GMV today</div><div class="dash-stat-val">GHS 4,820</div><div class="dash-stat-delta">↑ 18% vs yesterday</div></div>
+          <div class="dash-stat"><div class="dash-stat-label">Orders</div><div class="dash-stat-val">63</div><div class="dash-stat-delta">↑ 9 since 12:00</div></div>
+          <div class="dash-stat"><div class="dash-stat-label">MoMo success</div><div class="dash-stat-val">98.4%</div><div class="dash-stat-delta">All rails healthy</div></div>
+        </div>
+        <div class="dash-table">
+          <div class="dash-tr head"><span>Order</span><span>Customer</span><span>Amount</span><span>Status</span></div>
+          <div class="dash-tr"><span class="mono">#A-2317</span><span>Yaa Mensah</span><span class="mono">GHS 95.00</span><span class="pill pill-ok">paid</span></div>
+          <div class="dash-tr"><span class="mono">#A-2316</span><span>Kwame Asante</span><span class="mono">GHS 42.00</span><span class="pill pill-ok">paid</span></div>
+          <div class="dash-tr"><span class="mono">#A-2315</span><span>Adwoa Boateng</span><span class="mono">GHS 128.50</span><span class="pill pill-pend">pending</span></div>
+          <div class="dash-tr"><span class="mono">#A-2314</span><span>Kojo Owusu</span><span class="mono">GHS 60.00</span><span class="pill pill-ok">paid</span></div>
+          <div class="dash-tr"><span class="mono">#A-2313</span><span>Esi Nyarko</span><span class="mono">GHS 18.00</span><span class="pill pill-fail">failed</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============== STATS ============== -->
+<section class="section section--tight">
+  <div class="wrap">
+    <div class="stats">
+      <div class="stat"><div class="stat-num">99.95<em>%</em></div><div class="stat-label">Uptime SLA across webhooks &amp; payment processing</div></div>
+      <div class="stat"><div class="stat-num">&lt;1.8<em>s</em></div><div class="stat-label">Average WhatsApp reply latency, end-to-end</div></div>
+      <div class="stat"><div class="stat-num">98.4<em>%</em></div><div class="stat-label">MoMo collection success rate, last 30 days</div></div>
+      <div class="stat"><div class="stat-num">14<em> days</em></div><div class="stat-label">Free trial — no card, no MoMo prompt up front</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============== PRICING TEASE ============== -->
+<section class="section" data-screen-label="04 Pricing">
+  <div class="wrap">
+    <div class="section-head">
+      <div>
+        <span class="eyebrow">Pricing</span>
+        <h2 class="h-section" style="margin-top:18px">Priced for the <em>kelewele</em> stand.<br />Scaled for the chain.</h2>
+      </div>
+      <p class="lead">All prices in Ghana Cedis, billed monthly via MoMo. Cancel any time — your access continues to the end of the period you paid for.</p>
+    </div>
+
+    <div class="price-grid">
+      <div class="price-card">
+        <span class="price-tag">Starter</span>
+        <h3 class="h-card">Kiosk</h3>
+        <div class="price-amount"><sup>GHS</sup>49<span class="per">/ month</span></div>
+        <ul class="price-features">
+          <li>1 WhatsApp number</li>
+          <li>Up to 500 orders / month</li>
+          <li>MoMo collections (Hubtel)</li>
+          <li>Basic order tracking</li>
+          <li class="muted">Custom branded greetings</li>
+          <li class="muted">Multi-location inventory</li>
+        </ul>
+        <a href="signup.html" class="btn btn-ghost" style="margin-top:auto">Start free trial <span class="arr">→</span></a>
+      </div>
+
+      <div class="price-card featured">
+        <span class="price-tag">Most popular</span>
+        <h3 class="h-card">Shop</h3>
+        <div class="price-amount"><sup>GHS</sup>149<span class="per">/ month</span></div>
+        <ul class="price-features">
+          <li>3 WhatsApp numbers</li>
+          <li>Up to 5,000 orders / month</li>
+          <li>MoMo + Card via Paystack</li>
+          <li>Custom branded greetings</li>
+          <li>Webhook event API</li>
+          <li class="muted">Dedicated success manager</li>
+        </ul>
+        <a href="signup.html" class="btn btn-accent" style="margin-top:auto">Start free trial <span class="arr">→</span></a>
+      </div>
+
+      <div class="price-card">
+        <span class="price-tag">Chain</span>
+        <h3 class="h-card">Market</h3>
+        <div class="price-amount"><sup>GHS</sup>499<span class="per">/ month</span></div>
+        <ul class="price-features">
+          <li>Unlimited WhatsApp numbers</li>
+          <li>Unlimited orders</li>
+          <li>All payment rails</li>
+          <li>Multi-location inventory</li>
+          <li>Custom workflows &amp; webhooks</li>
+          <li>Dedicated success manager</li>
+        </ul>
+        <a href="signup.html" class="btn btn-ghost" style="margin-top:auto">Talk to sales <span class="arr">→</span></a>
+      </div>
+    </div>
+
+    <p style="text-align:center;color:var(--muted);font-size:14px;margin-top:32px">
+      All plans include a 14-day free trial. <a href="pricing.html" style="color:var(--ink);border-bottom:1px solid var(--line-2)">See full pricing details →</a>
+    </p>
+  </div>
+</section>
+
+<!-- ============== TESTIMONIALS ============== -->
+<section class="section" data-screen-label="05 Quotes">
+  <div class="wrap">
+    <div class="section-head">
+      <div>
+        <span class="eyebrow">From the field</span>
+        <h2 class="h-section" style="margin-top:18px">Trusted by SMEs from<br/>Madina to Takoradi.</h2>
+      </div>
+      <p class="lead">We talked to 40+ vendors, riders, and shop owners while building this. Here's what early customers tell us today.</p>
+    </div>
+
+    <div class="quotes">
+      <article class="quote">
+        <p>"I used to lose orders because I was cooking and couldn't reply on time. WA-B now takes the order, takes the money, and I just pack the food when it's ready."</p>
+        <div class="quote-author">
+          <div class="quote-avatar">AK</div>
+          <div><b>Akosua Asare</b><span>Auntie Akos Kitchen, East Legon</span></div>
+        </div>
+      </article>
+      <article class="quote">
+        <p>"The MoMo auto-renewal is the killer feature. I forget bills. WA-B doesn't. My subscription just runs and I never lose a customer to an outage."</p>
+        <div class="quote-author">
+          <div class="quote-avatar">KO</div>
+          <div><b>Kwabena Owusu</b><span>SneakerStop GH, Osu</span></div>
+        </div>
+      </article>
+      <article class="quote">
+        <p>"My beauty salon's WhatsApp is now a real shop. Bookings, deposits, reminders — and I can see who paid before they even walk in."</p>
+        <div class="quote-author">
+          <div class="quote-avatar">EN</div>
+          <div><b>Efua Nti</b><span>Glow by Efua, Tema</span></div>
+        </div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ============== FAQ ============== -->
+<section class="section section--tight" data-screen-label="06 FAQ">
+  <div class="wrap" style="max-width:880px">
+    <div style="margin-bottom:48px">
+      <span class="eyebrow">Common questions</span>
+      <h2 class="h-section" style="margin-top:18px">Honest answers.</h2>
+    </div>
+    <div class="faq">
+      <details open>
+        <summary>Do my customers need to download anything?</summary>
+        <div class="faq-body">No. They use WhatsApp — the same way they already do. We never ask them to install an app or visit a website.</div>
+      </details>
+      <details>
+        <summary>Which Mobile Money networks do you support?</summary>
+        <div class="faq-body">MTN MoMo, Vodafone Cash, and AirtelTigo Money via Hubtel Collections. Card payments are handled via Paystack.</div>
+      </details>
+      <details>
+        <summary>What happens if my MoMo subscription payment fails?</summary>
+        <div class="faq-body">We retry automatically and send you a WhatsApp reminder. You get a 3-day grace period before any service is suspended — and you can pay any time by replying <b>PAY</b>.</div>
+      </details>
+      <details>
+        <summary>Can I cancel?</summary>
+        <div class="faq-body">Yes, any time. Your access continues until the end of the billing period you've paid for. No fees, no calls, no email chains.</div>
+      </details>
+      <details>
+        <summary>Is this just for restaurants?</summary>
+        <div class="faq-body">No. Restaurants, retailers, salons, tailors, party rentals — anyone who already takes orders on WhatsApp will get value from WA-B.</div>
+      </details>
+    </div>
+  </div>
+</section>
+
+<!-- ============== CTA BANNER ============== -->
+<section class="section">
+  <div class="wrap">
+    <div class="cta-banner">
+      <div>
+        <span class="eyebrow" style="color:var(--accent)">Two minutes from now</span>
+        <h2 class="h-section" style="margin-top:18px">Your WhatsApp number<br/>could be a real shop.</h2>
+        <p>Free for 14 days. No card. No MoMo prompt up front. Just connect your number and we'll handle the rest.</p>
+      </div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap">
+        <a href="signup.html" class="btn btn-primary btn-lg">Start free trial <span class="arr">→</span></a>
+        <a href="signup.html" class="btn btn-ghost btn-lg">Book a demo</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============== FOOTER ============== -->
+<footer class="footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a href="index.html" class="brand"><span class="brand-mark">W</span><span>WA-B Solutions</span></a>
+        <p style="margin-top:14px;max-width:32ch;color:var(--muted);font-size:14px">
+          The automated WhatsApp B2P sales bot for Ghanaian SMEs. Built in Accra, made for Africa.
+        </p>
+      </div>
+      <div>
+        <h4>Product</h4>
+        <ul>
+          <li><a href="features.html">Features</a></li>
+          <li><a href="pricing.html">Pricing</a></li>
+          <li><a href="integrations.html">Integrations</a></li>
+          <li><a href="docs.html">Documentation</a></li>
+          <li><a href="changelog.html">Changelog</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Company</h4>
+        <ul>
+          <li><a href="about.html">About</a></li>
+          <li><a href="blog.html">Blog</a></li>
+          <li><a href="careers.html">Careers</a></li>
+          <li><a href="press.html">Press kit</a></li>
+          <li><a href="contact.html">Contact</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Legal</h4>
+        <ul>
+          <li><a href="privacy.html">Privacy policy</a></li>
+          <li><a href="terms.html">Terms of service</a></li>
+          <li><a href="data-processing.html">Data processing</a></li>
+          <li><a href="cookies.html">Cookies</a></li>
+          <li><a href="security.html">Security</a></li>
+          <li><a href="status.html">Status</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Contact</h4>
+        <ul>
+          <li>Osu, Accra · GH</li>
+          <li><a href="contact.html">+233 30 000 0000</a></li>
+          <li><a href="mailto:hello@wa-b.com">hello@wa-b.com</a></li>
+          <li><a href="contact.html">WhatsApp us →</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>© 2026 WA-B Solutions Ltd. All rights reserved.</span>
+      <span class="footer-tag">v2.0 · Built in Accra 🇬🇭</span>
+    </div>
+  </div>
+</footer>
+
+<!-- React + Babel for Tweaks panel -->
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="tweaks.jsx"></script>
+<script src="script.js"></script>
+</body>
+</html>

@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Sign up — WA-B Solutions</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap nav-row">
+    <a href="index.html" class="brand"><span class="brand-mark">W</span><span>WA-B Solutions</span></a>
+    <nav><ul class="nav-links">
+      <li><a href="features.html">Features</a></li>
+      <li><a href="pricing.html">Pricing</a></li>
+      <li><a href="docs.html">Docs</a></li>
+      <li><a href="blog.html">Blog</a></li>
+    </ul></nav>
+    <div class="nav-cta">
+      <a href="signup.html" class="btn btn-ghost btn-sm hide-on-mobile">Sign in</a>
+      <a href="#book" class="btn btn-primary btn-sm">Book a demo <span class="arr">→</span></a>
+    </div>
+  </div>
+</header>
+
+<section class="section">
+  <div class="wrap split" style="align-items:start">
+    <div>
+      <span class="eyebrow">Get started</span>
+      <h1 class="h-section" style="margin-top:18px;font-size:clamp(36px,4.4vw,58px)">Start your 14-day free trial.</h1>
+      <p class="lead" style="margin-top:18px">No card. No MoMo prompt up front. Connect your WhatsApp number and watch your first order land.</p>
+
+      <ul class="price-features" style="margin-top:32px;font-size:15px">
+        <li>Live in 10 minutes — guided setup</li>
+        <li>Bring your existing WhatsApp Business number</li>
+        <li>We'll help you import your menu</li>
+        <li>Cancel any time during trial, zero charges</li>
+      </ul>
+
+      <div style="margin-top:48px;padding:24px;border:1px solid var(--line);border-radius:var(--r-lg);background:var(--paper)">
+        <span class="eyebrow">Prefer to talk first?</span>
+        <p style="margin:14px 0 18px;color:var(--ink-2);font-size:15px">Book a 20-minute demo with our team. We'll walk you through WA-B, answer your questions, and help you decide if it's a fit.</p>
+        <a href="#book" class="btn btn-ghost">Book a demo <span class="arr">→</span></a>
+      </div>
+    </div>
+
+    <div style="background:var(--paper);border:1px solid var(--line);border-radius:var(--r-xl);padding:32px;box-shadow:0 30px 60px -40px rgba(0,0,0,0.12)" id="book">
+      <h2 class="h-card" style="font-size:22px">Tell us about your business</h2>
+      <p style="color:var(--muted);font-size:14px;margin:8px 0 24px">Takes about 90 seconds. We'll be in touch within one business day.</p>
+
+      <form class="form" onsubmit="event.preventDefault();this.querySelector('button').textContent='✓ Sent — check WhatsApp';this.querySelector('button').classList.add('btn-accent');this.querySelector('button').classList.remove('btn-primary')">
+        <div class="field-row">
+          <div class="field">
+            <label for="first">First name</label>
+            <input id="first" type="text" required placeholder="Akosua" />
+          </div>
+          <div class="field">
+            <label for="last">Last name</label>
+            <input id="last" type="text" required placeholder="Asare" />
+          </div>
+        </div>
+        <div class="field">
+          <label for="biz">Business name</label>
+          <input id="biz" type="text" required placeholder="Auntie Akos Kitchen" />
+        </div>
+        <div class="field">
+          <label for="phone">WhatsApp number</label>
+          <input id="phone" type="tel" required placeholder="+233 24 000 0000" />
+          <span class="field-hint">We'll send a verification code to this number.</span>
+        </div>
+        <div class="field">
+          <label for="email">Email</label>
+          <input id="email" type="email" required placeholder="you@business.com" />
+        </div>
+        <div class="field">
+          <label for="kind">Business type</label>
+          <select id="kind">
+            <option>Restaurant / food vendor</option>
+            <option>Retail / boutique</option>
+            <option>Salon / barbershop</option>
+            <option>Tailor / fashion</option>
+            <option>Services (bookings)</option>
+            <option>Other</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="plan">Plan</label>
+          <select id="plan">
+            <option>Kiosk — GHS 49 / mo</option>
+            <option selected>Shop — GHS 149 / mo (most popular)</option>
+            <option>Market — GHS 499 / mo</option>
+            <option>Not sure yet</option>
+          </select>
+        </div>
+        <button type="submit" class="btn btn-primary btn-lg" style="margin-top:8px;justify-content:center">Start free trial <span class="arr">→</span></button>
+        <p style="font-size:12.5px;color:var(--muted);margin:0;text-align:center">By signing up you agree to our Terms and Privacy Policy.</p>
+      </form>
+    </div>
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a href="index.html" class="brand"><span class="brand-mark">W</span><span>WA-B Solutions</span></a>
+        <p style="margin-top:14px;max-width:32ch;color:var(--muted);font-size:14px">
+          The automated WhatsApp B2P sales bot for Ghanaian SMEs. Built in Accra, made for Africa.
+        </p>
+      </div>
+      <div>
+        <h4>Product</h4>
+        <ul>
+          <li><a href="features.html">Features</a></li>
+          <li><a href="pricing.html">Pricing</a></li>
+          <li><a href="integrations.html">Integrations</a></li>
+          <li><a href="docs.html">Documentation</a></li>
+          <li><a href="changelog.html">Changelog</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Company</h4>
+        <ul>
+          <li><a href="about.html">About</a></li>
+          <li><a href="blog.html">Blog</a></li>
+          <li><a href="careers.html">Careers</a></li>
+          <li><a href="press.html">Press kit</a></li>
+          <li><a href="contact.html">Contact</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Legal</h4>
+        <ul>
+          <li><a href="privacy.html">Privacy policy</a></li>
+          <li><a href="terms.html">Terms of service</a></li>
+          <li><a href="data-processing.html">Data processing</a></li>
+          <li><a href="cookies.html">Cookies</a></li>
+          <li><a href="security.html">Security</a></li>
+          <li><a href="status.html">Status</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Contact</h4>
+        <ul>
+          <li>Osu, Accra &middot; GH</li>
+          <li><a href="contact.html">+233 30 000 0000</a></li>
+          <li><a href="mailto:hello@wa-b.com">hello@wa-b.com</a></li>
+          <li><a href="contact.html">WhatsApp us &rarr;</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>&copy; 2026 WA-B Solutions Ltd. All rights reserved.</span>
+      <span class="footer-tag">v2.0 &middot; Built in Accra &#127684;&#127686;</span>
+    </div>
+  </div>
+</footer>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="tweaks.jsx"></script>
+<script src="script.js"></script>
+</body>
+</html>

@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Integrations — WA-B Solutions</title>
+<link rel="stylesheet" href="styles.css" />
+<style>
+  .integ-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:20px }
+  @media (max-width:820px) { .integ-grid { grid-template-columns:1fr 1fr } }
+  @media (max-width:520px) { .integ-grid { grid-template-columns:1fr } }
+  .integ-card { border:1px solid var(--line); border-radius: var(--r-lg); padding:24px; transition: border-color 200ms, transform 200ms; background: var(--paper); display:flex; flex-direction:column; gap:12px; min-height:180px }
+  .integ-card:hover { border-color: var(--line-2); transform: translateY(-2px) }
+  .integ-icon { width:44px; height:44px; border-radius:10px; background: var(--bg-2); display:grid; place-items:center; font-family: var(--font-mono); font-weight:600; font-size:14px; color:var(--ink); border:1px solid var(--line) }
+  .integ-name { font-size: 16px; font-weight: 500; letter-spacing: -0.01em; color:var(--ink) }
+  .integ-cat { font-family:var(--font-mono); font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.08em }
+  .integ-desc { color:var(--muted); font-size:14px; line-height:1.55; margin:0 }
+  .integ-status { font-family:var(--font-mono); font-size:11px; padding:3px 8px; border-radius:4px; align-self:flex-start; text-transform:uppercase; letter-spacing:0.06em }
+  .integ-status.live { background:var(--accent-soft); color:var(--accent-ink) }
+  .integ-status.beta { background:rgba(201,122,29,0.12); color:#8a4f0e }
+  .integ-status.soon { background:var(--bg-2); color:var(--muted) }
+  .integ-section { margin-top:64px }
+  .integ-section h2 { font-size:24px; letter-spacing:-0.02em; margin-bottom:6px }
+  .integ-section p.lead-sub { color:var(--muted); font-size:14.5px; margin-bottom:24px }
+</style>
+</head>
+<body>
+<header class="nav"><div class="wrap nav-row">
+  <a href="index.html" class="brand"><span class="brand-mark">W</span><span>WA-B Solutions</span></a>
+  <nav><ul class="nav-links"><li><a href="features.html">Features</a></li><li><a href="pricing.html">Pricing</a></li><li><a href="docs.html">Docs</a></li><li><a href="blog.html">Blog</a></li></ul></nav>
+  <div class="nav-cta"><a href="signup.html" class="btn btn-ghost btn-sm hide-on-mobile">Sign in</a><a href="signup.html" class="btn btn-primary btn-sm">Book a demo <span class="arr">→</span></a></div>
+</div></header>
+
+<section class="page-hero"><div class="wrap">
+  <span class="eyebrow">Integrations</span>
+  <h1 style="margin-top:18px">Plays nicely with what you already use.</h1>
+  <p>WA-B speaks REST, webhooks, Zapier, and a growing list of native connections. Hook it up to your accounting, your delivery service, your CRM — and let WhatsApp stay your storefront.</p>
+</div></section>
+
+<section class="section section--tight"><div class="wrap">
+
+  <div class="integ-section" style="margin-top:0">
+    <h2>Payments</h2>
+    <p class="lead-sub">Charge customers and reconcile in cedis.</p>
+    <div class="integ-grid">
+      <div class="integ-card"><div class="integ-icon">Hu</div><span class="integ-status live">Live</span><div><div class="integ-name">Hubtel</div><div class="integ-cat">Mobile Money</div></div><p class="integ-desc">MoMo collections across MTN, Vodafone, AirtelTigo. Powers customer checkouts and your monthly subscription billing.</p></div>
+      <div class="integ-card"><div class="integ-icon">Ps</div><span class="integ-status live">Live</span><div><div class="integ-name">Paystack</div><div class="integ-cat">Card payments</div></div><p class="integ-desc">Visa, Mastercard, Verve. PCI-compliant tokenization — we never touch raw card numbers.</p></div>
+      <div class="integ-card"><div class="integ-icon">Fl</div><span class="integ-status soon">Coming Q3</span><div><div class="integ-name">Flutterwave</div><div class="integ-cat">Pan-African rails</div></div><p class="integ-desc">When you expand to Nigeria, Kenya, or Côte d'Ivoire — same WA-B account, local rails.</p></div>
+    </div>
+  </div>
+
+  <div class="integ-section">
+    <h2>Messaging</h2>
+    <p class="lead-sub">The conversation layer.</p>
+    <div class="integ-grid">
+      <div class="integ-card"><div class="integ-icon">Wa</div><span class="integ-status live">Live</span><div><div class="integ-name">WhatsApp Cloud API</div><div class="integ-cat">Meta official</div></div><p class="integ-desc">Direct integration with Meta's Cloud API. Verified business profile, blue tick eligibility, template messages.</p></div>
+      <div class="integ-card"><div class="integ-icon">Tw</div><span class="integ-status beta">Beta</span><div><div class="integ-name">Twilio Voice</div><div class="integ-cat">Voice fallback</div></div><p class="integ-desc">Customer can't get on WhatsApp? Auto-fallback to a voice IVR for the same order flow.</p></div>
+      <div class="integ-card"><div class="integ-icon">Sm</div><span class="integ-status live">Live</span><div><div class="integ-name">SMS Gateway (mNotify)</div><div class="integ-cat">SMS receipts</div></div><p class="integ-desc">Backup receipts and password resets via SMS for customers without smartphone access.</p></div>
+    </div>
+  </div>
+
+  <div class="integ-section">
+    <h2>Accounting &amp; books</h2>
+    <p class="lead-sub">Push transactions where your accountant lives.</p>
+    <div class="integ-grid">
+      <div class="integ-card"><div class="integ-icon">Qb</div><span class="integ-status live">Live</span><div><div class="integ-name">QuickBooks Online</div><div class="integ-cat">Bookkeeping</div></div><p class="integ-desc">Auto-sync invoices, payments, refunds, and VAT-tagged line items.</p></div>
+      <div class="integ-card"><div class="integ-icon">Xe</div><span class="integ-status live">Live</span><div><div class="integ-name">Xero</div><div class="integ-cat">Bookkeeping</div></div><p class="integ-desc">Daily journal sync. GRA-compliant VAT breakdowns out of the box.</p></div>
+      <div class="integ-card"><div class="integ-icon">Wv</div><span class="integ-status soon">Coming Q3</span><div><div class="integ-name">Wave</div><div class="integ-cat">Bookkeeping</div></div><p class="integ-desc">For solo entrepreneurs — connect your Wave book and let WA-B post each order automatically.</p></div>
+    </div>
+  </div>
+
+  <div class="integ-section">
+    <h2>Delivery &amp; logistics</h2>
+    <p class="lead-sub">From order confirmed to dispatched in one click.</p>
+    <div class="integ-grid">
+      <div class="integ-card"><div class="integ-icon">Bk</div><span class="integ-status live">Live</span><div><div class="integ-name">Bolt Food</div><div class="integ-cat">Last-mile</div></div><p class="integ-desc">Auto-dispatch any food order to the nearest Bolt rider. Customer gets live tracking on WhatsApp.</p></div>
+      <div class="integ-card"><div class="integ-icon">Yg</div><span class="integ-status live">Live</span><div><div class="integ-name">Yango Delivery</div><div class="integ-cat">Last-mile</div></div><p class="integ-desc">Same-day delivery across Accra and Kumasi. Live ETA pushed to customer chat.</p></div>
+      <div class="integ-card"><div class="integ-icon">Gp</div><span class="integ-status beta">Beta</span><div><div class="integ-name">Glovo Partners</div><div class="integ-cat">Last-mile</div></div><p class="integ-desc">Manual or auto-dispatch with Glovo's courier network.</p></div>
+    </div>
+  </div>
+
+  <div class="integ-section">
+    <h2>Productivity</h2>
+    <p class="lead-sub">Connect WA-B to the rest of your stack.</p>
+    <div class="integ-grid">
+      <div class="integ-card"><div class="integ-icon">Zp</div><span class="integ-status live">Live</span><div><div class="integ-name">Zapier</div><div class="integ-cat">Automation</div></div><p class="integ-desc">12 triggers (new order, payment received, customer churned…) and 6 actions. 5,000+ apps reachable.</p></div>
+      <div class="integ-card"><div class="integ-icon">Mk</div><span class="integ-status live">Live</span><div><div class="integ-name">Make.com</div><div class="integ-cat">Automation</div></div><p class="integ-desc">Visual scenarios — same triggers and actions as Zapier, with deeper branching.</p></div>
+      <div class="integ-card"><div class="integ-icon">Sl</div><span class="integ-status live">Live</span><div><div class="integ-name">Slack</div><div class="integ-cat">Notifications</div></div><p class="integ-desc">Pipe new orders, low-stock warnings, or daily summaries straight to your team channel.</p></div>
+      <div class="integ-card"><div class="integ-icon">Gs</div><span class="integ-status live">Live</span><div><div class="integ-name">Google Sheets</div><div class="integ-cat">Data export</div></div><p class="integ-desc">Live-syncing spreadsheet of orders, customers, or revenue. Build whatever you want on top.</p></div>
+      <div class="integ-card"><div class="integ-icon">Hu</div><span class="integ-status soon">Coming Q4</span><div><div class="integ-name">HubSpot CRM</div><div class="integ-cat">CRM</div></div><p class="integ-desc">Push WhatsApp customers as contacts; sync purchase history and lifecycle stages.</p></div>
+      <div class="integ-card"><div class="integ-icon">Ws</div><span class="integ-status live">Live</span><div><div class="integ-name">Webhooks</div><div class="integ-cat">Custom</div></div><p class="integ-desc">12 outbound events. HMAC-signed. Retry with exponential backoff. Build whatever's missing.</p></div>
+    </div>
+  </div>
+
+</div></section>
+
+<section class="section"><div class="wrap"><div class="cta-banner">
+  <div><span class="eyebrow" style="color:var(--accent)">Don't see your tool?</span><h2 class="h-section" style="margin-top:18px">Build it on the API.</h2><p>Full REST API + outbound webhooks. We also build custom integrations for Market plan customers.</p></div>
+  <div style="display:flex;gap:12px;flex-wrap:wrap"><a href="docs.html" class="btn btn-primary btn-lg">API docs <span class="arr">→</span></a><a href="contact.html" class="btn btn-ghost btn-lg">Request integration</a></div>
+</div></div></section>
+
+<footer class="footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a href="index.html" class="brand"><span class="brand-mark">W</span><span>WA-B Solutions</span></a>
+        <p style="margin-top:14px;max-width:32ch;color:var(--muted);font-size:14px">
+          The automated WhatsApp B2P sales bot for Ghanaian SMEs. Built in Accra, made for Africa.
+        </p>
+      </div>
+      <div>
+        <h4>Product</h4>
+        <ul>
+          <li><a href="features.html">Features</a></li>
+          <li><a href="pricing.html">Pricing</a></li>
+          <li><a href="integrations.html">Integrations</a></li>
+          <li><a href="docs.html">Documentation</a></li>
+          <li><a href="changelog.html">Changelog</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Company</h4>
+        <ul>
+          <li><a href="about.html">About</a></li>
+          <li><a href="blog.html">Blog</a></li>
+          <li><a href="careers.html">Careers</a></li>
+          <li><a href="press.html">Press kit</a></li>
+          <li><a href="contact.html">Contact</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Legal</h4>
+        <ul>
+          <li><a href="privacy.html">Privacy policy</a></li>
+          <li><a href="terms.html">Terms of service</a></li>
+          <li><a href="data-processing.html">Data processing</a></li>
+          <li><a href="cookies.html">Cookies</a></li>
+          <li><a href="security.html">Security</a></li>
+          <li><a href="status.html">Status</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Contact</h4>
+        <ul>
+          <li>Osu, Accra &middot; GH</li>
+          <li><a href="contact.html">+233 30 000 0000</a></li>
+          <li><a href="mailto:hello@wa-b.com">hello@wa-b.com</a></li>
+          <li><a href="contact.html">WhatsApp us &rarr;</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>&copy; 2026 WA-B Solutions Ltd. All rights reserved.</span>
+      <span class="footer-tag">v2.0 &middot; Built in Accra &#127684;&#127686;</span>
+    </div>
+  </div>
+</footer>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="tweaks.jsx"></script>
+<script src="script.js"></script>
+</body>
+</html>

@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Blog — WA-B Solutions</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap nav-row">
+    <a href="index.html" class="brand"><span class="brand-mark">W</span><span>WA-B Solutions</span></a>
+    <nav><ul class="nav-links">
+      <li><a href="features.html">Features</a></li>
+      <li><a href="pricing.html">Pricing</a></li>
+      <li><a href="docs.html">Docs</a></li>
+      <li><a href="blog.html" aria-current="page">Blog</a></li>
+    </ul></nav>
+    <div class="nav-cta">
+      <a href="signup.html" class="btn btn-ghost btn-sm hide-on-mobile">Sign in</a>
+      <a href="signup.html" class="btn btn-primary btn-sm">Book a demo <span class="arr">→</span></a>
+    </div>
+  </div>
+</header>
+
+<section class="page-hero">
+  <div class="wrap">
+    <span class="eyebrow">Field notes</span>
+    <h1 style="margin-top:18px">Notes on building commerce for WhatsApp.</h1>
+    <p>Lessons from the trenches — what we learned wiring up MoMo, why webhooks always fail at the worst time, and how we shipped to 100+ Ghanaian SMEs in our first quarter.</p>
+  </div>
+</section>
+
+<section class="section section--tight">
+  <div class="wrap">
+    <article class="blog-feature">
+      <a href="#" style="display:block">
+        <div class="blog-cover blog-cover-1"></div>
+      </a>
+      <div>
+        <div class="blog-meta"><span>Engineering</span><span class="dot"></span><span>May 03, 2026</span><span class="dot"></span><span>8 min read</span></div>
+        <h2 class="h-section" style="font-size:36px;letter-spacing:-0.025em">How we built a webhook queue that survives the 1st of the month.</h2>
+        <p class="lead" style="margin-top:14px">On the 1st, every Hubtel callback in Ghana fires within a 12-minute window. We couldn't afford to drop a single one. Here's the durable queue + leader-elected cron pattern we landed on.</p>
+        <a href="#" class="btn btn-ghost btn-sm" style="margin-top:24px">Read article <span class="arr">→</span></a>
+      </div>
+    </article>
+
+    <div class="blog-list">
+      <article class="blog-item">
+        <a href="#"><div class="blog-cover blog-cover-2"></div></a>
+        <div class="blog-meta" style="margin-top:18px"><span>Product</span><span class="dot"></span><span>Apr 22, 2026</span></div>
+        <h3>Why we put the menu builder behind WhatsApp, not a website.</h3>
+        <p>Our customers run a kitchen, not a CMS. Here's how we cut menu update friction by 90%.</p>
+      </article>
+      <article class="blog-item">
+        <a href="#"><div class="blog-cover blog-cover-1"></div></a>
+        <div class="blog-meta" style="margin-top:18px"><span>Stories</span><span class="dot"></span><span>Apr 15, 2026</span></div>
+        <h3>Auntie Akos doubled lunch orders without hiring anyone.</h3>
+        <p>How a one-person kitchen in East Legon scaled to 60+ orders a day on WhatsApp alone.</p>
+      </article>
+      <article class="blog-item">
+        <a href="#"><div class="blog-cover blog-cover-2"></div></a>
+        <div class="blog-meta" style="margin-top:18px"><span>Engineering</span><span class="dot"></span><span>Apr 02, 2026</span></div>
+        <h3>HMAC signatures, idempotency keys, and other things we wish Hubtel docs spelled out.</h3>
+        <p>Field notes from integrating Ghana's most-used MoMo aggregator. The good, the gotchas, the workarounds.</p>
+      </article>
+      <article class="blog-item">
+        <a href="#"><div class="blog-cover blog-cover-1"></div></a>
+        <div class="blog-meta" style="margin-top:18px"><span>Design</span><span class="dot"></span><span>Mar 28, 2026</span></div>
+        <h3>Designing a chat bot that doesn't sound like a chat bot.</h3>
+        <p>Tone, cadence, and why "Akwaaba 👋" beats "Hello, how can I help you today?" in 9 out of 10 sessions.</p>
+      </article>
+      <article class="blog-item">
+        <a href="#"><div class="blog-cover blog-cover-2"></div></a>
+        <div class="blog-meta" style="margin-top:18px"><span>Product</span><span class="dot"></span><span>Mar 14, 2026</span></div>
+        <h3>What we shipped in March: refunds, multi-zone delivery, and tenant API keys.</h3>
+        <p>Quick recap of new features, plus what's coming in April.</p>
+      </article>
+      <article class="blog-item">
+        <a href="#"><div class="blog-cover blog-cover-1"></div></a>
+        <div class="blog-meta" style="margin-top:18px"><span>Stories</span><span class="dot"></span><span>Feb 28, 2026</span></div>
+        <h3>From Madina to Takoradi: notes from our 30-vendor early access tour.</h3>
+        <p>Six weeks, three regions, dozens of conversations. What Ghanaian SMEs really need from a sales tool.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a href="index.html" class="brand"><span class="brand-mark">W</span><span>WA-B Solutions</span></a>
+        <p style="margin-top:14px;max-width:32ch;color:var(--muted);font-size:14px">
+          The automated WhatsApp B2P sales bot for Ghanaian SMEs. Built in Accra, made for Africa.
+        </p>
+      </div>
+      <div>
+        <h4>Product</h4>
+        <ul>
+          <li><a href="features.html">Features</a></li>
+          <li><a href="pricing.html">Pricing</a></li>
+          <li><a href="integrations.html">Integrations</a></li>
+          <li><a href="docs.html">Documentation</a></li>
+          <li><a href="changelog.html">Changelog</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Company</h4>
+        <ul>
+          <li><a href="about.html">About</a></li>
+          <li><a href="blog.html">Blog</a></li>
+          <li><a href="careers.html">Careers</a></li>
+          <li><a href="press.html">Press kit</a></li>
+          <li><a href="contact.html">Contact</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Legal</h4>
+        <ul>
+          <li><a href="privacy.html">Privacy policy</a></li>
+          <li><a href="terms.html">Terms of service</a></li>
+          <li><a href="data-processing.html">Data processing</a></li>
+          <li><a href="cookies.html">Cookies</a></li>
+          <li><a href="security.html">Security</a></li>
+          <li><a href="status.html">Status</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Contact</h4>
+        <ul>
+          <li>Osu, Accra &middot; GH</li>
+          <li><a href="contact.html">+233 30 000 0000</a></li>
+          <li><a href="mailto:hello@wa-b.com">hello@wa-b.com</a></li>
+          <li><a href="contact.html">WhatsApp us &rarr;</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>&copy; 2026 WA-B Solutions Ltd. All rights reserved.</span>
+      <span class="footer-tag">v2.0 &middot; Built in Accra &#127684;&#127686;</span>
+    </div>
+  </div>
+</footer>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="tweaks.jsx"></script>
+<script src="script.js"></script>
+</body>
+</html>

@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Changelog — WA-B Solutions</title>
+<link rel="stylesheet" href="styles.css" />
+<style>
+  .changelog-entry { padding: 48px 0; border-bottom: 1px solid var(--line); }
+  .changelog-entry:first-child { padding-top: 0; }
+  .changelog-meta { display:flex; gap:14px; align-items:center; margin-bottom:16px; flex-wrap:wrap }
+  .changelog-version { font-family: var(--font-mono); font-size:13px; padding:4px 10px; background:var(--bg-2); border:1px solid var(--line); border-radius:6px; color:var(--ink); }
+  .changelog-date { font-family: var(--font-mono); font-size:12.5px; color:var(--muted); text-transform:uppercase; letter-spacing:0.06em }
+  .changelog-tag { font-family: var(--font-mono); font-size:11.5px; padding:3px 8px; border-radius:4px; text-transform:uppercase; letter-spacing:0.06em }
+  .changelog-tag.new { background: var(--accent-soft); color: var(--accent-ink); }
+  .changelog-tag.fix { background: rgba(201,122,29,0.12); color:#8a4f0e }
+  .changelog-tag.imp { background: rgba(91,104,100,0.12); color: var(--ink-2) }
+  .changelog-list { list-style:none; padding:0; margin:16px 0 0 }
+  .changelog-list li { padding: 10px 0; display:grid; grid-template-columns: 70px 1fr; gap:18px; align-items:start; border-top:1px solid var(--line) }
+</style>
+</head>
+<body>
+<header class="nav"><div class="wrap nav-row">
+  <a href="index.html" class="brand"><span class="brand-mark">W</span><span>WA-B Solutions</span></a>
+  <nav><ul class="nav-links"><li><a href="features.html">Features</a></li><li><a href="pricing.html">Pricing</a></li><li><a href="docs.html">Docs</a></li><li><a href="blog.html">Blog</a></li></ul></nav>
+  <div class="nav-cta"><a href="signup.html" class="btn btn-ghost btn-sm hide-on-mobile">Sign in</a><a href="signup.html" class="btn btn-primary btn-sm">Book a demo <span class="arr">→</span></a></div>
+</div></header>
+
+<section class="page-hero"><div class="wrap">
+  <span class="eyebrow">Changelog</span>
+  <h1 style="margin-top:18px">What's new in WA-B.</h1>
+  <p>Every shipped change, with no marketing gloss. We deploy almost daily; we round things up here weekly. Subscribe via <a href="#" style="color:var(--ink);border-bottom:1px solid var(--line-2)">RSS</a> or <a href="#" style="color:var(--ink);border-bottom:1px solid var(--line-2)">on WhatsApp</a>.</p>
+</div></section>
+
+<section class="section section--tight"><div class="wrap" style="max-width:780px">
+
+  <article class="changelog-entry">
+    <div class="changelog-meta">
+      <span class="changelog-version">v2.0.0</span>
+      <span class="changelog-date">May 5, 2026</span>
+    </div>
+    <h2 class="h-card" style="font-size:24px">Custom command grammar &amp; multi-language menus.</h2>
+    <p style="margin-top:8px">Big release. Merchants can now define their own command words (<code>order</code> → <code>buy</code>, <code>menu</code> → <code>list</code>) and run menus simultaneously in English, Twi, Ga, and Ewe. Customers get the version that matches their WhatsApp profile language.</p>
+    <ul class="changelog-list">
+      <li><span class="changelog-tag new">New</span> Multi-language menu support (Twi, Ga, Ewe, English).</li>
+      <li><span class="changelog-tag new">New</span> Customizable command grammar in dashboard → Settings → Commands.</li>
+      <li><span class="changelog-tag new">New</span> Voice-note transcription for orders (auto-falls-back to text).</li>
+      <li><span class="changelog-tag imp">Improved</span> 40% faster bot reply latency (P50 now 1.2s, down from 2.0s).</li>
+      <li><span class="changelog-tag fix">Fixed</span> MoMo prompts occasionally arriving twice for orders &gt;GHS 500.</li>
+    </ul>
+  </article>
+
+  <article class="changelog-entry">
+    <div class="changelog-meta"><span class="changelog-version">v1.9.4</span><span class="changelog-date">April 22, 2026</span></div>
+    <h2 class="h-card" style="font-size:24px">Hubtel webhook hardening.</h2>
+    <ul class="changelog-list">
+      <li><span class="changelog-tag imp">Improved</span> HMAC signature verification now uses constant-time comparison.</li>
+      <li><span class="changelog-tag imp">Improved</span> Webhook queue retry now uses exponential backoff with jitter (max 8 retries over 3 days).</li>
+      <li><span class="changelog-tag fix">Fixed</span> Race condition in cron renewals when leader changed mid-batch.</li>
+    </ul>
+  </article>
+
+  <article class="changelog-entry">
+    <div class="changelog-meta"><span class="changelog-version">v1.9.3</span><span class="changelog-date">April 14, 2026</span></div>
+    <h2 class="h-card" style="font-size:24px">Inventory v2 + delivery zones.</h2>
+    <ul class="changelog-list">
+      <li><span class="changelog-tag new">New</span> Per-product stock tracking with low-stock WhatsApp alerts.</li>
+      <li><span class="changelog-tag new">New</span> Delivery zones with per-zone fees (Osu, Cantonments, East Legon, Spintex, Tema, custom polygon).</li>
+      <li><span class="changelog-tag new">New</span> Bulk CSV product import.</li>
+      <li><span class="changelog-tag fix">Fixed</span> Customer cart sometimes lost between sessions on iOS WhatsApp.</li>
+    </ul>
+  </article>
+
+  <article class="changelog-entry">
+    <div class="changelog-meta"><span class="changelog-version">v1.9.2</span><span class="changelog-date">April 1, 2026</span></div>
+    <h2 class="h-card" style="font-size:24px">Audit log &amp; role-based access.</h2>
+    <ul class="changelog-list">
+      <li><span class="changelog-tag new">New</span> Full audit log: who did what, when, from which IP.</li>
+      <li><span class="changelog-tag new">New</span> Roles: Owner, Manager, Cashier — granular permissions per dashboard area.</li>
+      <li><span class="changelog-tag imp">Improved</span> Dashboard load time on Market plan (8s → 1.4s for 100k orders).</li>
+    </ul>
+  </article>
+
+  <article class="changelog-entry">
+    <div class="changelog-meta"><span class="changelog-version">v1.9.0</span><span class="changelog-date">March 11, 2026</span></div>
+    <h2 class="h-card" style="font-size:24px">Paystack card rails are live.</h2>
+    <ul class="changelog-list">
+      <li><span class="changelog-tag new">New</span> Card payments via Paystack as alternative to MoMo.</li>
+      <li><span class="changelog-tag new">New</span> Customers choose payment method during checkout.</li>
+      <li><span class="changelog-tag imp">Improved</span> Receipt PDFs now include VAT breakdown for GRA compliance.</li>
+    </ul>
+  </article>
+
+  <article class="changelog-entry">
+    <div class="changelog-meta"><span class="changelog-version">v1.8.0</span><span class="changelog-date">February 19, 2026</span></div>
+    <h2 class="h-card" style="font-size:24px">Public REST API + webhooks.</h2>
+    <ul class="changelog-list">
+      <li><span class="changelog-tag new">New</span> REST API at <code>api.wa-b.com/v1</code> with full CRUD on orders, products, customers.</li>
+      <li><span class="changelog-tag new">New</span> Outbound webhooks: <code>order.created</code>, <code>order.paid</code>, <code>customer.churned</code>.</li>
+      <li><span class="changelog-tag new">New</span> Zapier &amp; Make.com integrations.</li>
+    </ul>
+  </article>
+
+  <p style="text-align:center;color:var(--muted);font-size:14px;margin-top:48px"><a href="#" style="color:var(--ink);border-bottom:1px solid var(--line-2)">View older entries (v1.0–v1.7) →</a></p>
+</div></section>
+
+<footer class="footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a href="index.html" class="brand"><span class="brand-mark">W</span><span>WA-B Solutions</span></a>
+        <p style="margin-top:14px;max-width:32ch;color:var(--muted);font-size:14px">
+          The automated WhatsApp B2P sales bot for Ghanaian SMEs. Built in Accra, made for Africa.
+        </p>
+      </div>
+      <div>
+        <h4>Product</h4>
+        <ul>
+          <li><a href="features.html">Features</a></li>
+          <li><a href="pricing.html">Pricing</a></li>
+          <li><a href="integrations.html">Integrations</a></li>
+          <li><a href="docs.html">Documentation</a></li>
+          <li><a href="changelog.html">Changelog</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Company</h4>
+        <ul>
+          <li><a href="about.html">About</a></li>
+          <li><a href="blog.html">Blog</a></li>
+          <li><a href="careers.html">Careers</a></li>
+          <li><a href="press.html">Press kit</a></li>
+          <li><a href="contact.html">Contact</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Legal</h4>
+        <ul>
+          <li><a href="privacy.html">Privacy policy</a></li>
+          <li><a href="terms.html">Terms of service</a></li>
+          <li><a href="data-processing.html">Data processing</a></li>
+          <li><a href="cookies.html">Cookies</a></li>
+          <li><a href="security.html">Security</a></li>
+          <li><a href="status.html">Status</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Contact</h4>
+        <ul>
+          <li>Osu, Accra &middot; GH</li>
+          <li><a href="contact.html">+233 30 000 0000</a></li>
+          <li><a href="mailto:hello@wa-b.com">hello@wa-b.com</a></li>
+          <li><a href="contact.html">WhatsApp us &rarr;</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>&copy; 2026 WA-B Solutions Ltd. All rights reserved.</span>
+      <span class="footer-tag">v2.0 &middot; Built in Accra &#127684;&#127686;</span>
+    </div>
+  </div>
+</footer>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="tweaks.jsx"></script>
+<script src="script.js"></script>
+</body>
+</html>

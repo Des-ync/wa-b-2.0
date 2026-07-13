@@ -1,4 +1,5 @@
 require('dotenv').config();
+const path = require('path');
 const express = require('express');
 const cron = require('node-cron');
 const logger = require('./utils/logger');
@@ -44,6 +45,9 @@ app.use(
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
 
+// Marketing site (public/) — served ahead of the API routes below.
+app.use(express.static(path.join(__dirname, '..', 'public')));
+
 // Lightweight request logger (skip noisy webhook polling)
 app.use((req, _res, next) => {
   if (!req.path.startsWith('/api/webhooks/whatsapp') || req.method !== 'GET') {
@@ -53,16 +57,8 @@ app.use((req, _res, next) => {
 });
 
 /* -------------------------------------------------------------------------
-   Health + root
+   Health check
    ------------------------------------------------------------------------- */
-
-app.get('/', (_req, res) => {
-  res.json({
-    service: 'whatsapp-saas',
-    status: 'ok',
-    timestamp: new Date().toISOString()
-  });
-});
 
 app.get('/health', async (_req, res) => {
   try {
@@ -84,8 +80,11 @@ app.use('/api/subscriptions', subscriptionRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/admin', adminRoutes);
 
-// 404
+// 404 — marketing site gets the branded page, API callers get JSON.
 app.use((req, res) => {
+  if (req.method === 'GET' && !req.path.startsWith('/api')) {
+    return res.status(404).sendFile(path.join(__dirname, '..', 'public', '404.html'));
+  }
   res.status(404).json({ success: false, error: `Not found: ${req.method} ${req.path}` });
 });
 
