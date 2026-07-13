@@ -45,8 +45,9 @@ app.use(
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// Marketing site (public/) — served ahead of the API routes below.
-app.use(express.static(path.join(__dirname, '..', 'public')));
+// Marketing site (public/) — mounted at /wa-b so this app can live alongside
+// other projects on the same domain instead of owning the domain root.
+app.use('/wa-b', express.static(path.join(__dirname, '..', 'public')));
 
 // Lightweight request logger (skip noisy webhook polling)
 app.use((req, _res, next) => {
@@ -80,9 +81,10 @@ app.use('/api/subscriptions', subscriptionRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/admin', adminRoutes);
 
-// 404 — marketing site gets the branded page, API callers get JSON.
+// 404 — /wa-b/* gets the branded page, API callers get JSON, everything
+// else (the domain root, reserved for other projects) falls through as JSON too.
 app.use((req, res) => {
-  if (req.method === 'GET' && !req.path.startsWith('/api')) {
+  if (req.method === 'GET' && req.path.startsWith('/wa-b')) {
     return res.status(404).sendFile(path.join(__dirname, '..', 'public', '404.html'));
   }
   res.status(404).json({ success: false, error: `Not found: ${req.method} ${req.path}` });
