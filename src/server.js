@@ -17,6 +17,7 @@ const subscriptionRoutes = require('./routes/subscription.routes');
 const orderRoutes = require('./routes/order.routes');
 const adminRoutes = require('./routes/admin.routes');
 const productRoutes = require('./routes/product.routes');
+const authRoutes = require('./routes/auth.routes');
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
@@ -104,8 +105,12 @@ app.use('/api/subscriptions', apiLimiter, subscriptionRoutes);
 app.use('/api/orders', apiLimiter, orderRoutes);
 app.use('/api/admin', apiLimiter, adminRoutes);
 app.use('/api/products', apiLimiter, productRoutes);
+app.use('/api/auth', apiLimiter, authRoutes);
 
-// Who am I? Lets the dashboard resolve the business behind an API key.
+// Who am I? Lets the dashboard resolve the business behind an API key OR a
+// Clerk session token — requireAuth() accepts either transparently. A Clerk
+// user with no linked business gets a 409 'not_linked' from requireAuth
+// itself, which the dashboard uses to show the "link your shop" step.
 app.get('/api/me', apiLimiter, requireAuth('any'), async (req, res) => {
   try {
     if (req.auth.scope === 'admin') {

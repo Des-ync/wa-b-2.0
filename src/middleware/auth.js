@@ -1,6 +1,44 @@
 const crypto = require('crypto');
+const { verifyToken } = require('@clerk/backend');
 const { query } = require('../config/database');
 const logger = require('../utils/logger');
+
+const CLERK_SECRET_KEY = process.env.CLERK_SECRET_KEY;
+// A Clerk session token is a JWT: three base64url segments separated by dots.
+// Our own API keys (sk_live_.../sk_admin_...) never contain a dot, so this is
+// an unambiguous way to tell the two apart on the same Authorization header.
+const JWT_SHAPE_RE = /^[\w-]+\.[\w-]+\.[\w-]+$/;
+
+/**
+ * Verify a Clerk session token and resolve it to a linked business.
+ * Returns { clerkUserId, business } on success.
+ * Throws with a `.code` of 'invalid_token' or 'not_linked' on failure —
+ * callers use the code to return the right HTTP status/message.
+ */
+async function verifyClerkSession(token) {
+  if (!CLERK_SECRET_KEY) {
+    const err = new Error('CLERK_SECRET_KEY is not configured');
+    err.code = 'invalid_token';
+    throw err;
+  }
+  let payload;
+  try {
+    payload = await verifyToken(token, { secretKey: CLERK_SECRET_KEY });
+  } catch (err) {
+    const wrapped = new Error('Invalid or expired Clerk session');
+    wrapped.code = 'invalid_token';
+    throw wrapped;
+  }
+  const clerkUserId = payload.sub;
+  const res = await query('SELECT * FROM businesses WHERE clerk_user_id = $1', [clerkUserId]);
+  if (!res.rows[0]) {
+    const err = new Error('No business linked to this Clerk account yet');
+    err.code = 'not_linked';
+    err.clerkUserId = clerkUserId;
+    throw err;
+  }
+  return { clerkUserId, business: res.rows[0] };
+}
 
 /**
  * SHA-256 of the plaintext key. We never store plaintext; only the hash.
@@ -79,6 +117,30 @@ function requireAuth(requiredScope = 'any') {
       if (!plaintext) {
         return res.status(401).json({ success: false, error: 'Missing API key' });
       }
+
+      // Clerk session tokens are JWTs; our own API keys never are. Route to
+      // the right verifier based on shape, entirely transparent to routes —
+      // any handler using requireAuth() accepts either credential type.
+      if (JWT_SHAPE_RE.test(plaintext)) {
+        try {
+          const { clerkUserId, business } = await verifyClerkSession(plaintext);
+          if (requiredScope === 'admin') {
+            return res.status(403).json({ success: false, error: 'Admin scope required' });
+          }
+          req.auth = { keyId: null, businessId: business.id, scope: 'tenant', clerkUserId };
+          return next();
+        } catch (err) {
+          if (err.code === 'not_linked') {
+            return res.status(409).json({
+              success: false,
+              error: 'not_linked',
+              message: 'No business is linked to this account yet.'
+            });
+          }
+          return res.status(401).json({ success: false, error: 'Invalid or expired session' });
+        }
+      }
+
       const row = await lookupKey(plaintext);
       if (!row) {
         return res.status(401).json({ success: false, error: 'Invalid or revoked API key' });
@@ -108,5 +170,7 @@ module.exports = {
   issueKey,
   revokeKey,
   requireAuth,
-  lookupKey
+  lookupKey,
+  verifyClerkSession,
+  JWT_SHAPE_RE
 };

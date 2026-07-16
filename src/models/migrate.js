@@ -17,6 +17,9 @@ CREATE TABLE IF NOT EXISTS businesses (
   wa_phone_number_id  TEXT UNIQUE,
   -- Per-tenant Meta access token (optional; falls back to env WA_ACCESS_TOKEN).
   wa_access_token     TEXT,
+  -- Clerk user id of the merchant who owns this business's dashboard login.
+  -- NULL until the merchant links their Clerk account (see /api/auth/clerk/link).
+  clerk_user_id       TEXT UNIQUE,
   industry            TEXT DEFAULT 'retail',
   status              TEXT NOT NULL DEFAULT 'trial'
                       CHECK (status IN ('trial','active','grace','suspended','cancelled')),
@@ -30,6 +33,8 @@ CREATE INDEX IF NOT EXISTS idx_businesses_wa_phone_id ON businesses(wa_phone_num
 -- Trial lifecycle notifications (upgrade path for existing databases).
 ALTER TABLE businesses ADD COLUMN IF NOT EXISTS trial_reminder_sent_at TIMESTAMPTZ;
 ALTER TABLE businesses ADD COLUMN IF NOT EXISTS trial_expired_notified_at TIMESTAMPTZ;
+-- Clerk dashboard login (upgrade path for existing databases).
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS clerk_user_id TEXT UNIQUE;
 
 -- =========================================================================
 -- plans: SaaS pricing tiers

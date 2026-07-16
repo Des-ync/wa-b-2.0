@@ -5,6 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Merchant dashboard — WA-B Solutions</title>
 <link rel="stylesheet" href="styles.css" />
+<script
+  async
+  crossorigin="anonymous"
+  data-clerk-publishable-key="pk_test_cmVsYXRlZC1maWxseS05NC5jbGVyay5hY2NvdW50cy5kZXYk"
+  src="https://related-filly-94.clerk.accounts.dev/npm/@clerk/clerk-js@5/dist/clerk.browser.js"
+  type="text/javascript"
+></script>
 <style>
   .dash { max-width: var(--max, 1100px); margin: 0 auto; padding: 40px 20px 80px; }
   .dash h1 { margin-bottom: 4px; }
@@ -33,21 +40,36 @@
 <header class="nav"><div class="wrap nav-row">
   <a href="index.html" class="brand"><span class="brand-mark">W</span><span>WA-B Solutions</span></a>
   <nav><ul class="nav-links"><li><a href="features.html">Features</a></li><li><a href="pricing.html">Pricing</a></li><li><a href="docs.html">Docs</a></li></ul></nav>
-  <div class="nav-cta"><span id="bizName" class="muted" style="font-size:14px"></span></div>
+  <div class="nav-cta">
+    <span id="bizName" class="muted" style="font-size:14px"></span>
+    <button id="signOutBtn" class="btn btn-ghost btn-sm" style="display:none" onclick="signOut()">Sign out</button>
+  </div>
 </div></header>
 
 <main class="dash">
   <h1>Merchant dashboard</h1>
   <p class="sub">Manage your catalogue and orders. Changes reflect in your WhatsApp bot instantly.</p>
 
-  <!-- API key gate -->
-  <div class="dash-card" id="keyCard">
-    <h2>Connect</h2>
-    <p class="muted" style="margin-bottom:12px">Paste your WA-B API key (starts with <code>sk_live_</code>). It's stored only in this browser.</p>
+  <!-- Clerk sign-in / sign-up -->
+  <div class="dash-card" id="authCard">
+    <h2 id="authTitle">Sign in</h2>
+    <div id="clerkAuth"></div>
+    <p class="muted" style="margin-top:16px;font-size:14px">
+      <span id="authToggleText">New here?</span>
+      <a href="#" onclick="toggleAuthMode(); return false;" id="authToggleLink">Create an account</a>
+    </p>
+  </div>
+
+  <!-- Shown once signed in but before the Clerk account is linked to a business -->
+  <div class="dash-card" id="linkCard" style="display:none">
+    <h2>Link your shop</h2>
+    <p class="muted" style="margin-bottom:12px">
+      Enter the WhatsApp number your shop was registered with. Your shop must already be
+      onboarded by WA-B — contact support if you haven't been set up yet.
+    </p>
     <div style="display:flex;gap:10px;flex-wrap:wrap">
-      <input id="apiKey" type="password" placeholder="sk_live_…" style="max-width:420px" />
-      <button class="btn btn-primary btn-sm" onclick="connect()">Connect <span class="arr">→</span></button>
-      <button class="btn btn-ghost btn-sm" onclick="disconnect()">Sign out</button>
+      <input id="linkPhone" type="tel" placeholder="0241234567" style="max-width:260px" />
+      <button class="btn btn-primary btn-sm" onclick="linkBusiness()">Link my shop <span class="arr">→</span></button>
     </div>
   </div>
 
@@ -96,8 +118,8 @@
 
 <script>
 const NEXT_STATUSES = ['confirmed','preparing','ready','delivered','cancelled'];
-let KEY = localStorage.getItem('wab_api_key') || '';
 let BIZ = null;
+let authMode = 'sign-in';
 
 function toast(msg) {
   const t = document.getElementById('toast');
@@ -106,46 +128,111 @@ function toast(msg) {
   setTimeout(() => t.classList.remove('show'), 2600);
 }
 
+/**
+ * Every call fetches a fresh Clerk session token — Clerk's JWTs are
+ * short-lived (~60s) by design, so caching one would start failing mid-session.
+ */
 async function api(path, opts = {}) {
+  const token = await window.Clerk.session.getToken();
   const res = await fetch('/api' + path, {
     ...opts,
     headers: {
-      'Authorization': 'Bearer ' + KEY,
+      'Authorization': 'Bearer ' + token,
       'Content-Type': 'application/json',
       ...(opts.headers || {})
     }
   });
   const body = await res.json().catch(() => ({}));
-  if (!res.ok || body.success === false) throw new Error(body.error || ('HTTP ' + res.status));
+  if (!res.ok || body.success === false) {
+    const err = new Error(body.error || ('HTTP ' + res.status));
+    err.code = body.error;
+    throw err;
+  }
   return body;
 }
 
-async function connect() {
-  const input = document.getElementById('apiKey');
-  if (input.value.trim()) KEY = input.value.trim();
-  if (!KEY) return toast('Enter your API key first');
-  try {
-    const me = await api('/me');
-    if (me.scope !== 'tenant' || !me.business) {
-      return toast('Use a tenant key (sk_live_…), not an admin key');
-    }
-    BIZ = me.business;
-    localStorage.setItem('wab_api_key', KEY);
-    document.getElementById('bizName').textContent = BIZ.name + ' · ' + BIZ.status;
-    document.getElementById('keyCard').style.display = 'none';
-    document.getElementById('app').style.display = '';
-    await Promise.all([loadProducts(), loadOrders()]);
-  } catch (err) {
-    toast('Could not connect: ' + err.message);
+function showCard(id) {
+  ['authCard', 'linkCard', 'app'].forEach(cardId => {
+    document.getElementById(cardId).style.display = cardId === id ? '' : 'none';
+  });
+}
+
+function mountAuth(mode) {
+  authMode = mode;
+  const el = document.getElementById('clerkAuth');
+  window.Clerk.unmountComponent(el);
+  const redirectUrl = window.location.href;
+  if (mode === 'sign-up') {
+    document.getElementById('authTitle').textContent = 'Create an account';
+    document.getElementById('authToggleText').textContent = 'Already registered?';
+    document.getElementById('authToggleLink').textContent = 'Sign in';
+    window.Clerk.mountSignUp(el, { afterSignUpUrl: redirectUrl, signInUrl: redirectUrl });
+  } else {
+    document.getElementById('authTitle').textContent = 'Sign in';
+    document.getElementById('authToggleText').textContent = 'New here?';
+    document.getElementById('authToggleLink').textContent = 'Create an account';
+    window.Clerk.mountSignIn(el, { afterSignInUrl: redirectUrl, signUpUrl: redirectUrl });
   }
 }
 
-function disconnect() {
-  localStorage.removeItem('wab_api_key');
-  KEY = ''; BIZ = null;
-  document.getElementById('keyCard').style.display = '';
-  document.getElementById('app').style.display = 'none';
+function toggleAuthMode() {
+  mountAuth(authMode === 'sign-in' ? 'sign-up' : 'sign-in');
+}
+
+async function signOut() {
+  await window.Clerk.signOut();
+  BIZ = null;
   document.getElementById('bizName').textContent = '';
+  document.getElementById('signOutBtn').style.display = 'none';
+  showCard('authCard');
+  mountAuth('sign-in');
+}
+
+/** Runs on load and every time Clerk's session state changes. */
+async function onAuthStateChange() {
+  if (!window.Clerk.user) {
+    document.getElementById('signOutBtn').style.display = 'none';
+    showCard('authCard');
+    mountAuth('sign-in');
+    return;
+  }
+
+  document.getElementById('signOutBtn').style.display = '';
+  try {
+    const me = await api('/me');
+    if (me.scope !== 'tenant' || !me.business) {
+      throw Object.assign(new Error('No business linked'), { code: 'not_linked' });
+    }
+    BIZ = me.business;
+    document.getElementById('bizName').textContent = BIZ.name + ' · ' + BIZ.status;
+    showCard('app');
+    await Promise.all([loadProducts(), loadOrders()]);
+  } catch (err) {
+    if (err.code === 'not_linked') {
+      showCard('linkCard');
+    } else {
+      toast('Could not load your shop: ' + err.message);
+    }
+  }
+}
+
+async function linkBusiness() {
+  const phone = document.getElementById('linkPhone').value.trim();
+  if (!phone) return toast('Enter your WhatsApp number first');
+  try {
+    const token = await window.Clerk.session.getToken();
+    const res = await fetch('/api/auth/clerk/link', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ whatsapp_number: phone })
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok || body.success === false) throw new Error(body.error || ('HTTP ' + res.status));
+    toast('Shop linked!');
+    await onAuthStateChange();
+  } catch (err) {
+    toast('Could not link shop: ' + err.message);
+  }
 }
 
 function esc(s) {
@@ -259,7 +346,10 @@ async function setOrderStatus(id, status) {
   } catch (err) { toast(err.message); }
 }
 
-if (KEY) connect();
+(async () => {
+  await window.Clerk.load();
+  window.Clerk.addListener(onAuthStateChange);
+})();
 </script>
 </body>
 </html>
