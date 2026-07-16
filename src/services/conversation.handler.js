@@ -15,7 +15,7 @@ const {
   sleep
 } = require('../utils/helpers');
 
-const TYPING_DELAY_MS = 1500;
+const TYPING_DELAY_MS = 750;
 
 const SUPPORT_NUMBER = process.env.SUPPORT_WHATSAPP_NUMBER || '+233241234567';
 const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || '';
