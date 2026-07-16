@@ -1,20 +1,33 @@
 require('dotenv').config();
 const path = require('path');
 const express = require('express');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const cron = require('node-cron');
 const logger = require('./utils/logger');
-const { pool } = require('./config/database');
+const { pool, query } = require('./config/database');
 const notification = require('./services/notification.service');
 const webhookProcessor = require('./services/webhook.processor');
+const paymentSweeper = require('./services/payment.sweeper');
+const { requireAuth } = require('./middleware/auth');
 
 const webhookRoutes = require('./routes/webhook.routes');
 const paymentRoutes = require('./routes/payment.routes');
 const subscriptionRoutes = require('./routes/subscription.routes');
 const orderRoutes = require('./routes/order.routes');
 const adminRoutes = require('./routes/admin.routes');
+const productRoutes = require('./routes/product.routes');
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
+
+// Behind Nginx: trust the first proxy hop so req.ip (used by the rate
+// limiter) reflects the real client, not 127.0.0.1.
+app.set('trust proxy', 1);
+
+// Security headers. CSP is off because the marketing site and dashboard use
+// inline scripts; everything else (frameguard, nosniff, HSTS via nginx) applies.
+app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
 
 // In a multi-instance deployment, set RUN_CRON=false on every replica except one
 // (or run the dedicated worker via `node src/worker.js` instead). The worker_lock
@@ -75,11 +88,39 @@ app.get('/health', async (_req, res) => {
    Routes
    ------------------------------------------------------------------------- */
 
+// Throttle the authed management APIs (webhooks are deliberately excluded —
+// Meta/Paystack retry bursts must never be rate-limited into data loss).
+const apiLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: 'Too many requests, slow down.' }
+});
+
 app.use('/api/webhooks', webhookRoutes);
 app.use('/api/payments', paymentRoutes);
-app.use('/api/subscriptions', subscriptionRoutes);
-app.use('/api/orders', orderRoutes);
-app.use('/api/admin', adminRoutes);
+app.use('/api/subscriptions', apiLimiter, subscriptionRoutes);
+app.use('/api/orders', apiLimiter, orderRoutes);
+app.use('/api/admin', apiLimiter, adminRoutes);
+app.use('/api/products', apiLimiter, productRoutes);
+
+// Who am I? Lets the dashboard resolve the business behind an API key.
+app.get('/api/me', apiLimiter, requireAuth('any'), async (req, res) => {
+  try {
+    if (req.auth.scope === 'admin') {
+      return res.json({ success: true, scope: 'admin', business: null });
+    }
+    const r = await query(
+      'SELECT id, name, owner_name, whatsapp_number, status, trial_ends_at FROM businesses WHERE id = $1',
+      [req.auth.businessId]
+    );
+    res.json({ success: true, scope: 'tenant', business: r.rows[0] || null });
+  } catch (err) {
+    logger.error('GET /api/me failed: %s', err.message);
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
 
 // 404 — /wa-b/* gets the branded page, API callers get JSON, everything
 // else (the domain root, reserved for other projects) falls through as JSON too.
@@ -123,7 +164,21 @@ function startCronJobs() {
     );
   }, { timezone: 'Africa/Accra' });
 
-  logger.info('Cron jobs scheduled (Africa/Accra) — 08:00 renewals, 09:00 reminders, 10:00 suspensions.');
+  // Reconcile stuck pending payments every 5 minutes.
+  cron.schedule('*/5 * * * *', () => {
+    paymentSweeper.runPaymentSweeper().catch(err =>
+      logger.error('paymentSweeper crashed: %s', err.message, { stack: err.stack })
+    );
+  }, { timezone: 'Africa/Accra' });
+
+  // Weekly retention prune (Sunday 02:30).
+  cron.schedule('30 2 * * 0', () => {
+    notification.runPruneJob().catch(err =>
+      logger.error('pruneJob crashed: %s', err.message, { stack: err.stack })
+    );
+  }, { timezone: 'Africa/Accra' });
+
+  logger.info('Cron jobs scheduled (Africa/Accra) — 08:00 renewals, 09:00 reminders, 10:00 suspensions, 5-min payment sweeper, weekly prune.');
 }
 
 /* -------------------------------------------------------------------------

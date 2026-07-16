@@ -12,10 +12,32 @@ const {
   generateReference,
   truncate,
   formatDate,
-  sleep
+  sleep,
+  ORDER_NUMBER_RE,
+  decayedTypingDelay,
+  buildMenuPage
 } = require('../utils/helpers');
 
-const TYPING_DELAY_MS = 750;
+/* -----------------------------------------------------------------
+   Typing indicator pacing: the first reply in a conversation waits the
+   longest; each subsequent reply gets progressively shorter, so a busy
+   queue drains fast while single messages still feel human.
+   ----------------------------------------------------------------- */
+const TYPING_RESET_MS = 10 * 60 * 1000;
+const typingCounts = new Map(); // key -> { count, ts }
+
+function nextTypingDelay(key) {
+  const now = Date.now();
+  if (typingCounts.size > 5000) {
+    for (const [k, v] of typingCounts) {
+      if (now - v.ts > TYPING_RESET_MS) typingCounts.delete(k);
+    }
+  }
+  const entry = typingCounts.get(key);
+  const count = entry && now - entry.ts < TYPING_RESET_MS ? entry.count : 0;
+  typingCounts.set(key, { count: count + 1, ts: now });
+  return decayedTypingDelay(count);
+}
 
 const SUPPORT_NUMBER = process.env.SUPPORT_WHATSAPP_NUMBER || '+233241234567';
 const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || '';
@@ -39,6 +61,7 @@ function extractInbound(payload) {
     let text = '';
     let interactiveId = null;
     let interactiveTitle = null;
+    let location = null;
     let type = message.type;
 
     if (message.type === 'text') {
@@ -56,6 +79,16 @@ function extractInbound(payload) {
       }
     } else if (message.type === 'button') {
       text = message.button?.text || '';
+    } else if (message.type === 'location') {
+      const loc = message.location || {};
+      if (loc.latitude != null && loc.longitude != null) {
+        location = {
+          latitude: loc.latitude,
+          longitude: loc.longitude,
+          name: loc.name || null,
+          address: loc.address || null
+        };
+      }
     }
 
     return {
@@ -66,6 +99,7 @@ function extractInbound(payload) {
       text: String(text || '').trim(),
       interactiveId,
       interactiveTitle,
+      location,
       raw: message,
       businessPhoneId: value.metadata?.phone_number_id
     };
@@ -73,6 +107,49 @@ function extractInbound(payload) {
     logger.error('extractInbound failed: %s', err.message);
     return null;
   }
+}
+
+/* =================================================================
+   Delivery status updates (sent → delivered → read, or failed)
+   ================================================================= */
+
+const STATUS_RANK = { sent: 1, delivered: 2, read: 3, failed: 4 };
+
+/**
+ * Apply Meta status webhooks to message_log so delivery failures are visible.
+ * Only upgrades status (a late 'delivered' never overwrites 'read').
+ */
+async function handleStatuses(payload) {
+  const value = payload?.entry?.[0]?.changes?.[0]?.value;
+  const statuses = value?.statuses;
+  if (!Array.isArray(statuses) || !statuses.length) return false;
+
+  for (const st of statuses) {
+    const rank = STATUS_RANK[st?.status];
+    if (!st?.id || !rank) continue;
+    try {
+      await query(
+        `UPDATE message_log
+            SET status = $2
+          WHERE wa_message_id = $1
+            AND direction = 'outbound'
+            AND (CASE status
+                   WHEN 'sent' THEN 1 WHEN 'delivered' THEN 2
+                   WHEN 'read' THEN 3 WHEN 'failed' THEN 4 ELSE 0
+                 END) < $3`,
+        [st.id, st.status, rank]
+      );
+    } catch (err) {
+      logger.warn('handleStatuses update failed for %s: %s', st.id, err.message);
+    }
+    if (st.status === 'failed') {
+      logger.warn(
+        'WhatsApp message %s to %s FAILED: %j',
+        st.id, st.recipient_id, st.errors || []
+      );
+    }
+  }
+  return true;
 }
 
 /* =================================================================
@@ -229,12 +306,12 @@ async function handleSaasBilling({ business, inbound }) {
   }
   if (inbound.messageId) {
     await wa.markAsRead(inbound.messageId, { businessId: business.id, typing: true });
-    await sleep(TYPING_DELAY_MS);
+    await sleep(nextTypingDelay(`biz:${business.id}`));
   }
 
   if (upper === 'STATUS') return saasStatus(business);
   if (upper === 'PAY' || upper === 'RENEW' || upper === 'RETRY') return saasPay(business);
-  if (upper === 'CANCEL') return saasCancel(business);
+  if (upper === 'CANCEL') return saasCancelConfirm(business);
   if (upper === 'UPGRADE') return saasUpgradeMenu(business);
   if (upper === 'SUPPORT') return saasSupport(business);
 
@@ -244,7 +321,92 @@ async function handleSaasBilling({ business, inbound }) {
     return saasUpgradeSelect(business, planName);
   }
 
+  // Cancel confirmation buttons
+  if (inbound.interactiveId === 'confirm_cancel') return saasCancel(business);
+  if (inbound.interactiveId === 'keep_sub') {
+    await wa.sendText(business.whatsapp_number,
+      'Great — no changes made. Your subscription continues as normal. 👍',
+      { businessId: business.id });
+    return;
+  }
+
+  // Order status updates: merchant taps a status button…
+  if (inbound.interactiveId && inbound.interactiveId.startsWith('ordst_')) {
+    return merchantSetOrderStatus(business, inbound.interactiveId);
+  }
+  // …or replies with an order number to get the status buttons.
+  const orderMatch = text.match(ORDER_NUMBER_RE);
+  if (orderMatch) {
+    return merchantShowOrder(business, orderMatch[0].toUpperCase());
+  }
+
   return saasMenu(business);
+}
+
+/* ---------- Merchant order management by chat ---------- */
+
+const MERCHANT_STATUS_LABELS = {
+  preparing: 'Preparing',
+  ready: 'Ready',
+  delivered: 'Delivered'
+};
+
+async function merchantShowOrder(business, orderNumber) {
+  const order = await orderService.getOrderByNumber(orderNumber);
+  if (!order || order.business_id !== business.id) {
+    await wa.sendText(business.whatsapp_number,
+      `No order *${orderNumber}* found for ${business.name}.`,
+      { businessId: business.id });
+    return;
+  }
+  const items = (Array.isArray(order.items) ? order.items : [])
+    .map(i => `• ${i.quantity || 1}× ${i.name}`).join('\n') || '(no items)';
+  const body =
+`📋 Order *${order.order_number}*
+
+${items}
+
+Total: ${formatGhs(order.total_ghs)}
+Payment: ${order.payment_status}
+Status: *${order.status}*
+Address: ${order.delivery_address || '—'}
+
+Update the status:`;
+  const buttons = Object.entries(MERCHANT_STATUS_LABELS)
+    .filter(([status]) => status !== order.status)
+    .slice(0, 3)
+    .map(([status, label]) => ({ id: `ordst_${order.id}_${status}`, title: label }));
+  await wa.sendButtons(business.whatsapp_number, body, buttons, { businessId: business.id });
+}
+
+async function merchantSetOrderStatus(business, interactiveId) {
+  // ordst_<uuid>_<status>
+  const rest = interactiveId.slice('ordst_'.length);
+  const sep = rest.lastIndexOf('_');
+  const orderId = rest.slice(0, sep);
+  const newStatus = rest.slice(sep + 1);
+
+  if (!MERCHANT_STATUS_LABELS[newStatus]) {
+    await wa.sendText(business.whatsapp_number, 'That status is not available.', { businessId: business.id });
+    return;
+  }
+  const order = await orderService.getOrderById(orderId);
+  if (!order || order.business_id !== business.id) {
+    await wa.sendText(business.whatsapp_number, 'Order not found.', { businessId: business.id });
+    return;
+  }
+  if (order.status === 'cancelled') {
+    await wa.sendText(business.whatsapp_number,
+      `Order *${order.order_number}* is cancelled and can't be updated.`,
+      { businessId: business.id });
+    return;
+  }
+
+  const updated = await orderService.updateOrderStatus(order.id, newStatus);
+  await notificationService.notifyOrderStatusChange({ order: updated, business });
+  await wa.sendText(business.whatsapp_number,
+    `✅ Order *${updated.order_number}* marked as *${newStatus}*. The customer has been notified.`,
+    { businessId: business.id });
 }
 
 async function saasMenu(business) {
@@ -320,6 +482,17 @@ async function saasPay(business) {
       `⚠️ Could not start the MoMo charge: ${result.error || 'unknown error'}.\n\nReply *RETRY* to try again or *SUPPORT* for help.`,
       { businessId: business.id });
   }
+}
+
+async function saasCancelConfirm(business) {
+  await wa.sendButtons(business.whatsapp_number,
+    `⚠️ You're about to cancel your ${business.name || ''} subscription.\n\nYou'll keep access until the end of your paid period, then your shop stops taking orders.\n\nAre you sure?`,
+    [
+      { id: 'confirm_cancel', title: 'Yes, cancel' },
+      { id: 'keep_sub', title: 'Keep my plan' }
+    ],
+    { businessId: business.id }
+  );
 }
 
 async function saasCancel(business) {
@@ -438,7 +611,7 @@ async function handleCommerce({ business, inbound }) {
   }
   if (inbound.messageId) {
     await wa.markAsRead(inbound.messageId, { businessId: business.id, customerId: customer.id, typing: true });
-    await sleep(TYPING_DELAY_MS);
+    await sleep(nextTypingDelay(`cust:${customer.id}`));
   }
 
   // Enforce subscription/trial access before serving any commerce flow.
@@ -465,6 +638,20 @@ async function handleCommerce({ business, inbound }) {
     return;
   }
 
+  // "Talk to us" — hand the customer the business's direct contact.
+  if (inbound.interactiveId === 'support_request') {
+    return sendSupportContact({ business, customer });
+  }
+
+  // Payment retry / order cancel buttons work from ANY state (they arrive
+  // after the flow state may have expired).
+  if (inbound.interactiveId && inbound.interactiveId.startsWith('retrypay_')) {
+    return retryOrderPayment({ business, customer, orderId: inbound.interactiveId.slice('retrypay_'.length) });
+  }
+  if (inbound.interactiveId && inbound.interactiveId.startsWith('cancelord_')) {
+    return cancelUnpaidOrder({ business, customer, orderId: inbound.interactiveId.slice('cancelord_'.length) });
+  }
+
   // Active flow routing
   if (state.current_flow === 'ordering') {
     return continueOrderingFlow({ business, customer, state, inbound });
@@ -475,12 +662,82 @@ async function handleCommerce({ business, inbound }) {
   }
 
   // Triggers from idle
-  if (['ORDER', 'MENU', 'BUY', 'SHOP'].includes(upper) || inbound.interactiveId === 'start_order') {
+  if (['ORDER', 'BUY', 'SHOP'].includes(upper) || inbound.interactiveId === 'start_order') {
     return startOrderingFlow({ business, customer });
   }
 
   // Default fallback
   return sendWelcome({ business, customer });
+}
+
+async function sendSupportContact({ business, customer }) {
+  const msisdn = String(business.whatsapp_number || '').replace(/[^\d]/g, '');
+  const line = msisdn
+    ? `You can reach *${business.name}* directly on WhatsApp: https://wa.me/${msisdn}`
+    : `You can reach *${business.name}* directly on their WhatsApp line.`;
+  await wa.sendText(customer.whatsapp_number,
+    `💬 ${line}\n\nOr reply *MENU* anytime to keep shopping.`,
+    { businessId: business.id, customerId: customer.id, previewUrl: false });
+}
+
+/**
+ * Restart payment on an EXISTING order (from the retry button) instead of
+ * making the customer rebuild their cart into a duplicate order.
+ */
+async function retryOrderPayment({ business, customer, orderId }) {
+  const order = await orderService.getOrderById(orderId);
+  if (!order || order.business_id !== business.id || order.customer_id !== customer.id) {
+    await wa.sendText(customer.whatsapp_number, 'That order is no longer available. Reply *MENU* to start over.',
+      { businessId: business.id, customerId: customer.id });
+    return;
+  }
+  if (order.payment_status === 'paid') {
+    await wa.sendText(customer.whatsapp_number,
+      `Order *${order.order_number}* is already paid. ✅`,
+      { businessId: business.id, customerId: customer.id });
+    return;
+  }
+  if (order.status === 'cancelled') {
+    await wa.sendText(customer.whatsapp_number,
+      `Order *${order.order_number}* was cancelled. Reply *MENU* to place a new one.`,
+      { businessId: business.id, customerId: customer.id });
+    return;
+  }
+
+  await saveState(customer.id, {
+    flow: 'paying',
+    step: 'choose_method',
+    data: { order_id: order.id, order_number: order.order_number, total: order.total_ghs }
+  });
+  await wa.sendButtons(customer.whatsapp_number,
+    `Let's finish paying for order *${order.order_number}* — total *${formatGhs(order.total_ghs)}*.\n\nHow would you like to pay?`,
+    [
+      { id: 'pay_momo', title: 'MoMo' },
+      { id: 'pay_card', title: 'Card / Link' },
+      { id: 'cancel_order', title: 'Cancel' }
+    ],
+    { businessId: business.id, customerId: customer.id }
+  );
+}
+
+async function cancelUnpaidOrder({ business, customer, orderId }) {
+  const order = await orderService.getOrderById(orderId);
+  if (!order || order.business_id !== business.id || order.customer_id !== customer.id) {
+    await wa.sendText(customer.whatsapp_number, 'That order is no longer available.',
+      { businessId: business.id, customerId: customer.id });
+    return;
+  }
+  if (order.payment_status === 'paid') {
+    await wa.sendText(customer.whatsapp_number,
+      `Order *${order.order_number}* is already paid, so it can't be cancelled here. Contact ${business.name} if you need help.`,
+      { businessId: business.id, customerId: customer.id });
+    return;
+  }
+  await orderService.updateOrderStatus(order.id, 'cancelled');
+  await resetState(customer.id);
+  await wa.sendText(customer.whatsapp_number,
+    `Order *${order.order_number}* cancelled. Reply *MENU* anytime to order again.`,
+    { businessId: business.id, customerId: customer.id });
 }
 
 async function sendWelcome({ business, customer }) {
@@ -496,13 +753,19 @@ Tap *Order Now* to browse our menu and place an order. Pay easily with MoMo or c
 
 /* ---------- Ordering: STEP 1 (browse) ---------- */
 
-async function startOrderingFlow({ business, customer }) {
+/**
+ * Show the product menu. CARRIES THE EXISTING CART FORWARD — "Add more" and
+ * "Continue shopping" must never wipe what the customer already picked.
+ * WhatsApp allows max 10 list rows total, so long catalogs are paginated
+ * with prev/next rows (handled via `menu_page_<n>` interactive ids).
+ */
+async function startOrderingFlow({ business, customer, page = 0 }) {
   const products = await query(
     `SELECT id, name, description, price_ghs, category
        FROM products
       WHERE business_id = $1 AND in_stock = TRUE
       ORDER BY category ASC, name ASC
-      LIMIT 50`,
+      LIMIT 200`,
     [business.id]
   );
   if (!products.rows.length) {
@@ -512,28 +775,29 @@ async function startOrderingFlow({ business, customer }) {
     return;
   }
 
-  const sectionsMap = {};
-  for (const p of products.rows) {
-    const cat = p.category || 'general';
-    sectionsMap[cat] = sectionsMap[cat] || [];
-    sectionsMap[cat].push({
-      id: `prod_${p.id}`,
-      title: truncate(p.name, 24),
-      description: `${formatGhs(p.price_ghs)}${p.description ? ' · ' + p.description : ''}`
-    });
-  }
-  const sections = Object.entries(sectionsMap).map(([title, rows]) => ({ title, rows }));
+  // Preserve any in-flight cart across menu views.
+  const state = await loadOrCreateState(customer.id);
+  const cart = Array.isArray(state.flow_data?.cart) ? state.flow_data.cart : [];
+
+  const menu = buildMenuPage(products.rows, page);
+  const sections = [{
+    title: menu.totalPages > 1 ? `Menu ${menu.page + 1}/${menu.totalPages}` : 'Menu',
+    rows: menu.rows
+  }];
 
   await saveState(customer.id, {
     flow: 'ordering',
     step: 'browse',
-    data: { cart: [] }
+    data: { cart, menu_page: menu.page }
   });
 
+  const cartNote = cart.length
+    ? `\n\n🛒 ${cart.reduce((n, i) => n + (i.quantity || 1), 0)} item(s) already in your cart.`
+    : '';
   await wa.sendList(
     customer.whatsapp_number,
     `${business.name} Menu`,
-    'Tap an item to add it to your cart.',
+    `Tap an item to add it to your cart.${cartNote}`,
     sections,
     { buttonLabel: 'View menu', businessId: business.id, customerId: customer.id }
   );
@@ -545,6 +809,12 @@ async function continueOrderingFlow({ business, customer, state, inbound }) {
   const data = state.flow_data || {};
   const cart = Array.isArray(data.cart) ? data.cart : [];
   const upper = (inbound.text || '').toUpperCase().trim();
+
+  // Menu pagination rows
+  if (inbound.interactiveId && inbound.interactiveId.startsWith('menu_page_')) {
+    const page = parseInt(inbound.interactiveId.slice('menu_page_'.length), 10) || 0;
+    return startOrderingFlow({ business, customer, page });
+  }
 
   // Selecting a product from list
   if (inbound.interactiveId && inbound.interactiveId.startsWith('prod_')) {
@@ -576,10 +846,16 @@ async function continueOrderingFlow({ business, customer, state, inbound }) {
     if (inbound.interactiveId === 'checkout' || upper === 'CHECKOUT') {
       return askForAddress({ business, customer });
     }
+    if (inbound.interactiveId === 'cancel_order' || upper === 'CANCEL') {
+      await resetState(customer.id);
+      await wa.sendText(customer.whatsapp_number, 'Order cancelled. Reply *MENU* to start over.',
+        { businessId: business.id, customerId: customer.id });
+      return;
+    }
   }
 
   if (state.current_step === 'get_address') {
-    return captureAddress({ business, customer, cart, address: inbound.text });
+    return captureAddress({ business, customer, cart, address: inbound.text, location: inbound.location });
   }
 
   if (state.current_step === 'confirm_order') {
@@ -677,15 +953,21 @@ async function askForAddress({ business, customer }) {
   const cart = state.flow_data?.cart || [];
   await saveState(customer.id, { flow: 'ordering', step: 'get_address', data: { cart } });
   await wa.sendText(customer.whatsapp_number,
-    `📍 Please send your delivery address as a text message.\n\nInclude landmark, area, and any special instructions.`,
+    `📍 Please send your delivery address as a text message (landmark, area, any special instructions) — or share your location pin.`,
     { businessId: business.id, customerId: customer.id });
 }
 
-async function captureAddress({ business, customer, cart, address }) {
-  const trimmed = String(address || '').trim();
+async function captureAddress({ business, customer, cart, address, location }) {
+  let trimmed = String(address || '').trim();
+  // A shared WhatsApp location pin is a perfectly good delivery address.
+  if (location) {
+    const label = [location.name, location.address].filter(Boolean).join(', ');
+    const maps = `https://maps.google.com/?q=${location.latitude},${location.longitude}`;
+    trimmed = label ? `${label} (pin: ${maps})` : `Pinned location: ${maps}`;
+  }
   if (trimmed.length < 5) {
     await wa.sendText(customer.whatsapp_number,
-      'That address looks too short. Please send a more detailed delivery address.',
+      'That address looks too short. Please send a more detailed delivery address, or share your location pin 📍.',
       { businessId: business.id, customerId: customer.id });
     return;
   }
@@ -960,8 +1242,12 @@ async function handlePaymentFailure({ reference }) {
   const customerRes = await query('SELECT * FROM customers WHERE id = $1', [order.customer_id]);
   const customer = customerRes.rows[0];
   if (customer) {
-    await wa.sendText(customer.whatsapp_number,
-      `⚠️ Payment for order *${order.order_number}* did not go through.\n\nReply *MENU* to retry.`,
+    await wa.sendButtons(customer.whatsapp_number,
+      `⚠️ Payment for order *${order.order_number}* did not go through.\n\nYour order is saved — you can try paying again.`,
+      [
+        { id: `retrypay_${order.id}`, title: 'Try again' },
+        { id: `cancelord_${order.id}`, title: 'Cancel order' }
+      ],
       { businessId: order.business_id, customerId: customer.id });
     try { await resetState(customer.id); } catch (_e) { /* ignore */ }
   }
@@ -970,6 +1256,7 @@ async function handlePaymentFailure({ reference }) {
 
 module.exports = {
   handleInbound,
+  handleStatuses,
   handlePaymentSuccess,
   handlePaymentFailure
 };

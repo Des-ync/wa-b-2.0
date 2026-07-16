@@ -57,11 +57,11 @@ function paystackMomoProvider(network) {
 }
 
 /**
- * Format a numeric amount as "GHS 1,234.56".
+ * Format a numeric amount as "GH₵1,234.56".
  */
 function formatGhs(amount) {
   const n = Number(amount || 0);
-  return `GHS ${n.toLocaleString('en-GH', {
+  return `GH₵${n.toLocaleString('en-GH', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
   })}`;
@@ -149,6 +149,53 @@ function safeJsonParse(value, fallback = null) {
   }
 }
 
+/**
+ * Matches order numbers like ORD-2026-4821 anywhere in a message.
+ */
+const ORDER_NUMBER_RE = /\bORD-\d{4}-\d{4}\b/i;
+
+/**
+ * Typing-indicator delay that decays per conversation: the first reply waits
+ * the full base delay, each subsequent reply gets ~35% shorter, down to a floor.
+ * `count` is how many replies this conversation has already received recently.
+ */
+function decayedTypingDelay(count, base = 750, floor = 150) {
+  const n = Math.max(0, Number(count) || 0);
+  return Math.max(floor, Math.round(base * Math.pow(0.65, n)));
+}
+
+/**
+ * Build one page of WhatsApp list rows from a product array.
+ * WhatsApp allows at most 10 rows per list message TOTAL, so we show
+ * `pageSize` products plus prev/next navigation rows when needed.
+ *
+ * Returns { rows, page, totalPages, hasPrev, hasNext }.
+ */
+function buildMenuPage(products, page = 0, pageSize = 8) {
+  const all = Array.isArray(products) ? products : [];
+  const totalPages = Math.max(1, Math.ceil(all.length / pageSize));
+  const p = Math.min(Math.max(0, parseInt(page, 10) || 0), totalPages - 1);
+  const slice = all.slice(p * pageSize, (p + 1) * pageSize);
+
+  const rows = slice.map(prod => ({
+    id: `prod_${prod.id}`,
+    title: truncate(prod.name, 24),
+    description: truncate(
+      `${formatGhs(prod.price_ghs)}${prod.description ? ' · ' + prod.description : ''}`, 72)
+  }));
+
+  const hasPrev = p > 0;
+  const hasNext = p < totalPages - 1;
+  if (hasPrev) {
+    rows.unshift({ id: `menu_page_${p - 1}`, title: '⬅️ Previous items', description: `Back to page ${p}` });
+  }
+  if (hasNext) {
+    rows.push({ id: `menu_page_${p + 1}`, title: '➡️ More items', description: `Page ${p + 2} of ${totalPages}` });
+  }
+
+  return { rows, page: p, totalPages, hasPrev, hasNext };
+}
+
 module.exports = {
   normalizeGhanaPhone,
   detectNetwork,
@@ -162,5 +209,8 @@ module.exports = {
   formatDate,
   truncate,
   sleep,
-  safeJsonParse
+  safeJsonParse,
+  ORDER_NUMBER_RE,
+  decayedTypingDelay,
+  buildMenuPage
 };

@@ -10,7 +10,8 @@
     "worker:dev": "nodemon src/worker.js",
     "migrate": "node src/models/migrate.js",
     "seed": "node src/models/seed.js",
-    "issue-key": "node src/models/issue-key.js"
+    "issue-key": "node src/models/issue-key.js",
+    "test": "node --test"
   },
   "engines": {
     "node": ">=18.0.0"
@@ -19,6 +20,8 @@
     "axios": "^1.6.0",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
+    "express-rate-limit": "^7.4.0",
+    "helmet": "^8.0.0",
     "node-cron": "^3.0.3",
     "pg": "^8.11.3",
     "uuid": "^9.0.1",

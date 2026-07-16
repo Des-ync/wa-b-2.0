@@ -1,6 +1,7 @@
 const express = require('express');
 const logger = require('../utils/logger');
 const orderService = require('../services/order.service');
+const notification = require('../services/notification.service');
 const { query } = require('../config/database');
 const { normalizeGhanaPhone, detectNetwork } = require('../utils/helpers');
 const { requireAuth } = require('../middleware/auth');
@@ -145,6 +146,14 @@ router.patch('/:id/status', async (req, res) => {
       return res.status(403).json({ success: false, error: 'Key does not match business' });
     }
     const order = await orderService.updateOrderStatus(req.params.id, status);
+
+    // Keep the customer in the loop, same as the merchant chat flow does.
+    if (order && order.status !== existing.status) {
+      const bizRes = await query('SELECT id, name FROM businesses WHERE id = $1', [order.business_id]);
+      notification.notifyOrderStatusChange({ order, business: bizRes.rows[0] })
+        .catch(err => logger.warn('order status notify failed: %s', err.message));
+    }
+
     res.json({ success: true, order });
   } catch (err) {
     logger.error('PATCH /orders/:id/status failed: %s', err.message);

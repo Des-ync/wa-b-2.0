@@ -9,10 +9,12 @@ const { query } = require('../config/database');
 
 /**
  * Process a WhatsApp event payload pulled from the queue.
- * Idempotency: handleInbound itself will hit the unique index on
- * message_log.wa_message_id and silently absorb duplicates.
+ * Status updates (sent/delivered/read/failed) update message_log; inbound
+ * messages run the conversation engine. Idempotency: handleInbound hits the
+ * unique index on message_log.wa_message_id and silently absorbs duplicates.
  */
 async function processWhatsApp(payload) {
+  await conversation.handleStatuses(payload);
   await conversation.handleInbound(payload);
 }
 

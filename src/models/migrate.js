@@ -27,6 +27,9 @@ CREATE TABLE IF NOT EXISTS businesses (
 CREATE INDEX IF NOT EXISTS idx_businesses_status ON businesses(status);
 CREATE INDEX IF NOT EXISTS idx_businesses_whatsapp ON businesses(whatsapp_number);
 CREATE INDEX IF NOT EXISTS idx_businesses_wa_phone_id ON businesses(wa_phone_number_id);
+-- Trial lifecycle notifications (upgrade path for existing databases).
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS trial_reminder_sent_at TIMESTAMPTZ;
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS trial_expired_notified_at TIMESTAMPTZ;
 
 -- =========================================================================
 -- plans: SaaS pricing tiers

@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Merchant dashboard — WA-B Solutions</title>
+<link rel="stylesheet" href="styles.css" />
+<style>
+  .dash { max-width: var(--max, 1100px); margin: 0 auto; padding: 40px 20px 80px; }
+  .dash h1 { margin-bottom: 4px; }
+  .dash .sub { color: var(--muted); margin-bottom: 32px; }
+  .dash-card { border: 1px solid var(--line); border-radius: var(--r-lg, 12px); padding: 24px; margin-bottom: 24px; background: var(--bg); }
+  .dash-card h2 { font-size: 18px; margin-bottom: 16px; }
+  .dash table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .dash th { text-align: left; color: var(--muted); font-weight: 600; padding: 8px 10px; border-bottom: 1px solid var(--line); font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .dash td { padding: 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  .dash tr:last-child td { border-bottom: none; }
+  .dash input, .dash select { padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--r-sm, 6px); font: inherit; background: var(--bg); color: var(--ink); width: 100%; }
+  .dash .row-form { display: grid; grid-template-columns: 2fr 2fr 1fr 1fr auto; gap: 10px; align-items: end; }
+  .dash .row-form label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 4px; }
+  .dash .pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .pill-ok { background: color-mix(in srgb, var(--success) 15%, transparent); color: var(--success); }
+  .pill-warn { background: color-mix(in srgb, var(--warning) 18%, transparent); color: var(--warning); }
+  .pill-off { background: var(--bg-2); color: var(--muted); }
+  .dash .btn-xs { padding: 5px 10px; font-size: 12px; }
+  .dash .muted { color: var(--muted); }
+  #toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 10px 18px; border-radius: 999px; font-size: 14px; opacity: 0; transition: opacity 200ms; pointer-events: none; z-index: 50; }
+  #toast.show { opacity: 1; }
+  @media (max-width: 720px) { .dash .row-form { grid-template-columns: 1fr 1fr; } .dash .scroll-x { overflow-x: auto; } }
+</style>
+</head>
+<body>
+<header class="nav"><div class="wrap nav-row">
+  <a href="index.html" class="brand"><span class="brand-mark">W</span><span>WA-B Solutions</span></a>
+  <nav><ul class="nav-links"><li><a href="features.html">Features</a></li><li><a href="pricing.html">Pricing</a></li><li><a href="docs.html">Docs</a></li></ul></nav>
+  <div class="nav-cta"><span id="bizName" class="muted" style="font-size:14px"></span></div>
+</div></header>
+
+<main class="dash">
+  <h1>Merchant dashboard</h1>
+  <p class="sub">Manage your catalogue and orders. Changes reflect in your WhatsApp bot instantly.</p>
+
+  <!-- API key gate -->
+  <div class="dash-card" id="keyCard">
+    <h2>Connect</h2>
+    <p class="muted" style="margin-bottom:12px">Paste your WA-B API key (starts with <code>sk_live_</code>). It's stored only in this browser.</p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <input id="apiKey" type="password" placeholder="sk_live_…" style="max-width:420px" />
+      <button class="btn btn-primary btn-sm" onclick="connect()">Connect <span class="arr">→</span></button>
+      <button class="btn btn-ghost btn-sm" onclick="disconnect()">Sign out</button>
+    </div>
+  </div>
+
+  <div id="app" style="display:none">
+    <!-- Products -->
+    <div class="dash-card">
+      <h2>Products</h2>
+      <div class="scroll-x">
+        <table id="productTable">
+          <thead><tr><th>Name</th><th>Description</th><th>Price (GH₵)</th><th>Category</th><th>Stock</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div style="margin-top:20px;border-top:1px solid var(--line);padding-top:16px">
+        <div class="row-form">
+          <div><label>Name</label><input id="pName" placeholder="Jollof Rice (Large)" /></div>
+          <div><label>Description</label><input id="pDesc" placeholder="Spicy jollof with chicken" /></div>
+          <div><label>Price GH₵</label><input id="pPrice" type="number" min="0" step="0.01" placeholder="45.00" /></div>
+          <div><label>Category</label><input id="pCat" placeholder="meals" /></div>
+          <div><button class="btn btn-primary btn-sm" onclick="addProduct()">Add product</button></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Orders -->
+    <div class="dash-card">
+      <h2>Orders</h2>
+      <div style="margin-bottom:12px">
+        <select id="orderStatusFilter" onchange="loadOrders()" style="max-width:220px">
+          <option value="">All statuses</option>
+          <option>pending</option><option>confirmed</option><option>paid</option>
+          <option>preparing</option><option>ready</option><option>delivered</option><option>cancelled</option>
+        </select>
+      </div>
+      <div class="scroll-x">
+        <table id="orderTable">
+          <thead><tr><th>Order</th><th>Items</th><th>Total</th><th>Payment</th><th>Status</th><th>Update</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</main>
+
+<div id="toast"></div>
+
+<script>
+const NEXT_STATUSES = ['confirmed','preparing','ready','delivered','cancelled'];
+let KEY = localStorage.getItem('wab_api_key') || '';
+let BIZ = null;
+
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2600);
+}
+
+async function api(path, opts = {}) {
+  const res = await fetch('/api' + path, {
+    ...opts,
+    headers: {
+      'Authorization': 'Bearer ' + KEY,
+      'Content-Type': 'application/json',
+      ...(opts.headers || {})
+    }
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok || body.success === false) throw new Error(body.error || ('HTTP ' + res.status));
+  return body;
+}
+
+async function connect() {
+  const input = document.getElementById('apiKey');
+  if (input.value.trim()) KEY = input.value.trim();
+  if (!KEY) return toast('Enter your API key first');
+  try {
+    const me = await api('/me');
+    if (me.scope !== 'tenant' || !me.business) {
+      return toast('Use a tenant key (sk_live_…), not an admin key');
+    }
+    BIZ = me.business;
+    localStorage.setItem('wab_api_key', KEY);
+    document.getElementById('bizName').textContent = BIZ.name + ' · ' + BIZ.status;
+    document.getElementById('keyCard').style.display = 'none';
+    document.getElementById('app').style.display = '';
+    await Promise.all([loadProducts(), loadOrders()]);
+  } catch (err) {
+    toast('Could not connect: ' + err.message);
+  }
+}
+
+function disconnect() {
+  localStorage.removeItem('wab_api_key');
+  KEY = ''; BIZ = null;
+  document.getElementById('keyCard').style.display = '';
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('bizName').textContent = '';
+}
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+    ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+
+/* ---------------- Products ---------------- */
+
+async function loadProducts() {
+  const { products } = await api('/products?business_id=' + BIZ.id);
+  const tbody = document.querySelector('#productTable tbody');
+  tbody.innerHTML = products.map(p => `
+    <tr data-id="${p.id}">
+      <td><strong>${esc(p.name)}</strong></td>
+      <td class="muted">${esc(p.description || '')}</td>
+      <td>${Number(p.price_ghs).toFixed(2)}</td>
+      <td class="muted">${esc(p.category)}</td>
+      <td><span class="pill ${p.in_stock ? 'pill-ok' : 'pill-off'}">${p.in_stock ? 'In stock' : 'Out'}</span></td>
+      <td style="white-space:nowrap">
+        <button class="btn btn-ghost btn-xs" onclick="toggleStock('${p.id}', ${!p.in_stock})">${p.in_stock ? 'Mark out' : 'Restock'}</button>
+        <button class="btn btn-ghost btn-xs" onclick="editPrice('${p.id}', ${Number(p.price_ghs)})">Price</button>
+        <button class="btn btn-ghost btn-xs" onclick="removeProduct('${p.id}', '${esc(p.name)}')">Delete</button>
+      </td>
+    </tr>`).join('') || '<tr><td colspan="6" class="muted">No products yet — add your first below.</td></tr>';
+}
+
+async function addProduct() {
+  const name = document.getElementById('pName').value.trim();
+  const price = parseFloat(document.getElementById('pPrice').value);
+  if (!name || !(price >= 0)) return toast('Name and a valid price are required');
+  try {
+    await api('/products', {
+      method: 'POST',
+      body: JSON.stringify({
+        business_id: BIZ.id,
+        name,
+        description: document.getElementById('pDesc').value.trim() || null,
+        price_ghs: price,
+        category: document.getElementById('pCat').value.trim() || 'general'
+      })
+    });
+    ['pName','pDesc','pPrice','pCat'].forEach(id => document.getElementById(id).value = '');
+    toast('Product added');
+    await loadProducts();
+  } catch (err) { toast(err.message); }
+}
+
+async function toggleStock(id, inStock) {
+  try {
+    await api('/products/' + id, { method: 'PATCH', body: JSON.stringify({ in_stock: inStock }) });
+    await loadProducts();
+  } catch (err) { toast(err.message); }
+}
+
+async function editPrice(id, current) {
+  const v = prompt('New price (GH₵):', current.toFixed(2));
+  if (v == null) return;
+  const price = parseFloat(v);
+  if (!(price >= 0)) return toast('Invalid price');
+  try {
+    await api('/products/' + id, { method: 'PATCH', body: JSON.stringify({ price_ghs: price }) });
+    toast('Price updated');
+    await loadProducts();
+  } catch (err) { toast(err.message); }
+}
+
+async function removeProduct(id, name) {
+  if (!confirm('Delete "' + name + '"? Past orders keep their records.')) return;
+  try {
+    await api('/products/' + id, { method: 'DELETE' });
+    toast('Deleted');
+    await loadProducts();
+  } catch (err) { toast(err.message); }
+}
+
+/* ---------------- Orders ---------------- */
+
+async function loadOrders() {
+  const status = document.getElementById('orderStatusFilter').value;
+  const qs = '/orders?business_id=' + BIZ.id + (status ? '&status=' + status : '') + '&limit=50';
+  const { orders } = await api(qs);
+  const tbody = document.querySelector('#orderTable tbody');
+  tbody.innerHTML = orders.map(o => {
+    const items = (o.items || []).map(i => (i.quantity || 1) + '× ' + i.name).join(', ');
+    const payPill = o.payment_status === 'paid' ? 'pill-ok' : (o.payment_status === 'pending' ? 'pill-warn' : 'pill-off');
+    const options = NEXT_STATUSES.filter(s => s !== o.status)
+      .map(s => `<option value="${s}">${s}</option>`).join('');
+    return `
+    <tr>
+      <td><strong>${esc(o.order_number)}</strong><br><span class="muted" style="font-size:12px">${new Date(o.created_at).toLocaleString()}</span></td>
+      <td class="muted">${esc(items)}<br><span style="font-size:12px">${esc(o.delivery_address || '')}</span></td>
+      <td>GH₵${Number(o.total_ghs).toFixed(2)}</td>
+      <td><span class="pill ${payPill}">${esc(o.payment_status)}</span></td>
+      <td><span class="pill pill-off">${esc(o.status)}</span></td>
+      <td style="white-space:nowrap">
+        <select onchange="setOrderStatus('${o.id}', this.value); this.value='';" style="max-width:140px">
+          <option value="">Move to…</option>${options}
+        </select>
+      </td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="6" class="muted">No orders yet.</td></tr>';
+}
+
+async function setOrderStatus(id, status) {
+  if (!status) return;
+  try {
+    await api('/orders/' + id + '/status', { method: 'PATCH', body: JSON.stringify({ status }) });
+    toast('Order updated — customer notified on WhatsApp');
+    await loadOrders();
+  } catch (err) { toast(err.message); }
+}
+
+if (KEY) connect();
+</script>
+</body>
+</html>

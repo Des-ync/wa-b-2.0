@@ -74,7 +74,7 @@ router.get('/paystack/callback', async (req, res) => {
     verification = await paystack.verifyTransaction(reference);
   } catch (err) {
     logger.error('Paystack callback: verifyTransaction threw for ref=%s: %s', reference, err.message);
-    return res.status(200).send('Payment is still processing. We will update you on WhatsApp.');
+    return res.redirect(303, '/wa-b/payment-pending.html');
   }
 
   if (verification.success && verification.status === 'success') {
@@ -96,9 +96,9 @@ router.get('/paystack/callback', async (req, res) => {
     } catch (err) {
       logger.error('Paystack callback enqueue failed: %s', err.message);
     }
-    return res.status(200).send('Payment received. You can return to WhatsApp now.');
+    return res.redirect(303, '/wa-b/payment-success.html');
   }
-  return res.status(200).send('Payment is still processing. We will update you on WhatsApp.');
+  return res.redirect(303, '/wa-b/payment-pending.html');
 });
 
 /**

@@ -17,6 +17,7 @@ const logger = require('./utils/logger');
 const { pool } = require('./config/database');
 const notification = require('./services/notification.service');
 const webhookProcessor = require('./services/webhook.processor');
+const paymentSweeper = require('./services/payment.sweeper');
 
 logger.info('🛠  Starting WhatsApp SaaS worker (env=%s)', process.env.NODE_ENV || 'development');
 
@@ -41,6 +42,18 @@ cron.schedule('0 9 * * *', () => {
 cron.schedule('0 10 * * *', () => {
   notification.runSuspensionJob().catch(err =>
     logger.error('suspensionJob crashed: %s', err.message, { stack: err.stack })
+  );
+}, { timezone: 'Africa/Accra' });
+
+cron.schedule('*/5 * * * *', () => {
+  paymentSweeper.runPaymentSweeper().catch(err =>
+    logger.error('paymentSweeper crashed: %s', err.message, { stack: err.stack })
+  );
+}, { timezone: 'Africa/Accra' });
+
+cron.schedule('30 2 * * 0', () => {
+  notification.runPruneJob().catch(err =>
+    logger.error('pruneJob crashed: %s', err.message, { stack: err.stack })
   );
 }, { timezone: 'Africa/Accra' });
 

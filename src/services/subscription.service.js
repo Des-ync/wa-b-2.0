@@ -561,6 +561,46 @@ async function clearStaleConversationStates() {
   return res.rowCount || 0;
 }
 
+/**
+ * Trial businesses whose trial ends within the next 3 days and who haven't
+ * been reminded yet.
+ */
+async function getTrialsEndingSoon() {
+  const res = await query(
+    `SELECT id, name, whatsapp_number, trial_ends_at
+       FROM businesses
+      WHERE status = 'trial'
+        AND trial_ends_at IS NOT NULL
+        AND trial_ends_at > NOW()
+        AND trial_ends_at <= NOW() + INTERVAL '3 days'
+        AND trial_reminder_sent_at IS NULL`
+  );
+  return res.rows;
+}
+
+async function markTrialReminderSent(businessId) {
+  await query(`UPDATE businesses SET trial_reminder_sent_at = NOW() WHERE id = $1`, [businessId]);
+}
+
+/**
+ * Trial businesses whose trial has already ended and who were never told.
+ */
+async function getExpiredTrialsToNotify() {
+  const res = await query(
+    `SELECT id, name, whatsapp_number, trial_ends_at
+       FROM businesses
+      WHERE status = 'trial'
+        AND trial_ends_at IS NOT NULL
+        AND trial_ends_at <= NOW()
+        AND trial_expired_notified_at IS NULL`
+  );
+  return res.rows;
+}
+
+async function markTrialExpiredNotified(businessId) {
+  await query(`UPDATE businesses SET trial_expired_notified_at = NOW() WHERE id = $1`, [businessId]);
+}
+
 module.exports = {
   getBusinessByWhatsApp,
   getBusinessById,
@@ -581,5 +621,9 @@ module.exports = {
   getUpcomingRenewalsForReminder,
   getOverdueForSuspension,
   clearStaleConversationStates,
+  getTrialsEndingSoon,
+  markTrialReminderSent,
+  getExpiredTrialsToNotify,
+  markTrialExpiredNotified,
   SUSPENSION_GRACE_DAYS
 };
