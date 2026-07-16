@@ -43,7 +43,11 @@ const SAMPLE_BUSINESS = {
   name: 'Demo Vendor GH',
   owner_name: 'Ama Owusu',
   whatsapp_number: '+233241234567',
-  industry: 'food'
+  industry: 'food',
+  // The live Meta phone_number_id this tenant receives WhatsApp messages on.
+  // Set WA_PHONE_NUMBER_ID in the environment running the seed to attach the
+  // demo business to your real registered number; omit it for a DB-only demo.
+  wa_phone_number_id: process.env.WA_PHONE_NUMBER_ID || null
 };
 
 const SAMPLE_PRODUCTS = [
@@ -94,11 +98,18 @@ async function upsertSampleBusinessAndProducts() {
     if (existing.rows.length) {
       businessId = existing.rows[0].id;
       logger.info('Sample business already exists (%s).', businessId);
+      if (SAMPLE_BUSINESS.wa_phone_number_id) {
+        await client.query(
+          `UPDATE businesses SET wa_phone_number_id = $1 WHERE id = $2`,
+          [SAMPLE_BUSINESS.wa_phone_number_id, businessId]
+        );
+        logger.info('Attached wa_phone_number_id=%s to existing sample business.', SAMPLE_BUSINESS.wa_phone_number_id);
+      }
     } else {
       const inserted = await client.query(
-        `INSERT INTO businesses (name, owner_name, whatsapp_number, industry, status)
-         VALUES ($1,$2,$3,$4,'trial') RETURNING id`,
-        [SAMPLE_BUSINESS.name, SAMPLE_BUSINESS.owner_name, wa, SAMPLE_BUSINESS.industry]
+        `INSERT INTO businesses (name, owner_name, whatsapp_number, industry, status, wa_phone_number_id)
+         VALUES ($1,$2,$3,$4,'trial',$5) RETURNING id`,
+        [SAMPLE_BUSINESS.name, SAMPLE_BUSINESS.owner_name, wa, SAMPLE_BUSINESS.industry, SAMPLE_BUSINESS.wa_phone_number_id]
       );
       businessId = inserted.rows[0].id;
       logger.info('Created sample business: %s (%s)', SAMPLE_BUSINESS.name, businessId);
