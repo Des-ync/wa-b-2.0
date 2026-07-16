@@ -163,16 +163,20 @@ async function sendList(to, header, body, sections = [], meta = {}) {
 }
 
 /**
- * Mark an inbound message as read.
+ * Mark an inbound message as read. Pass `meta.typing: true` to also raise the
+ * "typing…" indicator on the customer's screen — Meta clears it automatically
+ * once we send the next message (or after ~25s, whichever comes first).
  */
 async function markAsRead(messageId, meta = {}) {
   if (!messageId) return;
   const { phoneNumberId, accessToken } = await resolveCredentials(meta.businessId);
   if (!phoneNumberId || !accessToken) return;
   try {
+    const payload = { messaging_product: 'whatsapp', status: 'read', message_id: messageId };
+    if (meta.typing) payload.typing_indicator = { type: 'text' };
     await http.post(
       `/${phoneNumberId}/messages`,
-      { messaging_product: 'whatsapp', status: 'read', message_id: messageId },
+      payload,
       { headers: { Authorization: `Bearer ${accessToken}` } }
     );
   } catch (err) {

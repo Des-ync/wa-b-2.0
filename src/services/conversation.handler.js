@@ -11,8 +11,11 @@ const {
   formatGhs,
   generateReference,
   truncate,
-  formatDate
+  formatDate,
+  sleep
 } = require('../utils/helpers');
+
+const TYPING_DELAY_MS = 1500;
 
 const SUPPORT_NUMBER = process.env.SUPPORT_WHATSAPP_NUMBER || '+233241234567';
 const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || '';
@@ -224,7 +227,10 @@ async function handleSaasBilling({ business, inbound }) {
     logger.info('Duplicate inbound %s for business %s — skipping', inbound.messageId, business.id);
     return;
   }
-  if (inbound.messageId) wa.markAsRead(inbound.messageId, { businessId: business.id });
+  if (inbound.messageId) {
+    await wa.markAsRead(inbound.messageId, { businessId: business.id, typing: true });
+    await sleep(TYPING_DELAY_MS);
+  }
 
   if (upper === 'STATUS') return saasStatus(business);
   if (upper === 'PAY' || upper === 'RENEW' || upper === 'RETRY') return saasPay(business);
@@ -430,7 +436,10 @@ async function handleCommerce({ business, inbound }) {
     logger.info('Duplicate inbound %s for customer %s — skipping', inbound.messageId, customer.id);
     return;
   }
-  if (inbound.messageId) wa.markAsRead(inbound.messageId, { businessId: business.id });
+  if (inbound.messageId) {
+    await wa.markAsRead(inbound.messageId, { businessId: business.id, customerId: customer.id, typing: true });
+    await sleep(TYPING_DELAY_MS);
+  }
 
   // Enforce subscription/trial access before serving any commerce flow.
   if (!await hasCommerceAccess(business)) {
