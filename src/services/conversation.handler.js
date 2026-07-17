@@ -1,6 +1,7 @@
 const { query, transaction } = require('../config/database');
 const logger = require('../utils/logger');
 const wa = require('./whatsapp.service');
+const { getAdapter, destOf } = require('./channel.adapter');
 const paystack = require('./paystack.service');
 const orderService = require('./order.service');
 const subService = require('./subscription.service');
@@ -42,11 +43,28 @@ function nextTypingDelay(key) {
 const SUPPORT_NUMBER = process.env.SUPPORT_WHATSAPP_NUMBER || '+233241234567';
 const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || '';
 
+/** Outbound adapter for a customer's channel (WhatsApp unless 'instagram'). */
+function chOf(customer) {
+  return getAdapter(customer?.channel);
+}
+
 /* =================================================================
    Inbound message normalizer
    ================================================================= */
 
-function extractInbound(payload) {
+/**
+ * Normalize an inbound webhook payload into one channel-tagged shape:
+ *   { channel, from, profileName, messageId, type, text,
+ *     interactiveId, interactiveTitle, location, raw, ... }
+ * WhatsApp payloads additionally carry businessPhoneId; Instagram payloads
+ * carry igBusinessAccountId. Both feed the SAME conversation state machine.
+ */
+function extractInbound(payload, channel = 'whatsapp') {
+  if (channel === 'instagram') return extractInstagramInbound(payload);
+  return extractWhatsAppInbound(payload);
+}
+
+function extractWhatsAppInbound(payload) {
   try {
     const value = payload?.entry?.[0]?.changes?.[0]?.value;
     if (!value) return null;
@@ -92,6 +110,7 @@ function extractInbound(payload) {
     }
 
     return {
+      channel: 'whatsapp',
       from: normalizeGhanaPhone(from) || from,
       profileName,
       messageId,
@@ -105,6 +124,43 @@ function extractInbound(payload) {
     };
   } catch (err) {
     logger.error('extractInbound failed: %s', err.message);
+    return null;
+  }
+}
+
+/**
+ * TODO(IG-API): verify against Meta's Instagram Messaging API docs — the
+ * envelope walked below (entry[].messaging[] with sender/recipient/message,
+ * message.mid, message.text, quick_reply.payload, is_echo) is a stub and must
+ * be confirmed before go-live. Only the field paths need adjusting; the
+ * returned normalized shape is final and matches extractWhatsAppInbound.
+ */
+function extractInstagramInbound(payload) {
+  try {
+    const entry = payload?.entry?.[0];
+    const messaging = entry?.messaging?.[0];
+    if (!messaging) return null;
+    const message = messaging.message;
+    if (!message || message.is_echo) return null;
+
+    const quickReplyId = message.quick_reply?.payload || null;
+    const text = String(message.text || '').trim();
+
+    return {
+      channel: 'instagram',
+      from: String(messaging.sender?.id || ''),
+      profileName: null,
+      messageId: message.mid || null,
+      type: quickReplyId ? 'interactive' : 'text',
+      text,
+      interactiveId: quickReplyId,
+      interactiveTitle: quickReplyId ? (text || null) : null,
+      location: null,
+      raw: messaging,
+      igBusinessAccountId: String(messaging.recipient?.id || entry?.id || '')
+    };
+  } catch (err) {
+    logger.error('extractInstagramInbound failed: %s', err.message);
     return null;
   }
 }
@@ -239,11 +295,26 @@ async function logInbound({ businessId, customerId, type, content, waMessageId }
    Routing — top-level dispatcher
    ================================================================= */
 
-async function handleInbound(payload) {
-  const inbound = extractInbound(payload);
+async function handleInbound(payload, channel = 'whatsapp') {
+  const inbound = extractInbound(payload, channel);
   if (!inbound) {
     logger.debug('Inbound payload had no message — likely a status update.');
     return;
+  }
+
+  // Instagram is END-CUSTOMER commerce only: route by the IG business account
+  // that received the DM and go straight to the commerce flow. The merchant
+  // SaaS billing flow stays WhatsApp-only, keyed on business.whatsapp_number.
+  if (inbound.channel === 'instagram') {
+    const tenant = await getBusinessByIgAccountId(inbound.igBusinessAccountId);
+    if (!tenant) {
+      logger.warn(
+        'IG inbound from %s on ig_business_account_id=%s — no matching tenant; dropping.',
+        inbound.from, inbound.igBusinessAccountId
+      );
+      return;
+    }
+    return handleCommerce({ business: tenant, inbound });
   }
 
   const fromWa = inbound.from;
@@ -282,6 +353,15 @@ async function getBusinessByPhoneNumberId(phoneNumberId) {
   const res = await query(
     `SELECT * FROM businesses WHERE wa_phone_number_id = $1 LIMIT 1`,
     [phoneNumberId]
+  );
+  return res.rows[0] || null;
+}
+
+async function getBusinessByIgAccountId(igAccountId) {
+  if (!igAccountId) return null;
+  const res = await query(
+    `SELECT * FROM businesses WHERE ig_business_account_id = $1 LIMIT 1`,
+    [igAccountId]
   );
   return res.rows[0] || null;
 }
@@ -588,15 +668,20 @@ async function hasCommerceAccess(business) {
 }
 
 async function handleCommerce({ business, inbound }) {
-  const fromWa = inbound.from;
-  const network = detectNetwork(fromWa);
+  const channel = inbound.channel || 'whatsapp';
+  const isWhatsApp = channel === 'whatsapp';
+  const network = isWhatsApp ? detectNetwork(inbound.from) : null;
 
   const customer = await orderService.getOrCreateCustomer({
     businessId: business.id,
-    whatsappNumber: fromWa,
+    whatsappNumber: isWhatsApp ? inbound.from : undefined,
     displayName: inbound.profileName,
-    phoneNetwork: network
+    phoneNetwork: network,
+    channel,
+    channelId: inbound.from
   });
+  const ch = chOf(customer);
+  const dest = destOf(customer);
 
   const isNew = await logInbound({
     businessId: business.id,
@@ -610,13 +695,13 @@ async function handleCommerce({ business, inbound }) {
     return;
   }
   if (inbound.messageId) {
-    await wa.markAsRead(inbound.messageId, { businessId: business.id, customerId: customer.id, typing: true });
+    await ch.markAsRead(inbound.messageId, { businessId: business.id, customerId: customer.id, typing: true });
     await sleep(nextTypingDelay(`cust:${customer.id}`));
   }
 
   // Enforce subscription/trial access before serving any commerce flow.
   if (!await hasCommerceAccess(business)) {
-    await wa.sendText(fromWa,
+    await ch.sendText(dest,
       `Sorry, ${business.name} is not accepting orders right now. Please check back later.`,
       { businessId: business.id, customerId: customer.id });
     return;
@@ -632,7 +717,7 @@ async function handleCommerce({ business, inbound }) {
   }
   if (upper === 'CANCEL' || upper === 'STOP') {
     await resetState(customer.id);
-    await wa.sendText(fromWa, 'Cart cleared. Reply *MENU* to start over.', {
+    await ch.sendText(dest, 'Cart cleared. Reply *MENU* to start over.', {
       businessId: business.id, customerId: customer.id
     });
     return;
@@ -675,7 +760,7 @@ async function sendSupportContact({ business, customer }) {
   const line = msisdn
     ? `You can reach *${business.name}* directly on WhatsApp: https://wa.me/${msisdn}`
     : `You can reach *${business.name}* directly on their WhatsApp line.`;
-  await wa.sendText(customer.whatsapp_number,
+  await chOf(customer).sendText(destOf(customer),
     `💬 ${line}\n\nOr reply *MENU* anytime to keep shopping.`,
     { businessId: business.id, customerId: customer.id, previewUrl: false });
 }
@@ -687,18 +772,18 @@ async function sendSupportContact({ business, customer }) {
 async function retryOrderPayment({ business, customer, orderId }) {
   const order = await orderService.getOrderById(orderId);
   if (!order || order.business_id !== business.id || order.customer_id !== customer.id) {
-    await wa.sendText(customer.whatsapp_number, 'That order is no longer available. Reply *MENU* to start over.',
+    await chOf(customer).sendText(destOf(customer), 'That order is no longer available. Reply *MENU* to start over.',
       { businessId: business.id, customerId: customer.id });
     return;
   }
   if (order.payment_status === 'paid') {
-    await wa.sendText(customer.whatsapp_number,
+    await chOf(customer).sendText(destOf(customer),
       `Order *${order.order_number}* is already paid. ✅`,
       { businessId: business.id, customerId: customer.id });
     return;
   }
   if (order.status === 'cancelled') {
-    await wa.sendText(customer.whatsapp_number,
+    await chOf(customer).sendText(destOf(customer),
       `Order *${order.order_number}* was cancelled. Reply *MENU* to place a new one.`,
       { businessId: business.id, customerId: customer.id });
     return;
@@ -709,7 +794,7 @@ async function retryOrderPayment({ business, customer, orderId }) {
     step: 'choose_method',
     data: { order_id: order.id, order_number: order.order_number, total: order.total_ghs }
   });
-  await wa.sendButtons(customer.whatsapp_number,
+  await chOf(customer).sendButtons(destOf(customer),
     `Let's finish paying for order *${order.order_number}* — total *${formatGhs(order.total_ghs)}*.\n\nHow would you like to pay?`,
     [
       { id: 'pay_momo', title: 'MoMo' },
@@ -723,19 +808,19 @@ async function retryOrderPayment({ business, customer, orderId }) {
 async function cancelUnpaidOrder({ business, customer, orderId }) {
   const order = await orderService.getOrderById(orderId);
   if (!order || order.business_id !== business.id || order.customer_id !== customer.id) {
-    await wa.sendText(customer.whatsapp_number, 'That order is no longer available.',
+    await chOf(customer).sendText(destOf(customer), 'That order is no longer available.',
       { businessId: business.id, customerId: customer.id });
     return;
   }
   if (order.payment_status === 'paid') {
-    await wa.sendText(customer.whatsapp_number,
+    await chOf(customer).sendText(destOf(customer),
       `Order *${order.order_number}* is already paid, so it can't be cancelled here. Contact ${business.name} if you need help.`,
       { businessId: business.id, customerId: customer.id });
     return;
   }
   await orderService.updateOrderStatus(order.id, 'cancelled');
   await resetState(customer.id);
-  await wa.sendText(customer.whatsapp_number,
+  await chOf(customer).sendText(destOf(customer),
     `Order *${order.order_number}* cancelled. Reply *MENU* anytime to order again.`,
     { businessId: business.id, customerId: customer.id });
 }
@@ -745,7 +830,7 @@ async function sendWelcome({ business, customer }) {
 `👋 Welcome to *${business.name}*!
 
 Tap *Order Now* to browse our menu and place an order. Pay easily with MoMo or card.`;
-  await wa.sendButtons(customer.whatsapp_number, body, [
+  await chOf(customer).sendButtons(destOf(customer), body, [
     { id: 'start_order', title: 'Order Now' },
     { id: 'support_request', title: 'Talk to us' }
   ], { businessId: business.id, customerId: customer.id });
@@ -769,7 +854,7 @@ async function startOrderingFlow({ business, customer, page = 0 }) {
     [business.id]
   );
   if (!products.rows.length) {
-    await wa.sendText(customer.whatsapp_number,
+    await chOf(customer).sendText(destOf(customer),
       `Sorry, ${business.name} has no products available right now. Please check back soon!`,
       { businessId: business.id, customerId: customer.id });
     return;
@@ -794,8 +879,8 @@ async function startOrderingFlow({ business, customer, page = 0 }) {
   const cartNote = cart.length
     ? `\n\n🛒 ${cart.reduce((n, i) => n + (i.quantity || 1), 0)} item(s) already in your cart.`
     : '';
-  await wa.sendList(
-    customer.whatsapp_number,
+  await chOf(customer).sendList(
+    destOf(customer),
     `${business.name} Menu`,
     `Tap an item to add it to your cart.${cartNote}`,
     sections,
@@ -832,7 +917,7 @@ async function continueOrderingFlow({ business, customer, state, inbound }) {
     }
     if (inbound.interactiveId === 'cancel_order' || upper === 'CANCEL') {
       await resetState(customer.id);
-      await wa.sendText(customer.whatsapp_number, 'Order cancelled. Reply *MENU* to start over.',
+      await chOf(customer).sendText(destOf(customer), 'Order cancelled. Reply *MENU* to start over.',
         { businessId: business.id, customerId: customer.id });
       return;
     }
@@ -848,7 +933,7 @@ async function continueOrderingFlow({ business, customer, state, inbound }) {
     }
     if (inbound.interactiveId === 'cancel_order' || upper === 'CANCEL') {
       await resetState(customer.id);
-      await wa.sendText(customer.whatsapp_number, 'Order cancelled. Reply *MENU* to start over.',
+      await chOf(customer).sendText(destOf(customer), 'Order cancelled. Reply *MENU* to start over.',
         { businessId: business.id, customerId: customer.id });
       return;
     }
@@ -864,7 +949,7 @@ async function continueOrderingFlow({ business, customer, state, inbound }) {
     }
     if (inbound.interactiveId === 'cancel_order' || upper === 'CANCEL') {
       await resetState(customer.id);
-      await wa.sendText(customer.whatsapp_number, 'Order cancelled. Reply *MENU* to start over.',
+      await chOf(customer).sendText(destOf(customer), 'Order cancelled. Reply *MENU* to start over.',
         { businessId: business.id, customerId: customer.id });
       return;
     }
@@ -878,12 +963,12 @@ async function addProductToCart({ business, customer, productId, cart }) {
   const res = await query(`SELECT * FROM products WHERE id = $1 AND business_id = $2`, [productId, business.id]);
   const product = res.rows[0];
   if (!product) {
-    await wa.sendText(customer.whatsapp_number, 'That item is no longer available.',
+    await chOf(customer).sendText(destOf(customer), 'That item is no longer available.',
       { businessId: business.id, customerId: customer.id });
     return;
   }
   if (!product.in_stock) {
-    await wa.sendText(customer.whatsapp_number, `Sorry, "${product.name}" is out of stock.`,
+    await chOf(customer).sendText(destOf(customer), `Sorry, "${product.name}" is out of stock.`,
       { businessId: business.id, customerId: customer.id });
     return;
   }
@@ -908,7 +993,7 @@ async function promptAddMoreOrCheckout({ business, customer, justAdded }) {
   const body = justAdded
     ? `Added *${justAdded}* to your cart. ✅\n\nWould you like to add more items or checkout?`
     : `Would you like to add more items or checkout?`;
-  await wa.sendButtons(customer.whatsapp_number, body,
+  await chOf(customer).sendButtons(destOf(customer), body,
     [
       { id: 'add_more', title: 'Add more' },
       { id: 'checkout', title: 'Checkout' },
@@ -922,7 +1007,7 @@ async function promptAddMoreOrCheckout({ business, customer, justAdded }) {
 
 async function showCartReview({ business, customer, cart }) {
   if (!cart || cart.length === 0) {
-    await wa.sendText(customer.whatsapp_number, 'Your cart is empty. Reply *MENU* to start shopping.',
+    await chOf(customer).sendText(destOf(customer), 'Your cart is empty. Reply *MENU* to start shopping.',
       { businessId: business.id, customerId: customer.id });
     await resetState(customer.id);
     return;
@@ -939,7 +1024,7 @@ Subtotal: *${formatGhs(totals.subtotal_ghs)}*
 Continue shopping or checkout?`;
 
   await saveState(customer.id, { flow: 'ordering', step: 'cart_review', data: { cart } });
-  await wa.sendButtons(customer.whatsapp_number, body, [
+  await chOf(customer).sendButtons(destOf(customer), body, [
     { id: 'continue_shop', title: 'Continue' },
     { id: 'checkout', title: 'Checkout' },
     { id: 'cancel_order', title: 'Cancel' }
@@ -952,7 +1037,7 @@ async function askForAddress({ business, customer }) {
   const state = await loadOrCreateState(customer.id);
   const cart = state.flow_data?.cart || [];
   await saveState(customer.id, { flow: 'ordering', step: 'get_address', data: { cart } });
-  await wa.sendText(customer.whatsapp_number,
+  await chOf(customer).sendText(destOf(customer),
     `📍 Please send your delivery address as a text message (landmark, area, any special instructions) — or share your location pin.`,
     { businessId: business.id, customerId: customer.id });
 }
@@ -966,7 +1051,7 @@ async function captureAddress({ business, customer, cart, address, location }) {
     trimmed = label ? `${label} (pin: ${maps})` : `Pinned location: ${maps}`;
   }
   if (trimmed.length < 5) {
-    await wa.sendText(customer.whatsapp_number,
+    await chOf(customer).sendText(destOf(customer),
       'That address looks too short. Please send a more detailed delivery address, or share your location pin 📍.',
       { businessId: business.id, customerId: customer.id });
     return;
@@ -992,7 +1077,7 @@ Confirm and pay now?`;
     data: { cart, delivery_address: trimmed }
   });
 
-  await wa.sendButtons(customer.whatsapp_number, body, [
+  await chOf(customer).sendButtons(destOf(customer), body, [
     { id: 'confirm_pay', title: 'Confirm & Pay' },
     { id: 'cancel_order', title: 'Cancel' }
   ], { businessId: business.id, customerId: customer.id });
@@ -1004,7 +1089,7 @@ async function finalizeOrderAndStartPayment({ business, customer, state }) {
   const cart = state.flow_data?.cart || [];
   const address = state.flow_data?.delivery_address || null;
   if (!cart.length || !address) {
-    await wa.sendText(customer.whatsapp_number, 'Something went wrong with your order. Reply *MENU* to start over.',
+    await chOf(customer).sendText(destOf(customer), 'Something went wrong with your order. Reply *MENU* to start over.',
       { businessId: business.id, customerId: customer.id });
     await resetState(customer.id);
     return;
@@ -1021,7 +1106,7 @@ async function finalizeOrderAndStartPayment({ business, customer, state }) {
     });
   } catch (err) {
     logger.error('createOrder failed: %s', err.message, { stack: err.stack });
-    await wa.sendText(customer.whatsapp_number,
+    await chOf(customer).sendText(destOf(customer),
       'We could not create your order right now. Please try again in a moment.',
       { businessId: business.id, customerId: customer.id });
     await resetState(customer.id);
@@ -1034,7 +1119,7 @@ async function finalizeOrderAndStartPayment({ business, customer, state }) {
     data: { order_id: order.id, order_number: order.order_number, total: order.total_ghs }
   });
 
-  await wa.sendButtons(customer.whatsapp_number,
+  await chOf(customer).sendButtons(destOf(customer),
     `Order *${order.order_number}* created — total *${formatGhs(order.total_ghs)}*.\n\nHow would you like to pay?`,
     [
       { id: 'pay_momo', title: 'MoMo' },
@@ -1054,7 +1139,7 @@ async function continuePaymentFlow({ business, customer, state, inbound }) {
 
   if (!orderId) {
     await resetState(customer.id);
-    await wa.sendText(customer.whatsapp_number, 'Your session expired. Reply *MENU* to start over.',
+    await chOf(customer).sendText(destOf(customer), 'Your session expired. Reply *MENU* to start over.',
       { businessId: business.id, customerId: customer.id });
     return;
   }
@@ -1062,8 +1147,12 @@ async function continuePaymentFlow({ business, customer, state, inbound }) {
   if (state.current_step === 'choose_method') {
     if (inbound.interactiveId === 'pay_momo' || upper === 'MOMO' || upper === 'MOBILE MONEY') {
       await saveState(customer.id, { flow: 'paying', step: 'momo_get_phone', data });
-      await wa.sendText(customer.whatsapp_number,
-        `📱 Reply with the MoMo number to charge (or send *USE THIS* to use ${customer.whatsapp_number}).`,
+      // "USE THIS" only makes sense on WhatsApp, where the chat identity IS a
+      // phone number. Instagram customers must type their MoMo number.
+      const prompt = customer.channel === 'instagram'
+        ? '📱 Reply with the MoMo number to charge (e.g. 0241234567).'
+        : `📱 Reply with the MoMo number to charge (or send *USE THIS* to use ${customer.whatsapp_number}).`;
+      await chOf(customer).sendText(destOf(customer), prompt,
         { businessId: business.id, customerId: customer.id });
       return;
     }
@@ -1073,7 +1162,7 @@ async function continuePaymentFlow({ business, customer, state, inbound }) {
     if (inbound.interactiveId === 'cancel_order' || upper === 'CANCEL') {
       await orderService.updateOrderStatus(orderId, 'cancelled');
       await resetState(customer.id);
-      await wa.sendText(customer.whatsapp_number, 'Order cancelled.',
+      await chOf(customer).sendText(destOf(customer), 'Order cancelled.',
         { businessId: business.id, customerId: customer.id });
       return;
     }
@@ -1081,12 +1170,12 @@ async function continuePaymentFlow({ business, customer, state, inbound }) {
 
   if (state.current_step === 'momo_get_phone') {
     let momoNumber;
-    if (upper === 'USE THIS') {
+    if (upper === 'USE THIS' && customer.channel !== 'instagram') {
       momoNumber = customer.whatsapp_number;
     } else {
       momoNumber = normalizeGhanaPhone(inbound.text);
       if (!momoNumber) {
-        await wa.sendText(customer.whatsapp_number,
+        await chOf(customer).sendText(destOf(customer),
           'That doesn\'t look like a valid Ghana MoMo number. Try again (e.g. 0241234567).',
           { businessId: business.id, customerId: customer.id });
         return;
@@ -1095,7 +1184,7 @@ async function continuePaymentFlow({ business, customer, state, inbound }) {
     return startMomoPayment({ business, customer, orderId, momoNumber });
   }
 
-  await wa.sendText(customer.whatsapp_number, 'Reply *MENU* to start over.',
+  await chOf(customer).sendText(destOf(customer), 'Reply *MENU* to start over.',
     { businessId: business.id, customerId: customer.id });
 }
 
@@ -1103,7 +1192,7 @@ async function startMomoPayment({ business, customer, orderId, momoNumber }) {
   const order = await orderService.getOrderById(orderId);
   if (!order) {
     await resetState(customer.id);
-    await wa.sendText(customer.whatsapp_number, 'Order not found. Reply *MENU* to start over.',
+    await chOf(customer).sendText(destOf(customer), 'Order not found. Reply *MENU* to start over.',
       { businessId: business.id, customerId: customer.id });
     return;
   }
@@ -1119,7 +1208,7 @@ async function startMomoPayment({ business, customer, orderId, momoNumber }) {
   });
 
   if (!result.success) {
-    await wa.sendText(customer.whatsapp_number,
+    await chOf(customer).sendText(destOf(customer),
       `⚠️ Could not start MoMo charge: ${result.error || 'unknown error'}.\n\nReply *MENU* to try again.`,
       { businessId: business.id, customerId: customer.id });
     await resetState(customer.id);
@@ -1135,7 +1224,7 @@ async function startMomoPayment({ business, customer, orderId, momoNumber }) {
   const display = result.display_text
     ? result.display_text
     : `Approve the MoMo prompt on ${momoNumber} to complete payment.`;
-  await wa.sendText(customer.whatsapp_number,
+  await chOf(customer).sendText(destOf(customer),
     `✅ MoMo charge initiated for *${formatGhs(order.total_ghs)}*.\n\n${display}\n\nWe'll confirm here once payment is received.`,
     { businessId: business.id, customerId: customer.id });
 }
@@ -1144,7 +1233,7 @@ async function startCardPayment({ business, customer, orderId }) {
   const order = await orderService.getOrderById(orderId);
   if (!order) {
     await resetState(customer.id);
-    await wa.sendText(customer.whatsapp_number, 'Order not found. Reply *MENU* to start over.',
+    await chOf(customer).sendText(destOf(customer), 'Order not found. Reply *MENU* to start over.',
       { businessId: business.id, customerId: customer.id });
     return;
   }
@@ -1164,7 +1253,7 @@ async function startCardPayment({ business, customer, orderId }) {
   });
 
   if (!result.success || !result.authorization_url) {
-    await wa.sendText(customer.whatsapp_number,
+    await chOf(customer).sendText(destOf(customer),
       `⚠️ Could not generate payment link: ${result.error || 'unknown error'}.\n\nReply *MENU* to try again.`,
       { businessId: business.id, customerId: customer.id });
     await resetState(customer.id);
@@ -1177,7 +1266,7 @@ async function startCardPayment({ business, customer, orderId }) {
     data: { order_id: order.id, reference }
   });
 
-  await wa.sendText(customer.whatsapp_number,
+  await chOf(customer).sendText(destOf(customer),
     `💳 Pay *${formatGhs(order.total_ghs)}* securely via this link:\n\n${result.authorization_url}\n\nWe'll confirm here once payment is received.`,
     { businessId: business.id, customerId: customer.id, previewUrl: true });
 }
@@ -1212,7 +1301,7 @@ async function handlePaymentSuccess({ reference, gatewayRef, amount }) {
     const customerRes = await query('SELECT * FROM customers WHERE id = $1', [result.order.customer_id]);
     const customer = customerRes.rows[0];
     if (customer) {
-      await wa.sendText(customer.whatsapp_number,
+      await chOf(customer).sendText(destOf(customer),
         `⚠️ The payment received for order *${result.order.order_number}* did not match the order total. Our team will be in touch.`,
         { businessId: result.order.business_id, customerId: customer.id });
     }
@@ -1242,7 +1331,7 @@ async function handlePaymentFailure({ reference }) {
   const customerRes = await query('SELECT * FROM customers WHERE id = $1', [order.customer_id]);
   const customer = customerRes.rows[0];
   if (customer) {
-    await wa.sendButtons(customer.whatsapp_number,
+    await chOf(customer).sendButtons(destOf(customer),
       `⚠️ Payment for order *${order.order_number}* did not go through.\n\nYour order is saved — you can try paying again.`,
       [
         { id: `retrypay_${order.id}`, title: 'Try again' },

@@ -1,5 +1,6 @@
 const logger = require('../utils/logger');
 const wa = require('./whatsapp.service');
+const { getAdapter, destOf } = require('./channel.adapter');
 const subService = require('./subscription.service');
 const lock = require('./worker.lock');
 const { query } = require('../config/database');
@@ -151,9 +152,11 @@ async function runSuspensionJob() {
  */
 async function notifyOrderPaid({ order, business, customer }) {
   const promises = [];
-  if (customer?.whatsapp_number) {
+  // Customer receipt goes out on the channel the customer ordered from;
+  // the merchant notification below stays WhatsApp-only.
+  if (customer && destOf(customer)) {
     promises.push(
-      wa.sendPaymentConfirmation(customer.whatsapp_number, {
+      getAdapter(customer.channel).sendPaymentConfirmation(destOf(customer), {
         orderNumber: order.order_number,
         total: order.total_ghs,
         businessName: business?.name
@@ -197,8 +200,8 @@ async function notifyOrderStatusChange({ order, business }) {
     const customerRes = await query('SELECT * FROM customers WHERE id = $1', [order.customer_id]);
     const customer = customerRes.rows[0];
     if (!customer) return;
-    await wa.sendText(
-      customer.whatsapp_number,
+    await getAdapter(customer.channel).sendText(
+      destOf(customer),
       template(order.order_number, business?.name || 'the shop'),
       { businessId: order.business_id, customerId: customer.id }
     );
