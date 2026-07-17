@@ -8,8 +8,8 @@
 <script
   async
   crossorigin="anonymous"
-  data-clerk-publishable-key="pk_test_cmVsYXRlZC1maWxseS05NC5jbGVyay5hY2NvdW50cy5kZXYk"
-  src="https://related-filly-94.clerk.accounts.dev/npm/@clerk/clerk-js@5/dist/clerk.browser.js"
+  data-clerk-publishable-key="pk_live_Y2xlcmsuc2tlcy50ZWNoJA"
+  src="https://clerk.skes.tech/npm/@clerk/clerk-js@5/dist/clerk.browser.js"
   type="text/javascript"
 ></script>
 <style>
@@ -49,16 +49,6 @@
 <main class="dash">
   <h1>Merchant dashboard</h1>
   <p class="sub">Manage your catalogue and orders. Changes reflect in your WhatsApp bot instantly.</p>
-
-  <!-- Clerk sign-in / sign-up -->
-  <div class="dash-card" id="authCard">
-    <h2 id="authTitle">Sign in</h2>
-    <div id="clerkAuth"></div>
-    <p class="muted" style="margin-top:16px;font-size:14px">
-      <span id="authToggleText">New here?</span>
-      <a href="#" onclick="toggleAuthMode(); return false;" id="authToggleLink">Create an account</a>
-    </p>
-  </div>
 
   <!-- Shown once signed in but before the Clerk account is linked to a business -->
   <div class="dash-card" id="linkCard" style="display:none">
@@ -116,10 +106,10 @@
 
 <div id="toast"></div>
 
+<script src="clerk-theme.js"></script>
 <script>
 const NEXT_STATUSES = ['confirmed','preparing','ready','delivered','cancelled'];
 let BIZ = null;
-let authMode = 'sign-in';
 
 function toast(msg) {
   const t = document.getElementById('toast');
@@ -152,48 +142,25 @@ async function api(path, opts = {}) {
 }
 
 function showCard(id) {
-  ['authCard', 'linkCard', 'app'].forEach(cardId => {
+  ['linkCard', 'app'].forEach(cardId => {
     document.getElementById(cardId).style.display = cardId === id ? '' : 'none';
   });
 }
 
-function mountAuth(mode) {
-  authMode = mode;
-  const el = document.getElementById('clerkAuth');
-  window.Clerk.unmountComponent(el);
-  const redirectUrl = window.location.href;
-  if (mode === 'sign-up') {
-    document.getElementById('authTitle').textContent = 'Create an account';
-    document.getElementById('authToggleText').textContent = 'Already registered?';
-    document.getElementById('authToggleLink').textContent = 'Sign in';
-    window.Clerk.mountSignUp(el, { afterSignUpUrl: redirectUrl, signInUrl: redirectUrl });
-  } else {
-    document.getElementById('authTitle').textContent = 'Sign in';
-    document.getElementById('authToggleText').textContent = 'New here?';
-    document.getElementById('authToggleLink').textContent = 'Create an account';
-    window.Clerk.mountSignIn(el, { afterSignInUrl: redirectUrl, signUpUrl: redirectUrl });
-  }
-}
-
-function toggleAuthMode() {
-  mountAuth(authMode === 'sign-in' ? 'sign-up' : 'sign-in');
-}
-
 async function signOut() {
   await window.Clerk.signOut();
-  BIZ = null;
-  document.getElementById('bizName').textContent = '';
-  document.getElementById('signOutBtn').style.display = 'none';
-  showCard('authCard');
-  mountAuth('sign-in');
+  window.location.replace('login.html');
 }
 
 /** Runs on load and every time Clerk's session state changes. */
+let redirecting = false;
 async function onAuthStateChange() {
   if (!window.Clerk.user) {
-    document.getElementById('signOutBtn').style.display = 'none';
-    showCard('authCard');
-    mountAuth('sign-in');
+    // signed out: hand off to the dedicated sign-in page
+    if (!redirecting) {
+      redirecting = true;
+      window.location.replace('login.html');
+    }
     return;
   }
 
@@ -347,6 +314,7 @@ async function setOrderStatus(id, status) {
 }
 
 (async () => {
+  await waitForClerk();
   await window.Clerk.load();
   window.Clerk.addListener(onAuthStateChange);
 })();
