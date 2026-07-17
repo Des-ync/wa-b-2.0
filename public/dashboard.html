@@ -53,13 +53,27 @@
   <!-- Shown once signed in but before the Clerk account is linked to a business -->
   <div class="dash-card" id="linkCard" style="display:none">
     <h2>Link your shop</h2>
-    <p class="muted" style="margin-bottom:12px">
-      Enter the WhatsApp number your shop was registered with. Your shop must already be
-      onboarded by WA-B. Contact support if you haven't been set up yet.
-    </p>
-    <div style="display:flex;gap:10px;flex-wrap:wrap">
-      <input id="linkPhone" type="tel" placeholder="0241234567" style="max-width:260px" />
-      <button class="btn btn-primary btn-sm" onclick="linkBusiness()">Link my shop <span class="arr">→</span></button>
+
+    <div id="linkStep1">
+      <p class="muted" style="margin-bottom:12px">
+        Enter the WhatsApp number your shop was registered with. Your shop must already be
+        onboarded by WA-B. We'll text a verification code to that number to confirm it's you.
+      </p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <input id="linkPhone" type="tel" placeholder="0241234567" style="max-width:260px" />
+        <button class="btn btn-primary btn-sm" onclick="requestLinkOtp()">Send code <span class="arr">→</span></button>
+      </div>
+    </div>
+
+    <div id="linkStep2" style="display:none">
+      <p class="muted" style="margin-bottom:12px">
+        Enter the 6-digit code sent on WhatsApp to <strong id="linkPhoneDisplay"></strong>.
+      </p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <input id="linkCode" type="text" inputmode="numeric" maxlength="6" placeholder="123456" style="max-width:160px" />
+        <button class="btn btn-primary btn-sm" onclick="verifyLinkOtp()">Verify & link <span class="arr">→</span></button>
+        <button class="btn btn-ghost btn-sm" onclick="resetLinkStep()">Use a different number</button>
+      </div>
     </div>
   </div>
 
@@ -183,22 +197,55 @@ async function onAuthStateChange() {
   }
 }
 
-async function linkBusiness() {
+let pendingLinkPhone = null;
+
+async function clerkFetch(path, body) {
+  const token = await window.Clerk.session.getToken();
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  const parsed = await res.json().catch(() => ({}));
+  if (!res.ok || parsed.success === false) throw new Error(parsed.error || ('HTTP ' + res.status));
+  return parsed;
+}
+
+function resetLinkStep() {
+  pendingLinkPhone = null;
+  document.getElementById('linkCode').value = '';
+  document.getElementById('linkStep1').style.display = '';
+  document.getElementById('linkStep2').style.display = 'none';
+}
+
+async function requestLinkOtp() {
   const phone = document.getElementById('linkPhone').value.trim();
   if (!phone) return toast('Enter your WhatsApp number first');
   try {
-    const token = await window.Clerk.session.getToken();
-    const res = await fetch('/api/auth/clerk/link', {
-      method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ whatsapp_number: phone })
-    });
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok || body.success === false) throw new Error(body.error || ('HTTP ' + res.status));
+    const body = await clerkFetch('/api/auth/clerk/link/request', { whatsapp_number: phone });
+    if (body.alreadyLinked) {
+      toast('Shop linked!');
+      return onAuthStateChange();
+    }
+    pendingLinkPhone = phone;
+    document.getElementById('linkPhoneDisplay').textContent = phone;
+    document.getElementById('linkStep1').style.display = 'none';
+    document.getElementById('linkStep2').style.display = '';
+    toast('Code sent on WhatsApp');
+  } catch (err) {
+    toast('Could not send code: ' + err.message);
+  }
+}
+
+async function verifyLinkOtp() {
+  const code = document.getElementById('linkCode').value.trim();
+  if (!code) return toast('Enter the code');
+  try {
+    await clerkFetch('/api/auth/clerk/link/verify', { whatsapp_number: pendingLinkPhone, code });
     toast('Shop linked!');
     await onAuthStateChange();
   } catch (err) {
-    toast('Could not link shop: ' + err.message);
+    toast('Could not verify code: ' + err.message);
   }
 }
 

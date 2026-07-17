@@ -227,8 +227,11 @@ async function runPruneJob() {
           WHERE created_at < NOW() - ($1 || ' days')::interval`,
         [String(MESSAGE_LOG_RETENTION_DAYS)]
       );
-      logger.info('[cron] runPruneJob done: %d webhook event(s), %d message log row(s) pruned',
-        w.rowCount, m.rowCount);
+      const o = await query(
+        `DELETE FROM business_link_otps WHERE expires_at < NOW() - INTERVAL '1 day'`
+      );
+      logger.info('[cron] runPruneJob done: %d webhook event(s), %d message log row(s), %d link OTP(s) pruned',
+        w.rowCount, m.rowCount, o.rowCount);
     } catch (err) {
       logger.error('[cron] runPruneJob failed: %s', err.message);
     }

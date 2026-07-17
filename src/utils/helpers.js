@@ -77,6 +77,13 @@ function generateOrderNumber() {
 }
 
 /**
+ * Generate a 6-digit numeric OTP (zero-padded, e.g. "042817").
+ */
+function generateOtp() {
+  return String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
+}
+
+/**
  * Generate a unique payment / billing reference.
  */
 function generateReference(prefix = 'PAY') {
@@ -202,6 +209,7 @@ module.exports = {
   paystackMomoProvider,
   formatGhs,
   generateOrderNumber,
+  generateOtp,
   generateReference,
   toWaRecipient,
   toMsisdn,

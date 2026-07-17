@@ -252,6 +252,25 @@ CREATE TABLE IF NOT EXISTS worker_locks (
 );
 
 -- =========================================================================
+-- business_link_otps: WhatsApp-delivered OTP proving a Clerk user actually
+-- controls the phone number they're claiming to link a business with.
+-- One active challenge per (business, clerk user); a fresh request
+-- overwrites the previous code rather than stacking rows.
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS business_link_otps (
+  id             UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  business_id    UUID NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  clerk_user_id  TEXT NOT NULL,
+  code_hash      TEXT NOT NULL,
+  attempts       INT NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+  expires_at     TIMESTAMPTZ NOT NULL,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (business_id, clerk_user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_link_otps_business ON business_link_otps(business_id);
+CREATE INDEX IF NOT EXISTS idx_link_otps_expires ON business_link_otps(expires_at);
+
+-- =========================================================================
 -- api_keys: hashed credentials for admin + tenant-scoped API access.
 -- The plaintext key is shown only at creation time; only the SHA-256 hash
 -- is stored. business_id NULL means an admin/global key.
