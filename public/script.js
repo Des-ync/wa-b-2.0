@@ -1,20 +1,48 @@
 // WA-B Solutions — shared site script
 (function () {
-  // sticky nav border on scroll
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // sticky nav border: sentinel + IntersectionObserver (no scroll listener)
   const nav = document.querySelector('.nav');
-  if (nav) {
-    const onScroll = () => nav.classList.toggle('is-scrolled', window.scrollY > 4);
-    onScroll();
-    window.addEventListener('scroll', onScroll, { passive: true });
+  if (nav && 'IntersectionObserver' in window) {
+    const sentinel = document.createElement('div');
+    sentinel.setAttribute('aria-hidden', 'true');
+    sentinel.style.cssText = 'position:absolute;top:0;left:0;width:1px;height:5px;pointer-events:none;';
+    document.body.prepend(sentinel);
+    new IntersectionObserver(
+      ([entry]) => nav.classList.toggle('is-scrolled', !entry.isIntersecting)
+    ).observe(sentinel);
   }
 
   // theme bootstrap
   const stored = localStorage.getItem('wab-theme');
   if (stored) document.documentElement.setAttribute('data-theme', stored);
 
-  // animate WhatsApp chat (if present)
+  // scroll reveal: classes are added here so content stays visible without JS
+  if (!reducedMotion && 'IntersectionObserver' in window) {
+    const targets = document.querySelectorAll(
+      '.feat, .quote, .price-card, .stat, .section-head, .split > *, .cta-banner, .faq details'
+    );
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('is-visible');
+          io.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.15, rootMargin: '0px 0px -5% 0px' });
+
+    targets.forEach((el, i) => {
+      el.classList.add('reveal');
+      // small cascade within a viewport, without long queues on scroll
+      el.style.setProperty('--reveal-delay', `${(i % 4) * 60}ms`);
+      io.observe(el);
+    });
+  }
+
+  // animate WhatsApp chat (if present); static under reduced motion
   const thread = document.querySelector('[data-wa-thread]');
-  if (thread) animateThread(thread);
+  if (thread && !reducedMotion) animateThread(thread);
 
   function animateThread(thread) {
     const items = Array.from(thread.children);

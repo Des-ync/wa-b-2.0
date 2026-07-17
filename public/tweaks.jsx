@@ -75,7 +75,7 @@ function applyTweaks(t) {
         const ph = document.createElement('div');
         ph.className = 'hero-video';
         ph.style.cssText = `aspect-ratio:4/3;background:var(--bg-2);border:1px solid var(--line);border-radius:22px;display:grid;place-items:center;color:var(--muted);font-family:var(--font-mono);font-size:12px;letter-spacing:0.08em;text-transform:uppercase;background-image:radial-gradient(closest-side at 60% 40%,var(--accent-glow),transparent 70%);`;
-        ph.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;gap:14px"><div style="width:64px;height:64px;border-radius:50%;background:var(--ink);color:var(--bg);display:grid;place-items:center;font-size:22px">▶</div><span>Product video — 90s loop</span></div>`;
+        ph.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;gap:14px"><div style="width:64px;height:64px;border-radius:50%;background:var(--ink);color:var(--bg);display:grid;place-items:center;font-size:22px">▶</div><span>Product video · 90s loop</span></div>`;
         heroGrid.appendChild(ph);
       }
       heroGrid.style.gridTemplateColumns = '1.05fr 1fr';

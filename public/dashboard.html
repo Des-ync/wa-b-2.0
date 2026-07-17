@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Merchant dashboard — WA-B Solutions</title>
+<title>Merchant dashboard · WA-B Solutions</title>
 <link rel="stylesheet" href="styles.css" />
 <script
   async
@@ -65,7 +65,7 @@
     <h2>Link your shop</h2>
     <p class="muted" style="margin-bottom:12px">
       Enter the WhatsApp number your shop was registered with. Your shop must already be
-      onboarded by WA-B — contact support if you haven't been set up yet.
+      onboarded by WA-B. Contact support if you haven't been set up yet.
     </p>
     <div style="display:flex;gap:10px;flex-wrap:wrap">
       <input id="linkPhone" type="tel" placeholder="0241234567" style="max-width:260px" />
@@ -129,7 +129,7 @@ function toast(msg) {
 }
 
 /**
- * Every call fetches a fresh Clerk session token — Clerk's JWTs are
+ * Every call fetches a fresh Clerk session token; Clerk's JWTs are
  * short-lived (~60s) by design, so caching one would start failing mid-session.
  */
 async function api(path, opts = {}) {
@@ -257,7 +257,7 @@ async function loadProducts() {
         <button class="btn btn-ghost btn-xs" onclick="editPrice('${p.id}', ${Number(p.price_ghs)})">Price</button>
         <button class="btn btn-ghost btn-xs" onclick="removeProduct('${p.id}', '${esc(p.name)}')">Delete</button>
       </td>
-    </tr>`).join('') || '<tr><td colspan="6" class="muted">No products yet — add your first below.</td></tr>';
+    </tr>`).join('') || '<tr><td colspan="6" class="muted">No products yet. Add your first below.</td></tr>';
 }
 
 async function addProduct() {
@@ -341,7 +341,7 @@ async function setOrderStatus(id, status) {
   if (!status) return;
   try {
     await api('/orders/' + id + '/status', { method: 'PATCH', body: JSON.stringify({ status }) });
-    toast('Order updated — customer notified on WhatsApp');
+    toast('Order updated. Customer notified on WhatsApp');
     await loadOrders();
   } catch (err) { toast(err.message); }
 }

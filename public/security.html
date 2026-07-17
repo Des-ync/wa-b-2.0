@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Security — WA-B Solutions</title>
+<title>Security · WA-B Solutions</title>
 <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -16,18 +16,18 @@
 <section class="page-hero"><div class="wrap">
   <span class="eyebrow">Security</span>
   <h1 style="margin-top:18px">Designed for money. Built like it.</h1>
-  <p>WA-B handles real cedis through real merchants every day. Here's exactly how we keep that money — and your customers' data — safe.</p>
+  <p>WA-B handles real cedis through real merchants every day. Here's exactly how we keep that money and your customers' data safe.</p>
 </div></section>
 
 <section class="section section--tight"><div class="wrap">
   <h2 class="h-section" style="font-size:28px;margin-bottom:24px">Controls at a glance.</h2>
   <div class="feat-grid">
     <article class="feat"><h3 class="h-card">Encryption</h3><p>TLS 1.2+ in transit. AES-256 at rest, including backups. PII columns separately encrypted at the application layer.</p></article>
-    <article class="feat"><h3 class="h-card">Webhook integrity</h3><p>Every payment callback from Hubtel and Paystack is HMAC-verified with constant-time comparison. No spoofed payments — ever.</p></article>
+    <article class="feat"><h3 class="h-card">Webhook integrity</h3><p>Every payment callback from Hubtel and Paystack is HMAC-verified with constant-time comparison. No spoofed payments, ever.</p></article>
     <article class="feat"><h3 class="h-card">API key hashing</h3><p>API keys are stored as SHA-256 hashes. Even our database admins cannot read them in plaintext.</p></article>
     <article class="feat"><h3 class="h-card">Multi-tenant isolation</h3><p>Every query is row-level-security scoped to the merchant's tenant ID. Zero cross-tenant data exposure by construction.</p></article>
     <article class="feat"><h3 class="h-card">Idempotency &amp; replay protection</h3><p>Webhook processor uses idempotency keys; duplicate events are detected and dropped. Replay windows enforced on signed payloads.</p></article>
-    <article class="feat"><h3 class="h-card">RBAC &amp; audit log</h3><p>Owner / Manager / Cashier roles. Every action — login, payment, refund, settings change — is logged with actor, IP, and timestamp.</p></article>
+    <article class="feat"><h3 class="h-card">RBAC &amp; audit log</h3><p>Owner / Manager / Cashier roles. Every action (login, payment, refund, settings change) is logged with actor, IP, and timestamp.</p></article>
     <article class="feat"><h3 class="h-card">Secrets management</h3><p>All credentials live in a dedicated secret store (HashiCorp Vault). Rotated quarterly. Never in code or env files.</p></article>
     <article class="feat"><h3 class="h-card">SSO &amp; 2FA</h3><p>2FA available for all merchant accounts. SSO (Google, Microsoft) on Market plan. WA-B staff use SSO + hardware keys.</p></article>
     <article class="feat"><h3 class="h-card">Backups</h3><p>Encrypted point-in-time backups every 5 minutes. Quarterly restore drills. 30-day retention.</p></article>
@@ -39,11 +39,11 @@
     <h2 class="h-section" style="font-size:30px">Compliance &amp; certifications.</h2>
     <p style="color:var(--muted);font-size:15.5px;margin-top:12px">We are early-stage and don't pretend otherwise. We've built our controls to map to industry frameworks and are actively pursuing formal certification.</p>
     <ul class="price-features" style="margin-top:24px">
-      <li><b style="color:var(--ink)">SOC 2 Type II</b> — controls implemented; audit window opens Q3 2026.</li>
-      <li><b style="color:var(--ink)">PCI-DSS SAQ-A</b> — we never touch raw card data; tokenization handled by Paystack.</li>
-      <li><b style="color:var(--ink)">Ghana DPA 2012 (Act 843)</b> — registered with the Data Protection Commission.</li>
-      <li><b style="color:var(--ink)">GDPR</b> — applicable when serving EU data subjects; SCCs in place.</li>
-      <li><b style="color:var(--ink)">Bank of Ghana</b> — operating as a Payment Service Provider partner via Hubtel.</li>
+      <li><b style="color:var(--ink)">SOC 2 Type II</b>: controls implemented; audit window opens Q3 2026.</li>
+      <li><b style="color:var(--ink)">PCI-DSS SAQ-A</b>: we never touch raw card data; tokenization handled by Paystack.</li>
+      <li><b style="color:var(--ink)">Ghana DPA 2012 (Act 843)</b>: registered with the Data Protection Commission.</li>
+      <li><b style="color:var(--ink)">GDPR</b>: applicable when serving EU data subjects; SCCs in place.</li>
+      <li><b style="color:var(--ink)">Bank of Ghana</b>: operating as a Payment Service Provider partner via Hubtel.</li>
     </ul>
   </div>
 
@@ -71,7 +71,7 @@
       <li><b style="color:var(--ink)">Critical</b> (auth bypass, payment manipulation): up to GHS 50,000</li>
       <li><b style="color:var(--ink)">High</b> (cross-tenant leak, RCE): up to GHS 20,000</li>
       <li><b style="color:var(--ink)">Medium</b> (XSS, IDOR): up to GHS 5,000</li>
-      <li><b style="color:var(--ink)">Low</b> (CSP, info disclosure): GHS 500–1,500</li>
+      <li><b style="color:var(--ink)">Low</b> (CSP, info disclosure): GHS 500-1,500</li>
     </ul>
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:28px">
       <a href="mailto:security@wa-b.com" class="btn btn-primary">security@wa-b.com <span class="arr">→</span></a>
@@ -133,7 +133,7 @@
     </div>
     <div class="footer-bottom">
       <span>&copy; 2026 WA-B Solutions Ltd. All rights reserved.</span>
-      <span class="footer-tag">v2.0 &middot; Built in Accra &#127684;&#127686;</span>
+      <span class="footer-tag">Built in Accra, Ghana</span>
     </div>
   </div>
 </footer>

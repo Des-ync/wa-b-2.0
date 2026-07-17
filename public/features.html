@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Features — WA-B Solutions</title>
-<meta name="description" content="Everything WA-B Solutions does for your WhatsApp business — from automatic MoMo billing to multi-tenant order tracking." />
+<title>Features · WA-B Solutions</title>
+<meta name="description" content="Everything WA-B Solutions does for your WhatsApp business, from automatic MoMo billing to multi-tenant order tracking." />
 <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -36,12 +36,12 @@
 <section class="section section--tight" id="billing">
   <div class="wrap split">
     <div>
-      <span class="eyebrow">01 — Automatic MoMo billing</span>
+      <span class="eyebrow">Automatic MoMo billing</span>
       <h2 class="h-section" style="margin-top:18px">Subscriptions that <em>renew themselves</em>.</h2>
       <p class="lead" style="margin-top:18px">Hubtel MoMo Collections runs in the background. We charge on the 1st, retry failures with exponential backoff, send WhatsApp reminders 3 days before billing, and grace-suspend after 3 days past due.</p>
       <ul class="price-features" style="margin-top:24px;font-size:15px">
         <li>HMAC-verified Hubtel callbacks (no spoofed payments)</li>
-        <li>Idempotent reference handling — no double charges</li>
+        <li>Idempotent reference handling: no double charges</li>
         <li><b>PAY</b>, <b>RENEW</b>, <b>STATUS</b>, <b>UPGRADE</b>, <b>CANCEL</b> via WhatsApp text</li>
         <li>Audit trail of every billing event in the dashboard</li>
       </ul>
@@ -69,9 +69,8 @@
 <section class="section section--tight" id="orders">
   <div class="wrap split split--reverse">
     <div>
-      <span class="eyebrow">02 — Order tracking</span>
-      <h2 class="h-section" style="margin-top:18px">Every order. <em>Status-tracked.</em> Searchable.</h2>
-      <p class="lead" style="margin-top:18px">Customers, riders, and you all see the same status — pending, paid, preparing, on-the-way, delivered. One source of truth, automatic WhatsApp notifications at each step.</p>
+      <h2 class="h-section">Every order. <em>Status-tracked.</em> Searchable.</h2>
+      <p class="lead" style="margin-top:18px">Customers, riders, and you all see the same status: pending, paid, preparing, on-the-way, delivered. One source of truth, automatic WhatsApp notifications at each step.</p>
       <ul class="price-features" style="margin-top:24px;font-size:15px">
         <li>Customer profiles built automatically from chat</li>
         <li>One-tap refunds (pushes MoMo reversal request)</li>
@@ -97,9 +96,8 @@
 <section class="section section--tight" id="custom">
   <div class="wrap split">
     <div>
-      <span class="eyebrow">03 — Customizable</span>
-      <h2 class="h-section" style="margin-top:18px">Configure once. <em>See it live</em> in WhatsApp.</h2>
-      <p class="lead" style="margin-top:18px">Menu, hours, delivery zones, branded greetings, follow-up cadence. Every setting is hot-reloaded — change at 11:59, your customers see it at 12:00.</p>
+      <h2 class="h-section">Configure once. <em>See it live</em> in WhatsApp.</h2>
+      <p class="lead" style="margin-top:18px">Menu, hours, delivery zones, branded greetings, follow-up cadence. Every setting is hot-reloaded: change at 11:59, your customers see it at 12:00.</p>
       <ul class="price-features" style="margin-top:24px;font-size:15px">
         <li>Drag-and-drop menu builder with photos</li>
         <li>Branded welcome messages &amp; quick-reply buttons</li>
@@ -112,7 +110,7 @@
       <div class="dash-body">
         <div class="dash-stat" style="margin-bottom:14px"><div class="dash-stat-label">Welcome message</div><div style="margin-top:8px;font-size:14px;line-height:1.5;color:var(--ink-2)">Akwaaba! 👋 Welcome to <b>{{businessName}}</b>. Tap <b>View Menu</b> to see today's specials.</div></div>
         <div class="dash-row" style="margin-bottom:0">
-          <div class="dash-stat"><div class="dash-stat-label">Hours</div><div class="dash-stat-val" style="font-size:15px;font-weight:500;margin-top:8px">10:00 — 21:00</div></div>
+          <div class="dash-stat"><div class="dash-stat-label">Hours</div><div class="dash-stat-val" style="font-size:15px;font-weight:500;margin-top:8px">10:00 - 21:00</div></div>
           <div class="dash-stat"><div class="dash-stat-label">Delivery</div><div class="dash-stat-val" style="font-size:15px;font-weight:500;margin-top:8px">3 zones</div></div>
           <div class="dash-stat"><div class="dash-stat-label">Menu items</div><div class="dash-stat-val" style="font-size:15px;font-weight:500;margin-top:8px">42 active</div></div>
         </div>
@@ -124,13 +122,13 @@
 <section class="section">
   <div class="wrap">
     <div class="section-head">
-      <div><span class="eyebrow">Plus everything else</span><h2 class="h-section" style="margin-top:18px">Built like infra. <em>Priced like SaaS.</em></h2></div>
-      <p class="lead">Production-grade plumbing every Ghanaian SME deserves but rarely gets — durable webhook queues, advisory locks, audit logs.</p>
+      <div><h2 class="h-section">Built like infra. <em>Priced like SaaS.</em></h2></div>
+      <p class="lead">Production-grade plumbing every Ghanaian SME deserves but rarely gets: durable webhook queues, advisory locks, audit logs.</p>
     </div>
     <div class="feat-grid">
       <article class="feat"><span class="feat-num">04</span><h3 class="h-card">Durable webhook queue</h3><p>Every inbound event is persisted before we 200. Failed events retry with exponential backoff up to 8 attempts. Nothing falls through.</p></article>
-      <article class="feat"><span class="feat-num">05</span><h3 class="h-card">Multi-tenant isolation</h3><p>Each business is silo'd by phone-number ID. We never cross streams — even on a misrouted webhook, your data stays yours.</p></article>
-      <article class="feat"><span class="feat-num">06</span><h3 class="h-card">Cron with leader election</h3><p>Renewals, reminders, and suspensions run via DB advisory locks. Run 50 replicas — only one fires the job.</p></article>
+      <article class="feat"><span class="feat-num">05</span><h3 class="h-card">Multi-tenant isolation</h3><p>Each business is silo'd by phone-number ID. We never cross streams. Even on a misrouted webhook, your data stays yours.</p></article>
+      <article class="feat"><span class="feat-num">06</span><h3 class="h-card">Cron with leader election</h3><p>Renewals, reminders, and suspensions run via DB advisory locks. Run 50 replicas; only one fires the job.</p></article>
       <article class="feat"><span class="feat-num">07</span><h3 class="h-card">Scoped API keys</h3><p>Tenant or admin scope, SHA-256 hashed at rest, revocable in one SQL line. Real keys, not session cookies pretending.</p></article>
       <article class="feat"><span class="feat-num">08</span><h3 class="h-card">Card payments via Paystack</h3><p>Customers without MoMo? No problem. HMAC-SHA512 signed events, idempotent reference handling, redirect callback ready.</p></article>
       <article class="feat"><span class="feat-num">09</span><h3 class="h-card">Africa/Accra-aware</h3><p>Cron jobs run on local time. Reminders go out when humans actually read them. Currency formatted right. Phones normalized.</p></article>
@@ -141,7 +139,7 @@
 <section class="section">
   <div class="wrap">
     <div class="cta-banner">
-      <div><span class="eyebrow" style="color:var(--accent)">Ready when you are</span><h2 class="h-section" style="margin-top:18px">Free for 14 days.<br/>Live in 10 minutes.</h2><p>Connect your WhatsApp number, paste your menu, and watch your first order land.</p></div>
+      <div><h2 class="h-section">Free for 14 days.<br/>Live in 10 minutes.</h2><p>Connect your WhatsApp number, paste your menu, and watch your first order land.</p></div>
       <div style="display:flex;gap:12px;flex-wrap:wrap"><a href="signup.html" class="btn btn-primary btn-lg">Start free trial <span class="arr">→</span></a><a href="signup.html" class="btn btn-ghost btn-lg">Book a demo</a></div>
     </div>
   </div>
@@ -199,7 +197,7 @@
     </div>
     <div class="footer-bottom">
       <span>&copy; 2026 WA-B Solutions Ltd. All rights reserved.</span>
-      <span class="footer-tag">v2.0 &middot; Built in Accra &#127684;&#127686;</span>
+      <span class="footer-tag">Built in Accra, Ghana</span>
     </div>
   </div>
 </footer>
