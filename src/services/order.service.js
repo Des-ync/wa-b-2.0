@@ -6,12 +6,40 @@ const VALID_STATUSES = ['pending', 'confirmed', 'paid', 'preparing', 'ready', 'd
 const VALID_PAYMENT_STATUSES = ['unpaid', 'pending', 'paid', 'refunded'];
 
 /**
- * Get-or-create the customer record (per business + WhatsApp number).
+ * Get-or-create the customer record for a business on a given channel.
+ *
+ * Defaults keep every existing WhatsApp call site working exactly as before:
+ * channel='whatsapp', channelId=whatsappNumber, and the lookup stays keyed on
+ * (business_id, whatsapp_number). Other channels ('instagram') key on
+ * (business_id, channel, channel_id); whatsapp_number is NOT NULL so it
+ * carries the channel_id as a placeholder for those rows.
  */
-async function getOrCreateCustomer({ businessId, whatsappNumber, displayName, phoneNetwork }) {
+async function getOrCreateCustomer({ businessId, whatsappNumber, displayName, phoneNetwork, channel = 'whatsapp', channelId }) {
+  if (channel === 'whatsapp') {
+    channelId = channelId || whatsappNumber;
+    const existing = await query(
+      'SELECT * FROM customers WHERE business_id = $1 AND whatsapp_number = $2',
+      [businessId, whatsappNumber]
+    );
+    if (existing.rows.length) {
+      await query(
+        'UPDATE customers SET last_seen_at = NOW(), display_name = COALESCE($2, display_name) WHERE id = $1',
+        [existing.rows[0].id, displayName || null]
+      );
+      return existing.rows[0];
+    }
+    const inserted = await query(
+      `INSERT INTO customers (business_id, whatsapp_number, display_name, phone_network, channel, channel_id)
+       VALUES ($1,$2,$3,$4,'whatsapp',$5) RETURNING *`,
+      [businessId, whatsappNumber, displayName || null, phoneNetwork || null, channelId]
+    );
+    return inserted.rows[0];
+  }
+
+  if (!channelId) throw new Error(`channelId is required for channel=${channel}`);
   const existing = await query(
-    'SELECT * FROM customers WHERE business_id = $1 AND whatsapp_number = $2',
-    [businessId, whatsappNumber]
+    'SELECT * FROM customers WHERE business_id = $1 AND channel = $2 AND channel_id = $3',
+    [businessId, channel, channelId]
   );
   if (existing.rows.length) {
     await query(
@@ -21,9 +49,9 @@ async function getOrCreateCustomer({ businessId, whatsappNumber, displayName, ph
     return existing.rows[0];
   }
   const inserted = await query(
-    `INSERT INTO customers (business_id, whatsapp_number, display_name, phone_network)
-     VALUES ($1,$2,$3,$4) RETURNING *`,
-    [businessId, whatsappNumber, displayName || null, phoneNetwork || null]
+    `INSERT INTO customers (business_id, whatsapp_number, display_name, phone_network, channel, channel_id)
+     VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+    [businessId, channelId, displayName || null, phoneNetwork || null, channel, channelId]
   );
   return inserted.rows[0];
 }
