@@ -5,6 +5,51 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Sign up · WA-B Solutions</title>
 <link rel="stylesheet" href="styles.css" />
+<script
+  async
+  crossorigin="anonymous"
+  data-clerk-publishable-key="pk_live_Y2xlcmsuc2tlcy50ZWNoJA"
+  src="https://clerk.skes.tech/npm/@clerk/clerk-js@5/dist/clerk.browser.js"
+  type="text/javascript"
+></script>
+<style>
+  .signup-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: clamp(32px, 5vw, 72px);
+    align-items: start;
+  }
+  @media (max-width: 920px) {
+    .signup-grid { grid-template-columns: 1fr; }
+  }
+  #clerk-signup { display: grid; justify-content: center; min-height: 420px; }
+  @media (min-width: 921px) {
+    #clerk-signup { justify-content: end; position: sticky; top: 96px; }
+  }
+  .auth-skeleton {
+    width: 100%;
+    max-width: 400px;
+    height: 420px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-lg);
+    background: linear-gradient(100deg, var(--bg-2) 40%, var(--paper) 50%, var(--bg-2) 60%);
+    background-size: 200% 100%;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .auth-skeleton { animation: authShimmer 1.4s linear infinite; }
+  }
+  @keyframes authShimmer {
+    from { background-position: 120% 0; }
+    to { background-position: -80% 0; }
+  }
+  .signup-note {
+    color: var(--muted);
+    font-size: 13.5px;
+    margin-top: 16px;
+    max-width: 400px;
+  }
+  @media (min-width: 921px) { .signup-note { margin-left: auto; text-align: center; } }
+</style>
 </head>
 <body>
 
@@ -18,18 +63,18 @@
       <li><a href="blog.html">Blog</a></li>
     </ul></nav>
     <div class="nav-cta">
-      <a href="signup.html" class="btn btn-ghost btn-sm hide-on-mobile">Sign in</a>
-      <a href="#book" class="btn btn-primary btn-sm">Book a demo <span class="arr">→</span></a>
+      <a href="login.html" class="btn btn-ghost btn-sm hide-on-mobile">Sign in</a>
+      <a href="contact.html" class="btn btn-primary btn-sm">Book a demo <span class="arr">→</span></a>
     </div>
   </div>
 </header>
 
 <section class="section">
-  <div class="wrap split" style="align-items:start">
+  <div class="wrap signup-grid">
     <div>
       <span class="eyebrow">Get started</span>
       <h1 class="h-section" style="margin-top:18px;font-size:clamp(36px,4.4vw,58px)">Start your 14-day free trial.</h1>
-      <p class="lead" style="margin-top:18px">No card. No MoMo prompt up front. Connect your WhatsApp number and watch your first order land.</p>
+      <p class="lead" style="margin-top:18px">No card. No MoMo prompt up front. Create your account, link your WhatsApp number, and watch your first order land.</p>
 
       <ul class="price-features" style="margin-top:32px;font-size:15px">
         <li>Live in 10 minutes: guided setup</li>
@@ -41,61 +86,13 @@
       <div style="margin-top:48px;padding:24px;border:1px solid var(--line);border-radius:var(--r-lg);background:var(--paper)">
         <span class="eyebrow">Prefer to talk first?</span>
         <p style="margin:14px 0 18px;color:var(--ink-2);font-size:15px">Book a 20-minute demo with our team. We'll walk you through WA-B, answer your questions, and help you decide if it's a fit.</p>
-        <a href="#book" class="btn btn-ghost">Book a demo <span class="arr">→</span></a>
+        <a href="contact.html" class="btn btn-ghost">Book a demo <span class="arr">→</span></a>
       </div>
     </div>
 
-    <div style="background:var(--paper);border:1px solid var(--line);border-radius:var(--r-xl);padding:32px;box-shadow:0 30px 60px -40px rgba(0,0,0,0.12)" id="book">
-      <h2 class="h-card" style="font-size:22px">Tell us about your business</h2>
-      <p style="color:var(--muted);font-size:14px;margin:8px 0 24px">Takes about 90 seconds. We'll be in touch within one business day.</p>
-
-      <form class="form" onsubmit="event.preventDefault();this.querySelector('button').textContent='✓ Sent. Check WhatsApp';this.querySelector('button').classList.add('btn-accent');this.querySelector('button').classList.remove('btn-primary')">
-        <div class="field-row">
-          <div class="field">
-            <label for="first">First name</label>
-            <input id="first" type="text" required placeholder="Akosua" />
-          </div>
-          <div class="field">
-            <label for="last">Last name</label>
-            <input id="last" type="text" required placeholder="Asare" />
-          </div>
-        </div>
-        <div class="field">
-          <label for="biz">Business name</label>
-          <input id="biz" type="text" required placeholder="Auntie Akos Kitchen" />
-        </div>
-        <div class="field">
-          <label for="phone">WhatsApp number</label>
-          <input id="phone" type="tel" required placeholder="+233 24 000 0000" />
-          <span class="field-hint">We'll send a verification code to this number.</span>
-        </div>
-        <div class="field">
-          <label for="email">Email</label>
-          <input id="email" type="email" required placeholder="you@business.com" />
-        </div>
-        <div class="field">
-          <label for="kind">Business type</label>
-          <select id="kind">
-            <option>Restaurant / food vendor</option>
-            <option>Retail / boutique</option>
-            <option>Salon / barbershop</option>
-            <option>Tailor / fashion</option>
-            <option>Services (bookings)</option>
-            <option>Other</option>
-          </select>
-        </div>
-        <div class="field">
-          <label for="plan">Plan</label>
-          <select id="plan">
-            <option>Kiosk · GHS 49 / mo</option>
-            <option selected>Shop · GHS 149 / mo (most popular)</option>
-            <option>Market · GHS 499 / mo</option>
-            <option>Not sure yet</option>
-          </select>
-        </div>
-        <button type="submit" class="btn btn-primary btn-lg" style="margin-top:8px;justify-content:center">Start free trial <span class="arr">→</span></button>
-        <p style="font-size:12.5px;color:var(--muted);margin:0;text-align:center">By signing up you agree to our Terms and Privacy Policy.</p>
-      </form>
+    <div>
+      <div id="clerk-signup"><div class="auth-skeleton" aria-hidden="true"></div></div>
+      <p class="signup-note">After creating your account you'll link the WhatsApp number your shop runs on. Already registered? <a href="login.html" style="color:var(--ink);border-bottom:1px solid var(--line-2)">Sign in</a></p>
     </div>
   </div>
 </section>
@@ -157,11 +154,29 @@
   </div>
 </footer>
 
-<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
-<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
-<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
-<script type="text/babel" src="tweaks-panel.jsx"></script>
-<script type="text/babel" src="tweaks.jsx"></script>
-<script src="script.js"></script>
+<script src="clerk-theme.js"></script>
+<script>
+(async () => {
+  await waitForClerk();
+  await window.Clerk.load();
+
+  if (window.Clerk.user) {
+    window.location.replace('dashboard.html');
+    return;
+  }
+
+  const el = document.getElementById('clerk-signup');
+  el.innerHTML = '';
+  window.Clerk.mountSignUp(el, {
+    appearance: window.WAB_CLERK_APPEARANCE,
+    forceRedirectUrl: 'dashboard.html',
+    signInUrl: 'login.html'
+  });
+
+  window.Clerk.addListener(({ user }) => {
+    if (user) window.location.replace('dashboard.html');
+  });
+})();
+</script>
 </body>
 </html>
