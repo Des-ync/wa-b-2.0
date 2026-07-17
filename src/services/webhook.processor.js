@@ -18,6 +18,17 @@ async function processWhatsApp(payload) {
   await conversation.handleInbound(payload);
 }
 
+/**
+ * Process an Instagram DM event pulled from the queue. The payload is
+ * normalized inside conversation.extractInbound(payload, 'instagram') into the
+ * SAME shape WhatsApp inbounds take, then runs the same state machine —
+ * there is no parallel Instagram flow. Idempotency: same unique index on
+ * message_log (IG mids and WA mids never collide).
+ */
+async function processInstagram(payload) {
+  await conversation.handleInbound(payload, 'instagram');
+}
+
 async function processPaystack(payload) {
   const eventType = payload?.event;
   const data = payload?.data || {};
@@ -165,10 +176,11 @@ async function processPawapay(payload) {
 }
 
 const PROCESSORS = {
-  whatsapp: processWhatsApp,
-  paystack: processPaystack,
-  hubtel:   processHubtel,
-  pawapay:  processPawapay
+  whatsapp:  processWhatsApp,
+  instagram: processInstagram,
+  paystack:  processPaystack,
+  hubtel:    processHubtel,
+  pawapay:   processPawapay
 };
 
 let _running = false;
