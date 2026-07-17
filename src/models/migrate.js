@@ -20,6 +20,11 @@ CREATE TABLE IF NOT EXISTS businesses (
   -- Clerk user id of the merchant who owns this business's dashboard login.
   -- NULL until the merchant links their Clerk account (see /api/auth/clerk/link).
   clerk_user_id       TEXT UNIQUE,
+  -- Instagram Messaging: the IG business account id that receives DMs for this
+  -- tenant (routes inbound IG webhooks), and its page access token (optional;
+  -- falls back to env IG_ACCESS_TOKEN). NULL until the merchant connects IG.
+  ig_business_account_id TEXT UNIQUE,
+  ig_page_access_token   TEXT,
   industry            TEXT DEFAULT 'retail',
   status              TEXT NOT NULL DEFAULT 'trial'
                       CHECK (status IN ('trial','active','grace','suspended','cancelled')),
@@ -35,6 +40,9 @@ ALTER TABLE businesses ADD COLUMN IF NOT EXISTS trial_reminder_sent_at TIMESTAMP
 ALTER TABLE businesses ADD COLUMN IF NOT EXISTS trial_expired_notified_at TIMESTAMPTZ;
 -- Clerk dashboard login (upgrade path for existing databases).
 ALTER TABLE businesses ADD COLUMN IF NOT EXISTS clerk_user_id TEXT UNIQUE;
+-- Instagram DM channel (upgrade path for existing databases).
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS ig_business_account_id TEXT UNIQUE;
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS ig_page_access_token TEXT;
 
 -- =========================================================================
 -- plans: SaaS pricing tiers
@@ -121,6 +129,11 @@ CREATE TABLE IF NOT EXISTS customers (
   display_name     TEXT,
   phone_network    TEXT CHECK (phone_network IS NULL
                                 OR phone_network IN ('mtn','vodafone','airteltigo','other')),
+  -- Multi-channel identity. channel_id is the channel-native identifier:
+  -- the WhatsApp number for 'whatsapp', the IG-scoped user id for 'instagram'.
+  -- whatsapp_number stays as-is for backward compatibility.
+  channel          TEXT NOT NULL DEFAULT 'whatsapp',
+  channel_id       TEXT,
   total_orders     INT NOT NULL DEFAULT 0 CHECK (total_orders >= 0),
   total_spent_ghs  NUMERIC(12,2) NOT NULL DEFAULT 0 CHECK (total_spent_ghs >= 0),
   last_seen_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -129,6 +142,13 @@ CREATE TABLE IF NOT EXISTS customers (
 );
 CREATE INDEX IF NOT EXISTS idx_customers_business ON customers(business_id);
 CREATE INDEX IF NOT EXISTS idx_customers_whatsapp ON customers(whatsapp_number);
+-- Multi-channel identity (upgrade path for existing databases).
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS channel TEXT NOT NULL DEFAULT 'whatsapp';
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS channel_id TEXT;
+-- Backfill: pre-existing rows are WhatsApp customers keyed on their number.
+UPDATE customers SET channel_id = whatsapp_number WHERE channel_id IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_customers_business_channel_id
+  ON customers(business_id, channel, channel_id);
 
 -- =========================================================================
 -- products: business catalogues
@@ -221,7 +241,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_msglog_wa_message_id
 -- =========================================================================
 CREATE TABLE IF NOT EXISTS webhook_events (
   id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  source          TEXT NOT NULL CHECK (source IN ('whatsapp','paystack','hubtel','pawapay')),
+  source          TEXT NOT NULL CHECK (source IN ('whatsapp','paystack','hubtel','pawapay','instagram')),
   external_id     TEXT NOT NULL,
   payload         JSONB NOT NULL,
   signature_valid BOOLEAN NOT NULL DEFAULT TRUE,
@@ -298,7 +318,7 @@ ALTER TABLE billing_transactions ADD CONSTRAINT billing_transactions_gateway_che
   CHECK (gateway IN ('hubtel','paystack','pawapay'));
 ALTER TABLE webhook_events DROP CONSTRAINT IF EXISTS webhook_events_source_check;
 ALTER TABLE webhook_events ADD CONSTRAINT webhook_events_source_check
-  CHECK (source IN ('whatsapp','paystack','hubtel','pawapay'));
+  CHECK (source IN ('whatsapp','paystack','hubtel','pawapay','instagram'));
 
 -- =========================================================================
 -- updated_at trigger
