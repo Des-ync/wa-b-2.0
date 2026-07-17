@@ -48,6 +48,10 @@ app.use(
   express.raw({ type: '*/*', limit: '1mb' })
 );
 app.use(
+  '/api/webhooks/instagram',
+  express.raw({ type: '*/*', limit: '1mb' })
+);
+app.use(
   '/api/payments/paystack/webhook',
   express.raw({ type: '*/*', limit: '1mb' })
 );
