@@ -55,6 +55,8 @@ ALTER TABLE businesses ADD COLUMN IF NOT EXISTS delivery_fee_ghs NUMERIC(10,2) N
 ALTER TABLE businesses ADD COLUMN IF NOT EXISTS delivery_zones JSONB NOT NULL DEFAULT '[]'::jsonb;
 ALTER TABLE businesses ADD COLUMN IF NOT EXISTS open_time TEXT;
 ALTER TABLE businesses ADD COLUMN IF NOT EXISTS close_time TEXT;
+-- Customer-facing bot language: 'en' | 'tw' (Twi). Merchant flows stay English.
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS bot_language TEXT NOT NULL DEFAULT 'en';
 
 -- =========================================================================
 -- plans: SaaS pricing tiers

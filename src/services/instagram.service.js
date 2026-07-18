@@ -3,26 +3,29 @@ const axios = require('axios');
 const logger = require('../utils/logger');
 const { query } = require('../config/database');
 const { formatGhs, truncate } = require('../utils/helpers');
+const { t } = require('../utils/i18n');
 
 /**
  * Instagram DM channel — mirrors the structure of whatsapp.service.js:
  * resolveCredentials (per-tenant with env fallback), sendRaw, logOutbound into
  * message_log, sendText, and sendQuickReplies (the analogue of sendButtons).
  *
- * IMPORTANT — wire format is NOT implemented yet. Every place that needs a
- * real Instagram Messaging API detail (endpoint path, auth placement, payload
- * field names) is a clearly marked TODO(IG-API) stub. Until those stubs are
- * filled in from Meta's docs, sends fail loudly with a descriptive error
- * instead of guessing Meta's wire format. All surrounding plumbing (credential
- * resolution, tenant isolation, message_log audit) is real and final.
+ * Wire format implemented from Meta's Instagram Messaging docs
+ * (developers.facebook.com/docs/messenger-platform/instagram):
+ *   POST https://graph.facebook.com/<v>/me/messages?access_token=<PAGE_TOKEN>
+ *   text:          { recipient: {id}, message: { text } }            (≤1000 chars)
+ *   quick replies: message.quick_replies [{content_type:'text',
+ *                  title (≤20 chars), payload}], max 13 per message
+ *   image:         message.attachment { type:'image', payload:{url} }
+ *   response:      { recipient_id, message_id }
+ * The webhook receives the tapped quick reply's title in `text` and its
+ * payload in `quick_reply.payload` (matches extractInstagramInbound).
  */
 
 const IG_API_VERSION = process.env.IG_API_VERSION || 'v19.0';
 const IG_ACCESS_TOKEN = process.env.IG_ACCESS_TOKEN;
 const IG_BUSINESS_ACCOUNT_ID = process.env.IG_BUSINESS_ACCOUNT_ID;
 
-// TODO(IG-API): verify against Meta's Instagram Messaging API docs — confirm
-// the correct Graph host + version prefix for Instagram Messaging sends.
 const BASE_URL = `https://graph.facebook.com/${IG_API_VERSION}`;
 
 const http = axios.create({
@@ -84,21 +87,38 @@ async function logOutbound({ businessId, customerId, type, content, igMessageId,
 }
 
 /**
- * TODO(IG-API): verify against Meta's Instagram Messaging API docs — endpoint
- * path, whether the access token goes in a query param or Authorization
- * header, the exact request body field names for text and quick-reply sends,
- * and the response field carrying the sent message id. Do not guess.
- *
- * `message` is our channel-agnostic descriptor:
+ * Map our channel-agnostic descriptor onto Meta's Instagram Send API request.
  *   { type: 'text',          text }
  *   { type: 'quick_replies', text, options: [{ id, title }] }
+ *   { type: 'image',         url }
+ * Returns { url, body, headers, extractMessageId(responseData) }.
  *
- * Must return: { url, body, headers, extractMessageId(responseData) }
+ * Per Meta's docs the endpoint is /me/messages ("me" resolves to the Page/IG
+ * account the token belongs to) with the token in the query string; the IG
+ * account id is not part of the path.
  */
-function buildSendRequest({ igAccountId, accessToken, recipientId, message }) { // eslint-disable-line no-unused-vars
-  throw new Error(
-    'Instagram send not implemented — fill buildSendRequest() from Meta\'s Instagram Messaging API docs (TODO(IG-API))'
-  );
+function buildSendRequest({ igAccountId: _igAccountId, accessToken, recipientId, message }) {
+  let msg;
+  if (message.type === 'quick_replies') {
+    msg = {
+      text: String(message.text || '').slice(0, 1000),
+      quick_replies: (message.options || []).slice(0, 13).map(o => ({
+        content_type: 'text',
+        title: truncate(o.title || '', 20),
+        payload: String(o.id || '').slice(0, 1000)
+      }))
+    };
+  } else if (message.type === 'image') {
+    msg = { attachment: { type: 'image', payload: { url: String(message.url || '') } } };
+  } else {
+    msg = { text: String(message.text || '').slice(0, 1000) };
+  }
+  return {
+    url: `/me/messages?access_token=${encodeURIComponent(accessToken)}`,
+    body: { recipient: { id: String(recipientId) }, message: msg },
+    headers: { 'Content-Type': 'application/json' },
+    extractMessageId: data => data?.message_id || null
+  };
 }
 
 /**
@@ -146,24 +166,26 @@ async function sendText(to, body, meta = {}) {
 }
 
 /**
- * Adapter parity with whatsapp.service.sendImage.
- *
- * TODO(IG-API): verify against Meta's Instagram Messaging API docs — the
- * attachment payload shape for image sends. Routed through the same
- * buildSendRequest() stub, so it fails loudly (never guesses) until filled in.
+ * Adapter parity with whatsapp.service.sendImage. Instagram image attachments
+ * have no caption field, so a caption goes out as a follow-up text message.
  */
 async function sendImage(to, imageUrl, caption, meta = {}) {
-  const message = { type: 'image', url: String(imageUrl || ''), text: caption ? String(caption).slice(0, 1000) : undefined };
-  return sendRaw({ recipientId: to, message }, { ...meta, content: caption || `[image] ${imageUrl}` });
+  const result = await sendRaw(
+    { recipientId: to, message: { type: 'image', url: String(imageUrl || '') } },
+    { ...meta, content: `[image] ${imageUrl}` }
+  );
+  if (result.success && caption) {
+    await sendText(to, caption, meta);
+  }
+  return result;
 }
 
 /**
  * Send text with quick-reply chips — the Instagram analogue of WhatsApp reply
  * buttons. options = [{ id: 'BTN_1', title: 'Yes' }, ...]
  *
- * TODO(IG-API): verify against Meta's Instagram Messaging API docs — the
- * maximum number of quick replies and title length limits. The caps below are
- * conservative placeholders, not confirmed values.
+ * Meta allows up to 13 quick replies with 20-char titles; this button-parity
+ * wrapper keeps WhatsApp's 3-button cap so both channels look identical.
  */
 async function sendQuickReplies(to, body, options = [], meta = {}) {
   const trimmed = options.slice(0, 3).map((o, i) => ({
@@ -185,12 +207,8 @@ async function sendButtons(to, body, buttons = [], meta = {}) {
 /**
  * Adapter parity with whatsapp.service.sendList. Instagram has no list
  * message; sections are flattened into quick-reply chips under the combined
- * header + body text.
- *
- * TODO(IG-API): verify against Meta's Instagram Messaging API docs — confirm
- * the quick-reply count cap so long menus paginate correctly. Capped at 10
- * here as a conservative placeholder (matches the WhatsApp list-row cap the
- * conversation flow already paginates for).
+ * header + body text. Meta's cap is 13 quick replies; we keep 10 to match the
+ * WhatsApp list-row cap the conversation flow already paginates for.
  */
 async function sendList(to, header, body, sections = [], meta = {}) {
   const rows = sections.flatMap(s => s.rows || []).slice(0, 10).map((r, i) => ({
@@ -203,11 +221,9 @@ async function sendList(to, header, body, sections = [], meta = {}) {
 }
 
 /**
- * Adapter parity with whatsapp.service.markAsRead.
- *
- * TODO(IG-API): verify against Meta's Instagram Messaging API docs — whether
- * a read-receipt / typing (sender action) endpoint exists for IG messaging
- * and its request shape. No-op until confirmed.
+ * Adapter parity with whatsapp.service.markAsRead. Meta's Instagram Messaging
+ * docs only document 'react'/'unreact' sender actions — no mark_seen/typing
+ * equivalent — so this stays a deliberate no-op.
  */
 async function markAsRead(_messageId, _meta = {}) {
   return;
@@ -217,15 +233,12 @@ async function markAsRead(_messageId, _meta = {}) {
    High-level templated messages (adapter parity with whatsapp.service)
    ================================================================ */
 
-async function sendPaymentConfirmation(to, { orderNumber, total, businessName }, meta = {}) {
-  const body =
-`✅ Payment received!
-
-Order: ${orderNumber}
-Total: ${formatGhs(total)}
-Business: ${businessName || 'your vendor'}
-
-We'll notify you the moment your order is on its way. Thank you for shopping with us! 🛍️`;
+async function sendPaymentConfirmation(to, { orderNumber, total, businessName, lang }, meta = {}) {
+  const body = t(lang === 'tw' ? 'tw' : 'en', 'payment_received', {
+    n: orderNumber,
+    total: formatGhs(total),
+    shop: businessName || 'your vendor'
+  });
   return sendText(to, body, meta);
 }
 

@@ -5,6 +5,7 @@ const subService = require('./subscription.service');
 const lock = require('./worker.lock');
 const { query } = require('../config/database');
 const { formatGhs } = require('../utils/helpers');
+const { t, langOf } = require('../utils/i18n');
 
 const WEBHOOK_RETENTION_DAYS = parseInt(process.env.WEBHOOK_RETENTION_DAYS || '30', 10);
 const MESSAGE_LOG_RETENTION_DAYS = parseInt(process.env.MESSAGE_LOG_RETENTION_DAYS || '90', 10);
@@ -159,7 +160,8 @@ async function notifyOrderPaid({ order, business, customer }) {
       getAdapter(customer.channel).sendPaymentConfirmation(destOf(customer), {
         orderNumber: order.order_number,
         total: order.total_ghs,
-        businessName: business?.name
+        businessName: business?.name,
+        lang: langOf(business)
       }, { businessId: business?.id, customerId: customer.id })
     );
   }
@@ -184,25 +186,31 @@ async function notifyOrderPaid({ order, business, customer }) {
  * Tell the customer their order moved to a new fulfilment status.
  * Used by both the merchant's WhatsApp reply flow and the dashboard API.
  */
-const STATUS_MESSAGES = {
-  confirmed: (o, b) => `✅ ${b} confirmed your order *${o}*.`,
-  preparing: (o, b) => `🍳 ${b} is preparing your order *${o}*.`,
-  ready: (o, b) => `📦 Your order *${o}* is ready! It will be with you shortly.`,
-  delivered: (o, b) => `🎉 Order *${o}* delivered. Thank you for shopping with ${b}!`,
-  cancelled: (o, b) => `Your order *${o}* at ${b} has been cancelled. Reply *MENU* to order again.`
+const STATUS_KEYS = {
+  confirmed: 'ns_confirmed',
+  preparing: 'ns_preparing',
+  ready: 'ns_ready',
+  delivered: 'ns_delivered',
+  cancelled: 'ns_cancelled'
 };
 
 async function notifyOrderStatusChange({ order, business }) {
   if (!order?.customer_id) return;
-  const template = STATUS_MESSAGES[order.status];
-  if (!template) return;
+  const key = STATUS_KEYS[order.status];
+  if (!key) return;
   try {
     const customerRes = await query('SELECT * FROM customers WHERE id = $1', [order.customer_id]);
     const customer = customerRes.rows[0];
     if (!customer) return;
+    // Callers don't always pass the full business row; fetch the language if missing.
+    let lang = business && 'bot_language' in business ? langOf(business) : null;
+    if (lang == null) {
+      const bizRes = await query('SELECT bot_language FROM businesses WHERE id = $1', [order.business_id]);
+      lang = langOf(bizRes.rows[0]);
+    }
     await getAdapter(customer.channel).sendText(
       destOf(customer),
-      template(order.order_number, business?.name || 'the shop'),
+      t(lang, key, { n: order.order_number, shop: business?.name || 'the shop' }),
       { businessId: order.business_id, customerId: customer.id }
     );
   } catch (err) {

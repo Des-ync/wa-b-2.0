@@ -9,7 +9,7 @@ const router = express.Router();
 router.use(requireAuth('any'));
 
 const SETTINGS_COLUMNS =
-  'id, name, welcome_message, support_phone, delivery_fee_ghs, delivery_zones, open_time, close_time';
+  'id, name, welcome_message, support_phone, delivery_fee_ghs, delivery_zones, open_time, close_time, bot_language';
 
 function resolveBusinessId(req) {
   if (req.auth?.scope === 'admin') return req.query.business_id || req.body?.business_id || null;
@@ -89,6 +89,13 @@ router.patch('/settings', async (req, res) => {
         clean.push({ name, fee_ghs: Number(fee.toFixed(2)) });
       }
       set('delivery_zones', JSON.stringify(clean));
+    }
+    if ('bot_language' in body) {
+      const v = String(body.bot_language || 'en').trim();
+      if (!['en', 'tw'].includes(v)) {
+        return res.status(400).json({ success: false, error: "bot_language must be 'en' or 'tw'" });
+      }
+      set('bot_language', v);
     }
     for (const col of ['open_time', 'close_time']) {
       if (col in body) {

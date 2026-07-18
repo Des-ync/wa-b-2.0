@@ -158,7 +158,8 @@
           <label style="font-size:12px;color:var(--muted)">Welcome message (your bot's greeting — leave blank for the default)</label>
           <textarea id="sWelcome" rows="3" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-sm,6px);font:inherit;background:var(--bg);color:var(--ink)" placeholder="👋 Akwaaba! Welcome to Auntie Ama's Kitchen…"></textarea>
         </div>
-        <div class="row-form" style="grid-template-columns:1fr 1fr 1fr 1fr">
+        <div class="row-form" style="grid-template-columns:1fr 1fr 1fr 1fr 1fr">
+          <div><label>Bot language</label><select id="sLang"><option value="en">English</option><option value="tw">Twi</option></select></div>
           <div><label>Support number</label><input id="sSupport" placeholder="0241234567" /></div>
           <div><label>Flat delivery fee GH₵</label><input id="sFee" type="number" min="0" step="0.01" placeholder="0.00" /></div>
           <div><label>Opens (HH:MM)</label><input id="sOpen" placeholder="08:00" /></div>
@@ -505,6 +506,7 @@ async function exportOrdersCsv() {
 async function loadSettings() {
   const { settings } = await api('/business/settings');
   document.getElementById('sWelcome').value = settings.welcome_message || '';
+  document.getElementById('sLang').value = settings.bot_language === 'tw' ? 'tw' : 'en';
   document.getElementById('sSupport').value = settings.support_phone || '';
   document.getElementById('sFee').value = settings.delivery_fee_ghs != null ? Number(settings.delivery_fee_ghs).toFixed(2) : '';
   document.getElementById('sOpen').value = settings.open_time || '';
@@ -524,6 +526,7 @@ async function saveSettings() {
   const feeRaw = document.getElementById('sFee').value.trim();
   const body = {
     welcome_message: document.getElementById('sWelcome').value.trim() || null,
+    bot_language: document.getElementById('sLang').value,
     support_phone: document.getElementById('sSupport').value.trim() || null,
     delivery_zones: zones,
     open_time: document.getElementById('sOpen').value.trim() || null,

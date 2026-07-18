@@ -240,7 +240,7 @@ router.patch('/:id/status', async (req, res) => {
 
     // Keep the customer in the loop, same as the merchant chat flow does.
     if (order && order.status !== existing.status) {
-      const bizRes = await query('SELECT id, name FROM businesses WHERE id = $1', [order.business_id]);
+      const bizRes = await query('SELECT id, name, bot_language FROM businesses WHERE id = $1', [order.business_id]);
       notification.notifyOrderStatusChange({ order, business: bizRes.rows[0] })
         .catch(err => logger.warn('order status notify failed: %s', err.message));
     }

@@ -2,6 +2,7 @@ const logger = require('../utils/logger');
 const lock = require('./worker.lock');
 const { query } = require('../config/database');
 const { getAdapter, destOf } = require('./channel.adapter');
+const { t, langOf } = require('../utils/i18n');
 
 /**
  * Cart-abandonment recovery. Every run finds ordering-flow conversations that
@@ -22,7 +23,7 @@ async function runCartNudgeJob() {
     const candidates = await query(
       `SELECT cs.customer_id, cs.flow_data, c.channel, c.channel_id, c.whatsapp_number,
               b.id AS business_id, b.name AS business_name, b.status AS business_status,
-              b.trial_ends_at
+              b.trial_ends_at, b.bot_language
          FROM conversation_state cs
          JOIN customers c ON c.id = cs.customer_id
          JOIN businesses b ON b.id = c.business_id
@@ -58,13 +59,14 @@ async function runCartNudgeJob() {
         const cart = Array.isArray(row.flow_data?.cart) ? row.flow_data.cart : [];
         const count = cart.reduce((n, i) => n + (Number(i.quantity) || 1), 0);
         const customer = { channel: row.channel, channel_id: row.channel_id, whatsapp_number: row.whatsapp_number };
+        const lang = langOf(row);
         await getAdapter(row.channel).sendButtons(
           destOf(customer),
-          `🛒 Still thinking it over? Your cart at *${row.business_name}* with ${count} item${count === 1 ? '' : 's'} is saved and waiting.`,
+          t(lang, 'cart_nudge', { shop: row.business_name, count }),
           [
-            { id: 'checkout', title: 'Checkout' },
-            { id: 'add_more', title: 'Add more' },
-            { id: 'cancel_order', title: 'Cancel' }
+            { id: 'checkout', title: t(lang, 'btn_checkout') },
+            { id: 'add_more', title: t(lang, 'btn_add_more') },
+            { id: 'cancel_order', title: t(lang, 'btn_cancel') }
           ],
           { businessId: row.business_id, customerId: row.customer_id }
         );

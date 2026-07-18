@@ -20,6 +20,7 @@ const {
   parseQuantityExpression,
   isWithinBusinessHours
 } = require('../utils/helpers');
+const { t, langOf } = require('../utils/i18n');
 
 /* -----------------------------------------------------------------
    Typing indicator pacing: the first reply in a conversation waits the
@@ -175,11 +176,10 @@ function extractWhatsAppInbound(payload) {
 }
 
 /**
- * TODO(IG-API): verify against Meta's Instagram Messaging API docs — the
- * envelope walked below (entry[].messaging[] with sender/recipient/message,
- * message.mid, message.text, quick_reply.payload, is_echo) is a stub and must
- * be confirmed before go-live. Only the field paths need adjusting; the
- * returned normalized shape is final and matches extractWhatsAppInbound.
+ * Envelope confirmed against Meta's Instagram Messaging webhook docs:
+ * entry[].messaging[] with sender.id / recipient.id, message.mid,
+ * message.text, quick_reply.payload, and is_echo for business-sent echoes.
+ * entry[].id is the IG Professional account id (used for tenant routing).
  */
 function extractInstagramInbound(payload) {
   try {
@@ -752,17 +752,16 @@ async function handleCommerce({ business, inbound }) {
     logger.warn('Rate-limited customer %s (business %s) — dropping reply', customer.id, business.id);
     return;
   }
+  const lang = langOf(business);
   if (rate === 'warn') {
-    await ch.sendText(dest,
-      `You're sending messages a bit too fast. Please slow down — we'll pick up right where you left off in a few minutes. 🙏`,
+    await ch.sendText(dest, t(lang, 'slow_down'),
       { businessId: business.id, customerId: customer.id });
     return;
   }
 
   // Enforce subscription/trial access before serving any commerce flow.
   if (!await hasCommerceAccess(business)) {
-    await ch.sendText(dest,
-      `Sorry, ${business.name} is not accepting orders right now. Please check back later.`,
+    await ch.sendText(dest, t(lang, 'shop_unavailable', { shop: business.name }),
       { businessId: business.id, customerId: customer.id });
     return;
   }
@@ -775,9 +774,7 @@ async function handleCommerce({ business, inbound }) {
       return customerOrderStatus({ business, customer, orderNumber: orderRef[0].toUpperCase() });
     }
     await ch.sendText(dest,
-      `🕐 *${business.name}* is closed right now.` +
-      (business.open_time ? ` We open at ${business.open_time}.` : '') +
-      `\n\nMessage us again during opening hours to place an order — we'd love to serve you!`,
+      t(lang, 'shop_closed', { shop: business.name, open: business.open_time }),
       { businessId: business.id, customerId: customer.id });
     return;
   }
@@ -792,7 +789,7 @@ async function handleCommerce({ business, inbound }) {
   }
   if (upper === 'CANCEL' || upper === 'STOP') {
     await resetState(customer.id);
-    await ch.sendText(dest, 'Cart cleared. Reply *MENU* to start over.', {
+    await ch.sendText(dest, t(lang, 'cart_cleared'), {
       businessId: business.id, customerId: customer.id
     });
     return;
@@ -846,32 +843,30 @@ async function handleCommerce({ business, inbound }) {
  * customer at THIS business — an order number alone is not proof of ownership.
  */
 async function customerOrderStatus({ business, customer, orderNumber }) {
+  const lang = langOf(business);
   const order = await orderService.getOrderByNumber(orderNumber);
   if (!order || order.business_id !== business.id || order.customer_id !== customer.id) {
     await chOf(customer).sendText(destOf(customer),
-      `We couldn't find order *${orderNumber}* on your account with ${business.name}. Reply *MENU* to place a new order.`,
+      t(lang, 'order_not_found', { n: orderNumber, shop: business.name }),
       { businessId: business.id, customerId: customer.id });
     return;
   }
   const items = (Array.isArray(order.items) ? order.items : [])
     .map(i => `• ${i.quantity || 1}× ${i.name}`).join('\n') || '(no items)';
-  const statusLine = {
-    pending: '⏳ Waiting for payment',
-    confirmed: '✅ Confirmed — the shop has your order',
-    paid: '✅ Paid — being processed',
-    preparing: '🍳 Being prepared',
-    ready: '📦 Ready for delivery/pickup',
-    delivered: '🎉 Delivered',
-    cancelled: '❌ Cancelled'
-  }[order.status] || order.status;
+  const statusKey = {
+    pending: 'st_pending', confirmed: 'st_confirmed', paid: 'st_paid',
+    preparing: 'st_preparing', ready: 'st_ready',
+    delivered: 'st_delivered', cancelled: 'st_cancelled'
+  }[order.status];
   await chOf(customer).sendText(destOf(customer),
-`📋 Order *${order.order_number}* — ${business.name}
-
-${items}
-
-Total: ${formatGhs(order.total_ghs)}
-Payment: ${order.payment_status}
-Status: ${statusLine}`,
+    t(lang, 'order_card', {
+      n: order.order_number,
+      shop: business.name,
+      items,
+      total: formatGhs(order.total_ghs),
+      payment: order.payment_status,
+      status: statusKey ? t(lang, statusKey) : order.status
+    }),
     { businessId: business.id, customerId: customer.id });
 }
 
@@ -880,11 +875,12 @@ Status: ${statusLine}`,
  * current prices and skipping items no longer in stock.
  */
 async function reorderLastOrder({ business, customer }) {
+  const lang = langOf(business);
   const last = await orderService.getLastOrderForCustomer(customer.id, business.id);
   const items = last && Array.isArray(last.items) ? last.items : [];
   if (!items.length) {
     await chOf(customer).sendText(destOf(customer),
-      `You don't have a previous order with ${business.name} yet. Reply *MENU* to browse.`,
+      t(lang, 'no_previous_order', { shop: business.name }),
       { businessId: business.id, customerId: customer.id });
     return;
   }
@@ -916,13 +912,13 @@ async function reorderLastOrder({ business, customer }) {
 
   if (!cart.length) {
     await chOf(customer).sendText(destOf(customer),
-      `The items from your last order aren't available right now. Reply *MENU* to see today's menu.`,
+      t(lang, 'prev_items_unavailable'),
       { businessId: business.id, customerId: customer.id });
     return;
   }
   if (dropped.length) {
     await chOf(customer).sendText(destOf(customer),
-      `Heads up: ${dropped.join(', ')} ${dropped.length === 1 ? 'is' : 'are'} no longer available and ${dropped.length === 1 ? 'was' : 'were'} left out.`,
+      t(lang, 'items_dropped', { list: dropped.join(', '), count: dropped.length }),
       { businessId: business.id, customerId: customer.id });
   }
   return showCartReview({ business, customer, cart });
@@ -930,11 +926,11 @@ async function reorderLastOrder({ business, customer }) {
 
 async function sendSupportContact({ business, customer }) {
   const msisdn = String(business.support_phone || business.whatsapp_number || '').replace(/[^\d]/g, '');
-  const line = msisdn
-    ? `You can reach *${business.name}* directly on WhatsApp: https://wa.me/${msisdn}`
-    : `You can reach *${business.name}* directly on their WhatsApp line.`;
   await chOf(customer).sendText(destOf(customer),
-    `💬 ${line}\n\nOr reply *MENU* anytime to keep shopping.`,
+    t(langOf(business), 'support_direct', {
+      shop: business.name,
+      link: msisdn ? `https://wa.me/${msisdn}` : null
+    }),
     { businessId: business.id, customerId: customer.id, previewUrl: false });
 }
 
@@ -943,21 +939,22 @@ async function sendSupportContact({ business, customer }) {
  * making the customer rebuild their cart into a duplicate order.
  */
 async function retryOrderPayment({ business, customer, orderId }) {
+  const lang = langOf(business);
   const order = await orderService.getOrderById(orderId);
   if (!order || order.business_id !== business.id || order.customer_id !== customer.id) {
-    await chOf(customer).sendText(destOf(customer), 'That order is no longer available. Reply *MENU* to start over.',
+    await chOf(customer).sendText(destOf(customer), t(lang, 'order_gone'),
       { businessId: business.id, customerId: customer.id });
     return;
   }
   if (order.payment_status === 'paid') {
     await chOf(customer).sendText(destOf(customer),
-      `Order *${order.order_number}* is already paid. ✅`,
+      t(lang, 'order_already_paid', { n: order.order_number }),
       { businessId: business.id, customerId: customer.id });
     return;
   }
   if (order.status === 'cancelled') {
     await chOf(customer).sendText(destOf(customer),
-      `Order *${order.order_number}* was cancelled. Reply *MENU* to place a new one.`,
+      t(lang, 'order_was_cancelled', { n: order.order_number }),
       { businessId: business.id, customerId: customer.id });
     return;
   }
@@ -968,51 +965,51 @@ async function retryOrderPayment({ business, customer, orderId }) {
     data: { order_id: order.id, order_number: order.order_number, total: order.total_ghs }
   });
   await chOf(customer).sendButtons(destOf(customer),
-    `Let's finish paying for order *${order.order_number}* — total *${formatGhs(order.total_ghs)}*.\n\nHow would you like to pay?`,
+    t(lang, 'finish_paying', { n: order.order_number, total: formatGhs(order.total_ghs) }),
     [
-      { id: 'pay_momo', title: 'MoMo' },
-      { id: 'pay_card', title: 'Card / Link' },
-      { id: 'cancel_order', title: 'Cancel' }
+      { id: 'pay_momo', title: t(lang, 'btn_momo') },
+      { id: 'pay_card', title: t(lang, 'btn_card') },
+      { id: 'cancel_order', title: t(lang, 'btn_cancel') }
     ],
     { businessId: business.id, customerId: customer.id }
   );
 }
 
 async function cancelUnpaidOrder({ business, customer, orderId }) {
+  const lang = langOf(business);
   const order = await orderService.getOrderById(orderId);
   if (!order || order.business_id !== business.id || order.customer_id !== customer.id) {
-    await chOf(customer).sendText(destOf(customer), 'That order is no longer available.',
+    await chOf(customer).sendText(destOf(customer), t(lang, 'order_gone'),
       { businessId: business.id, customerId: customer.id });
     return;
   }
   if (order.payment_status === 'paid') {
     await chOf(customer).sendText(destOf(customer),
-      `Order *${order.order_number}* is already paid, so it can't be cancelled here. Contact ${business.name} if you need help.`,
+      t(lang, 'cannot_cancel_paid', { n: order.order_number, shop: business.name }),
       { businessId: business.id, customerId: customer.id });
     return;
   }
   await orderService.updateOrderStatus(order.id, 'cancelled');
   await resetState(customer.id);
   await chOf(customer).sendText(destOf(customer),
-    `Order *${order.order_number}* cancelled. Reply *MENU* anytime to order again.`,
+    t(lang, 'order_cancelled_ok', { n: order.order_number }),
     { businessId: business.id, customerId: customer.id });
 }
 
 async function sendWelcome({ business, customer }) {
   // Merchants can brand their greeting from the dashboard; the stock copy is
   // only the fallback. The action buttons are always appended.
+  const lang = langOf(business);
   const greeting = String(business.welcome_message || '').trim();
   const body = greeting
-    ? `${greeting.slice(0, 900)}\n\nTap *Order Now* to browse and pay with MoMo or card.`
-    : `👋 Welcome to *${business.name}*!
-
-Tap *Order Now* to browse our menu and place an order. Pay easily with MoMo or card.`;
+    ? `${greeting.slice(0, 900)}\n\n${t(lang, 'welcome_custom_suffix')}`
+    : t(lang, 'welcome_default', { shop: business.name });
   const buttons = [
-    { id: 'start_order', title: 'Order Now' },
-    { id: 'support_request', title: 'Talk to us' }
+    { id: 'start_order', title: t(lang, 'btn_order_now') },
+    { id: 'support_request', title: t(lang, 'btn_talk_to_us') }
   ];
   if (Number(customer.total_orders) > 0) {
-    buttons.push({ id: 'repeat_order', title: 'Repeat last order' });
+    buttons.push({ id: 'repeat_order', title: t(lang, 'btn_repeat') });
   }
   await chOf(customer).sendButtons(destOf(customer), body, buttons,
     { businessId: business.id, customerId: customer.id });
@@ -1035,9 +1032,10 @@ async function startOrderingFlow({ business, customer, page = 0 }) {
       LIMIT 200`,
     [business.id]
   );
+  const lang = langOf(business);
   if (!products.rows.length) {
     await chOf(customer).sendText(destOf(customer),
-      `Sorry, ${business.name} has no products available right now. Please check back soon!`,
+      t(lang, 'no_products', { shop: business.name }),
       { businessId: business.id, customerId: customer.id });
     return;
   }
@@ -1059,20 +1057,21 @@ async function startOrderingFlow({ business, customer, page = 0 }) {
   });
 
   const cartNote = cart.length
-    ? `\n\n🛒 ${cart.reduce((n, i) => n + (i.quantity || 1), 0)} item(s) already in your cart.`
+    ? t(lang, 'cart_note', { count: cart.reduce((n, i) => n + (i.quantity || 1), 0) })
     : '';
   await chOf(customer).sendList(
     destOf(customer),
-    `${business.name} Menu`,
-    `Tap an item to add it to your cart.${cartNote}`,
+    t(lang, 'menu_title', { shop: business.name }),
+    t(lang, 'menu_body', { cartNote }),
     sections,
-    { buttonLabel: 'View menu', businessId: business.id, customerId: customer.id }
+    { buttonLabel: t(lang, 'btn_view_menu'), businessId: business.id, customerId: customer.id }
   );
 }
 
 /* ---------- Ordering: routing while in flow ---------- */
 
 async function continueOrderingFlow({ business, customer, state, inbound }) {
+  const lang = langOf(business);
   const data = state.flow_data || {};
   const cart = Array.isArray(data.cart) ? data.cart : [];
   const upper = (inbound.text || '').toUpperCase().trim();
@@ -1099,7 +1098,7 @@ async function continueOrderingFlow({ business, customer, state, inbound }) {
     }
     if (inbound.interactiveId === 'cancel_order' || upper === 'CANCEL') {
       await resetState(customer.id);
-      await chOf(customer).sendText(destOf(customer), 'Order cancelled. Reply *MENU* to start over.',
+      await chOf(customer).sendText(destOf(customer), t(lang, 'order_cancelled_menu'),
         { businessId: business.id, customerId: customer.id });
       return;
     }
@@ -1115,7 +1114,7 @@ async function continueOrderingFlow({ business, customer, state, inbound }) {
     }
     if (inbound.interactiveId === 'cancel_order' || upper === 'CANCEL') {
       await resetState(customer.id);
-      await chOf(customer).sendText(destOf(customer), 'Order cancelled. Reply *MENU* to start over.',
+      await chOf(customer).sendText(destOf(customer), t(lang, 'order_cancelled_menu'),
         { businessId: business.id, customerId: customer.id });
       return;
     }
@@ -1148,7 +1147,7 @@ async function continueOrderingFlow({ business, customer, state, inbound }) {
     }
     if (inbound.interactiveId === 'cancel_order' || upper === 'CANCEL') {
       await resetState(customer.id);
-      await chOf(customer).sendText(destOf(customer), 'Order cancelled. Reply *MENU* to start over.',
+      await chOf(customer).sendText(destOf(customer), t(lang, 'order_cancelled_menu'),
         { businessId: business.id, customerId: customer.id });
       return;
     }
@@ -1170,7 +1169,7 @@ async function continueOrderingFlow({ business, customer, state, inbound }) {
         });
       }
       await chOf(customer).sendText(destOf(customer),
-        `We couldn't find "${qty.name}" on the menu. Tap *View menu* to pick from the list.`,
+        t(lang, 'product_not_found', { name: qty.name }),
         { businessId: business.id, customerId: customer.id });
       return startOrderingFlow({ business, customer, page: data.menu_page || 0 });
     }
@@ -1181,15 +1180,16 @@ async function continueOrderingFlow({ business, customer, state, inbound }) {
 }
 
 async function addProductToCart({ business, customer, productId, cart, quantity = 1 }) {
+  const lang = langOf(business);
   const res = await query(`SELECT * FROM products WHERE id = $1 AND business_id = $2`, [productId, business.id]);
   const product = res.rows[0];
   if (!product) {
-    await chOf(customer).sendText(destOf(customer), 'That item is no longer available.',
+    await chOf(customer).sendText(destOf(customer), t(lang, 'item_gone'),
       { businessId: business.id, customerId: customer.id });
     return;
   }
   if (!product.in_stock) {
-    await chOf(customer).sendText(destOf(customer), `Sorry, "${product.name}" is out of stock.`,
+    await chOf(customer).sendText(destOf(customer), t(lang, 'out_of_stock', { name: product.name }),
       { businessId: business.id, customerId: customer.id });
     return;
   }
@@ -1227,14 +1227,15 @@ async function addProductToCart({ business, customer, productId, cart, quantity 
 }
 
 async function promptAddMoreOrCheckout({ business, customer, justAdded }) {
+  const lang = langOf(business);
   const body = justAdded
-    ? `Added *${justAdded}* to your cart. ✅\n\nWould you like to add more items or checkout?`
-    : `Would you like to add more items or checkout?`;
+    ? t(lang, 'added_prompt', { name: justAdded })
+    : t(lang, 'add_or_checkout');
   await chOf(customer).sendButtons(destOf(customer), body,
     [
-      { id: 'add_more', title: 'Add more' },
-      { id: 'checkout', title: 'Checkout' },
-      { id: 'cancel_order', title: 'Cancel' }
+      { id: 'add_more', title: t(lang, 'btn_add_more') },
+      { id: 'checkout', title: t(lang, 'btn_checkout') },
+      { id: 'cancel_order', title: t(lang, 'btn_cancel') }
     ],
     { businessId: business.id, customerId: customer.id }
   );
@@ -1243,28 +1244,22 @@ async function promptAddMoreOrCheckout({ business, customer, justAdded }) {
 /* ---------- Ordering: STEP 2 (cart review) ---------- */
 
 async function showCartReview({ business, customer, cart }) {
+  const lang = langOf(business);
   if (!cart || cart.length === 0) {
-    await chOf(customer).sendText(destOf(customer), 'Your cart is empty. Reply *MENU* to start shopping.',
+    await chOf(customer).sendText(destOf(customer), t(lang, 'cart_empty'),
       { businessId: business.id, customerId: customer.id });
     await resetState(customer.id);
     return;
   }
   const totals = orderService.computeTotals(cart, 0);
   const lines = cart.map(i => `• ${i.quantity}× ${i.name} — ${formatGhs(i.price_ghs * i.quantity)}`).join('\n');
-  const body =
-`🛒 Your Cart
-
-${lines}
-
-Subtotal: *${formatGhs(totals.subtotal_ghs)}*
-
-Continue shopping or checkout?`;
 
   await saveState(customer.id, { flow: 'ordering', step: 'cart_review', data: { cart } });
-  await chOf(customer).sendButtons(destOf(customer), body, [
-    { id: 'continue_shop', title: 'Continue' },
-    { id: 'checkout', title: 'Checkout' },
-    { id: 'cancel_order', title: 'Cancel' }
+  await chOf(customer).sendButtons(destOf(customer),
+    t(lang, 'cart_review', { lines, subtotal: formatGhs(totals.subtotal_ghs) }), [
+    { id: 'continue_shop', title: t(lang, 'btn_continue') },
+    { id: 'checkout', title: t(lang, 'btn_checkout') },
+    { id: 'cancel_order', title: t(lang, 'btn_cancel') }
   ], { businessId: business.id, customerId: customer.id });
 }
 
@@ -1275,7 +1270,7 @@ async function askForAddress({ business, customer }) {
   const cart = state.flow_data?.cart || [];
   await saveState(customer.id, { flow: 'ordering', step: 'get_address', data: { cart } });
   await chOf(customer).sendText(destOf(customer),
-    `📍 Please send your delivery address as a text message (landmark, area, any special instructions) — or share your location pin.`,
+    t(langOf(business), 'ask_address'),
     { businessId: business.id, customerId: customer.id });
 }
 
@@ -1300,7 +1295,7 @@ async function captureAddress({ business, customer, cart, address, location }) {
   }
   if (trimmed.length < 5) {
     await chOf(customer).sendText(destOf(customer),
-      'That address looks too short. Please send a more detailed delivery address, or share your location pin 📍.',
+      t(langOf(business), 'address_short'),
       { businessId: business.id, customerId: customer.id });
     return;
   }
@@ -1319,6 +1314,7 @@ async function captureAddress({ business, customer, cart, address, location }) {
 }
 
 async function askForDeliveryZone({ business, customer, cart, address }) {
+  const lang = langOf(business);
   const zones = deliveryZonesOf(business);
   await saveState(customer.id, {
     flow: 'ordering',
@@ -1328,32 +1324,21 @@ async function askForDeliveryZone({ business, customer, cart, address }) {
   const rows = zones.map((z, i) => ({
     id: `zone_${i}`,
     title: truncate(z.name, 24),
-    description: `Delivery ${formatGhs(z.fee_ghs)}`
+    description: t(lang, 'zone_fee', { fee: formatGhs(z.fee_ghs) })
   }));
   await chOf(customer).sendList(
     destOf(customer),
-    'Delivery zone',
-    '📍 Which area are we delivering to? The delivery fee depends on your zone.',
-    [{ title: 'Zones', rows }],
-    { buttonLabel: 'Choose zone', businessId: business.id, customerId: customer.id }
+    t(lang, 'zone_header'),
+    t(lang, 'zone_body'),
+    [{ title: t(lang, 'zone_section'), rows }],
+    { buttonLabel: t(lang, 'btn_choose_zone'), businessId: business.id, customerId: customer.id }
   );
 }
 
 async function showOrderConfirm({ business, customer, cart, address, fee, zoneName }) {
+  const lang = langOf(business);
   const totals = orderService.computeTotals(cart, fee);
   const lines = cart.map(i => `• ${i.quantity}× ${i.name} — ${formatGhs(i.price_ghs * i.quantity)}`).join('\n');
-  const body =
-`📦 Order Summary
-
-${lines}
-
-Subtotal: ${formatGhs(totals.subtotal_ghs)}
-Delivery${zoneName ? ` (${zoneName})` : ''}: ${formatGhs(totals.delivery_fee)}
-*Total: ${formatGhs(totals.total_ghs)}*
-
-Address: ${address}
-
-Confirm and pay now?`;
 
   await saveState(customer.id, {
     flow: 'ordering',
@@ -1361,19 +1346,28 @@ Confirm and pay now?`;
     data: { cart, delivery_address: address, delivery_fee: totals.delivery_fee, delivery_zone: zoneName || null }
   });
 
-  await chOf(customer).sendButtons(destOf(customer), body, [
-    { id: 'confirm_pay', title: 'Confirm & Pay' },
-    { id: 'cancel_order', title: 'Cancel' }
+  await chOf(customer).sendButtons(destOf(customer),
+    t(lang, 'order_summary', {
+      lines,
+      subtotal: formatGhs(totals.subtotal_ghs),
+      zone: zoneName,
+      fee: formatGhs(totals.delivery_fee),
+      total: formatGhs(totals.total_ghs),
+      address
+    }), [
+    { id: 'confirm_pay', title: t(lang, 'btn_confirm_pay') },
+    { id: 'cancel_order', title: t(lang, 'btn_cancel') }
   ], { businessId: business.id, customerId: customer.id });
 }
 
 /* ---------- Ordering: STEP 4 (create order, move to payment) ---------- */
 
 async function finalizeOrderAndStartPayment({ business, customer, state }) {
+  const lang = langOf(business);
   const cart = state.flow_data?.cart || [];
   const address = state.flow_data?.delivery_address || null;
   if (!cart.length || !address) {
-    await chOf(customer).sendText(destOf(customer), 'Something went wrong with your order. Reply *MENU* to start over.',
+    await chOf(customer).sendText(destOf(customer), t(lang, 'order_broken'),
       { businessId: business.id, customerId: customer.id });
     await resetState(customer.id);
     return;
@@ -1392,7 +1386,7 @@ async function finalizeOrderAndStartPayment({ business, customer, state }) {
   } catch (err) {
     logger.error('createOrder failed: %s', err.message, { stack: err.stack });
     await chOf(customer).sendText(destOf(customer),
-      'We could not create your order right now. Please try again in a moment.',
+      t(lang, 'order_create_failed'),
       { businessId: business.id, customerId: customer.id });
     await resetState(customer.id);
     return;
@@ -1405,11 +1399,11 @@ async function finalizeOrderAndStartPayment({ business, customer, state }) {
   });
 
   await chOf(customer).sendButtons(destOf(customer),
-    `Order *${order.order_number}* created — total *${formatGhs(order.total_ghs)}*.\n\nHow would you like to pay?`,
+    t(lang, 'order_created', { n: order.order_number, total: formatGhs(order.total_ghs) }),
     [
-      { id: 'pay_momo', title: 'MoMo' },
-      { id: 'pay_card', title: 'Card / Link' },
-      { id: 'cancel_order', title: 'Cancel' }
+      { id: 'pay_momo', title: t(lang, 'btn_momo') },
+      { id: 'pay_card', title: t(lang, 'btn_card') },
+      { id: 'cancel_order', title: t(lang, 'btn_cancel') }
     ],
     { businessId: business.id, customerId: customer.id }
   );
@@ -1418,13 +1412,14 @@ async function finalizeOrderAndStartPayment({ business, customer, state }) {
 /* ---------- Payment flow ---------- */
 
 async function continuePaymentFlow({ business, customer, state, inbound }) {
+  const lang = langOf(business);
   const upper = (inbound.text || '').toUpperCase().trim();
   const data = state.flow_data || {};
   const orderId = data.order_id;
 
   if (!orderId) {
     await resetState(customer.id);
-    await chOf(customer).sendText(destOf(customer), 'Your session expired. Reply *MENU* to start over.',
+    await chOf(customer).sendText(destOf(customer), t(lang, 'session_expired'),
       { businessId: business.id, customerId: customer.id });
     return;
   }
@@ -1435,8 +1430,8 @@ async function continuePaymentFlow({ business, customer, state, inbound }) {
       // "USE THIS" only makes sense on WhatsApp, where the chat identity IS a
       // phone number. Instagram customers must type their MoMo number.
       const prompt = customer.channel === 'instagram'
-        ? '📱 Reply with the MoMo number to charge (e.g. 0241234567).'
-        : `📱 Reply with the MoMo number to charge (or send *USE THIS* to use ${customer.whatsapp_number}).`;
+        ? t(lang, 'momo_ask_ig')
+        : t(lang, 'momo_ask', { number: customer.whatsapp_number });
       await chOf(customer).sendText(destOf(customer), prompt,
         { businessId: business.id, customerId: customer.id });
       return;
@@ -1447,7 +1442,7 @@ async function continuePaymentFlow({ business, customer, state, inbound }) {
     if (inbound.interactiveId === 'cancel_order' || upper === 'CANCEL') {
       await orderService.updateOrderStatus(orderId, 'cancelled');
       await resetState(customer.id);
-      await chOf(customer).sendText(destOf(customer), 'Order cancelled.',
+      await chOf(customer).sendText(destOf(customer), t(lang, 'order_cancelled_short'),
         { businessId: business.id, customerId: customer.id });
       return;
     }
@@ -1461,7 +1456,7 @@ async function continuePaymentFlow({ business, customer, state, inbound }) {
       momoNumber = normalizeGhanaPhone(inbound.text);
       if (!momoNumber) {
         await chOf(customer).sendText(destOf(customer),
-          'That doesn\'t look like a valid Ghana MoMo number. Try again (e.g. 0241234567).',
+          t(lang, 'momo_invalid'),
           { businessId: business.id, customerId: customer.id });
         return;
       }
@@ -1469,15 +1464,16 @@ async function continuePaymentFlow({ business, customer, state, inbound }) {
     return startMomoPayment({ business, customer, orderId, momoNumber });
   }
 
-  await chOf(customer).sendText(destOf(customer), 'Reply *MENU* to start over.',
+  await chOf(customer).sendText(destOf(customer), t(lang, 'reply_menu'),
     { businessId: business.id, customerId: customer.id });
 }
 
 async function startMomoPayment({ business, customer, orderId, momoNumber }) {
+  const lang = langOf(business);
   const order = await orderService.getOrderById(orderId);
   if (!order) {
     await resetState(customer.id);
-    await chOf(customer).sendText(destOf(customer), 'Order not found. Reply *MENU* to start over.',
+    await chOf(customer).sendText(destOf(customer), t(lang, 'order_gone'),
       { businessId: business.id, customerId: customer.id });
     return;
   }
@@ -1494,7 +1490,7 @@ async function startMomoPayment({ business, customer, orderId, momoNumber }) {
 
   if (!result.success) {
     await chOf(customer).sendText(destOf(customer),
-      `⚠️ Could not start MoMo charge: ${result.error || 'unknown error'}.\n\nReply *MENU* to try again.`,
+      t(lang, 'momo_start_failed', { err: result.error || 'unknown error' }),
       { businessId: business.id, customerId: customer.id });
     await resetState(customer.id);
     return;
@@ -1508,17 +1504,18 @@ async function startMomoPayment({ business, customer, orderId, momoNumber }) {
 
   const display = result.display_text
     ? result.display_text
-    : `Approve the MoMo prompt on ${momoNumber} to complete payment.`;
+    : t(lang, 'momo_approve_hint', { number: momoNumber });
   await chOf(customer).sendText(destOf(customer),
-    `✅ MoMo charge initiated for *${formatGhs(order.total_ghs)}*.\n\n${display}\n\nWe'll confirm here once payment is received.`,
+    t(lang, 'momo_initiated', { total: formatGhs(order.total_ghs), display }),
     { businessId: business.id, customerId: customer.id });
 }
 
 async function startCardPayment({ business, customer, orderId }) {
+  const lang = langOf(business);
   const order = await orderService.getOrderById(orderId);
   if (!order) {
     await resetState(customer.id);
-    await chOf(customer).sendText(destOf(customer), 'Order not found. Reply *MENU* to start over.',
+    await chOf(customer).sendText(destOf(customer), t(lang, 'order_gone'),
       { businessId: business.id, customerId: customer.id });
     return;
   }
@@ -1539,7 +1536,7 @@ async function startCardPayment({ business, customer, orderId }) {
 
   if (!result.success || !result.authorization_url) {
     await chOf(customer).sendText(destOf(customer),
-      `⚠️ Could not generate payment link: ${result.error || 'unknown error'}.\n\nReply *MENU* to try again.`,
+      t(lang, 'card_link_failed', { err: result.error || 'unknown error' }),
       { businessId: business.id, customerId: customer.id });
     await resetState(customer.id);
     return;
@@ -1552,7 +1549,7 @@ async function startCardPayment({ business, customer, orderId }) {
   });
 
   await chOf(customer).sendText(destOf(customer),
-    `💳 Pay *${formatGhs(order.total_ghs)}* securely via this link:\n\n${result.authorization_url}\n\nWe'll confirm here once payment is received.`,
+    t(lang, 'card_link', { total: formatGhs(order.total_ghs), url: result.authorization_url }),
     { businessId: business.id, customerId: customer.id, previewUrl: true });
 }
 
@@ -1586,8 +1583,9 @@ async function handlePaymentSuccess({ reference, gatewayRef, amount }) {
     const customerRes = await query('SELECT * FROM customers WHERE id = $1', [result.order.customer_id]);
     const customer = customerRes.rows[0];
     if (customer) {
+      const bizRes = await query('SELECT bot_language FROM businesses WHERE id = $1', [result.order.business_id]);
       await chOf(customer).sendText(destOf(customer),
-        `⚠️ The payment received for order *${result.order.order_number}* did not match the order total. Our team will be in touch.`,
+        t(langOf(bizRes.rows[0]), 'payment_mismatch', { n: result.order.order_number }),
         { businessId: result.order.business_id, customerId: customer.id });
     }
     return { handled: true, mismatch: true };
@@ -1616,11 +1614,13 @@ async function handlePaymentFailure({ reference }) {
   const customerRes = await query('SELECT * FROM customers WHERE id = $1', [order.customer_id]);
   const customer = customerRes.rows[0];
   if (customer) {
+    const bizRes = await query('SELECT bot_language FROM businesses WHERE id = $1', [order.business_id]);
+    const lang = langOf(bizRes.rows[0]);
     await chOf(customer).sendButtons(destOf(customer),
-      `⚠️ Payment for order *${order.order_number}* did not go through.\n\nYour order is saved — you can try paying again.`,
+      t(lang, 'payment_failed_retry', { n: order.order_number }),
       [
-        { id: `retrypay_${order.id}`, title: 'Try again' },
-        { id: `cancelord_${order.id}`, title: 'Cancel order' }
+        { id: `retrypay_${order.id}`, title: t(lang, 'btn_try_again') },
+        { id: `cancelord_${order.id}`, title: t(lang, 'btn_cancel_order') }
       ],
       { businessId: order.business_id, customerId: customer.id });
     try { await resetState(customer.id); } catch (_e) { /* ignore */ }

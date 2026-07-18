@@ -3,6 +3,7 @@ const axios = require('axios');
 const logger = require('../utils/logger');
 const { query } = require('../config/database');
 const { toWaRecipient, formatGhs, formatDate, truncate } = require('../utils/helpers');
+const { t } = require('../utils/i18n');
 
 const WA_API_VERSION = process.env.WA_API_VERSION || 'v19.0';
 const WA_PHONE_NUMBER_ID = process.env.WA_PHONE_NUMBER_ID;
@@ -274,15 +275,12 @@ async function sendBusinessNotice({ to, templateEnv, bodyParams, fallbackText, m
    High-level templated messages
    ================================================================ */
 
-async function sendPaymentConfirmation(to, { orderNumber, total, businessName }, meta = {}) {
-  const body =
-`✅ Payment received!
-
-Order: ${orderNumber}
-Total: ${formatGhs(total)}
-Business: ${businessName || 'your vendor'}
-
-We'll notify you the moment your order is on its way. Thank you for shopping with us! 🛍️`;
+async function sendPaymentConfirmation(to, { orderNumber, total, businessName, lang }, meta = {}) {
+  const body = t(lang === 'tw' ? 'tw' : 'en', 'payment_received', {
+    n: orderNumber,
+    total: formatGhs(total),
+    shop: businessName || 'your vendor'
+  });
   return sendText(to, body, meta);
 }
 
