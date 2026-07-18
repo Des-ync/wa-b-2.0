@@ -72,7 +72,15 @@ function extractWhatsAppInbound(payload) {
     if (!message) return null;
 
     const contact = value.contacts?.[0];
-    const from = `+${message.from.replace(/^\+/, '')}`;
+    // Meta's "message without sharing your number" mode omits `message.from`
+    // entirely — the sender is identified only by an opaque from_user_id
+    // (e.g. "GH.1051901200567604") plus a username, no phone number at all.
+    // Falling back blindly to message.from.replace(...) throws on that shape
+    // and this whole function returns null, silently dropping the message.
+    const senderId = message.from || message.from_user_id || contact?.user_id;
+    if (!senderId) return null;
+    const looksLikePhone = /^\+?\d+$/.test(senderId);
+    const from = looksLikePhone ? `+${senderId.replace(/^\+/, '')}` : senderId;
     const profileName = contact?.profile?.name;
     const messageId = message.id;
 
