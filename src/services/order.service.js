@@ -147,6 +147,19 @@ async function getOrderByPaymentRef(paymentRef) {
   return res.rows[0] || null;
 }
 
+/**
+ * The customer's most recent non-cancelled order at a business (for "REPEAT").
+ */
+async function getLastOrderForCustomer(customerId, businessId) {
+  const res = await query(
+    `SELECT * FROM orders
+      WHERE customer_id = $1 AND business_id = $2 AND status <> 'cancelled'
+      ORDER BY created_at DESC LIMIT 1`,
+    [customerId, businessId]
+  );
+  return res.rows[0] || null;
+}
+
 async function listOrdersForBusiness(businessId, { limit = 50, status } = {}) {
   const params = [businessId];
   let sql = 'SELECT * FROM orders WHERE business_id = $1';
@@ -278,6 +291,7 @@ module.exports = {
   getOrderById,
   getOrderByNumber,
   getOrderByPaymentRef,
+  getLastOrderForCustomer,
   listOrdersForBusiness,
   updateOrderStatus,
   attachPaymentReference,

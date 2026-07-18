@@ -203,6 +203,53 @@ function buildMenuPage(products, page = 0, pageSize = 8) {
   return { rows, page: p, totalPages, hasPrev, hasNext };
 }
 
+/**
+ * Parse a "2x Jollof" / "Jollof x2" / "2 × Jollof" style message into
+ * { quantity, name }. Returns null when the text isn't a quantity expression.
+ * Quantity is clamped to 1–99.
+ */
+function parseQuantityExpression(text) {
+  const s = String(text || '').trim();
+  if (!s) return null;
+  let m = s.match(/^(\d{1,2})\s*[x×*]\s*(.{2,})$/i);
+  if (!m) {
+    const tail = s.match(/^(.{2,}?)\s*[x×*]\s*(\d{1,2})$/i);
+    if (tail) m = [tail[0], tail[2], tail[1]];
+  }
+  if (!m) return null;
+  const quantity = Math.min(99, Math.max(1, parseInt(m[1], 10)));
+  const name = m[2].trim();
+  if (!name) return null;
+  return { quantity, name };
+}
+
+/**
+ * Is the business open right now in Africa/Accra?
+ * open_time/close_time are 'HH:MM' strings; missing/invalid → always open.
+ * Supports overnight windows (e.g. 18:00–02:00).
+ */
+function isWithinBusinessHours(openTime, closeTime, now = new Date()) {
+  const parse = t => {
+    const m = /^(\d{1,2}):(\d{2})$/.exec(String(t || '').trim());
+    if (!m) return null;
+    const h = parseInt(m[1], 10), min = parseInt(m[2], 10);
+    if (h > 23 || min > 59) return null;
+    return h * 60 + min;
+  };
+  const open = parse(openTime);
+  const close = parse(closeTime);
+  if (open == null || close == null || open === close) return true;
+
+  const accra = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Africa/Accra', hour: '2-digit', minute: '2-digit', hour12: false
+  }).format(now);
+  const [h, m] = accra.split(':').map(Number);
+  const cur = h * 60 + m;
+
+  if (open < close) return cur >= open && cur < close;
+  return cur >= open || cur < close; // overnight window
+}
+
 module.exports = {
   normalizeGhanaPhone,
   detectNetwork,
@@ -220,5 +267,7 @@ module.exports = {
   safeJsonParse,
   ORDER_NUMBER_RE,
   decayedTypingDelay,
-  buildMenuPage
+  buildMenuPage,
+  parseQuantityExpression,
+  isWithinBusinessHours
 };

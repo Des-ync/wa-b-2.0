@@ -9,6 +9,7 @@ const { pool, query } = require('./config/database');
 const notification = require('./services/notification.service');
 const webhookProcessor = require('./services/webhook.processor');
 const paymentSweeper = require('./services/payment.sweeper');
+const cartNudge = require('./services/cart.nudge');
 const { requireAuth } = require('./middleware/auth');
 
 const webhookRoutes = require('./routes/webhook.routes');
@@ -18,6 +19,8 @@ const orderRoutes = require('./routes/order.routes');
 const adminRoutes = require('./routes/admin.routes');
 const productRoutes = require('./routes/product.routes');
 const authRoutes = require('./routes/auth.routes');
+const customerRoutes = require('./routes/customer.routes');
+const businessRoutes = require('./routes/business.routes');
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
@@ -110,6 +113,36 @@ app.use('/api/orders', apiLimiter, orderRoutes);
 app.use('/api/admin', apiLimiter, adminRoutes);
 app.use('/api/products', apiLimiter, productRoutes);
 app.use('/api/auth', apiLimiter, authRoutes);
+app.use('/api/customers', apiLimiter, customerRoutes);
+app.use('/api/business', apiLimiter, businessRoutes);
+
+// Public system status — powers the (honest) status page. Exposes only
+// coarse operational signals, never tenant data.
+app.get('/api/status', apiLimiter, async (_req, res) => {
+  const status = { db: false, queue: null, checked_at: new Date().toISOString() };
+  try {
+    const r = await query(
+      `SELECT
+         (SELECT COUNT(*)::int FROM webhook_events WHERE status = 'pending')     AS pending,
+         (SELECT COUNT(*)::int FROM webhook_events WHERE status = 'processing')  AS processing,
+         (SELECT COUNT(*)::int FROM webhook_events
+           WHERE status = 'failed' AND received_at > NOW() - INTERVAL '24 hours') AS failed_24h,
+         (SELECT EXTRACT(EPOCH FROM (NOW() - MAX(received_at)))::int
+            FROM webhook_events)                                                 AS last_webhook_age_s,
+         (SELECT EXTRACT(EPOCH FROM (NOW() - MIN(next_attempt_at)))::int
+            FROM webhook_events WHERE status = 'pending')                        AS oldest_pending_age_s`
+    );
+    status.db = true;
+    status.queue = r.rows[0];
+    const degraded = (status.queue.pending || 0) > 100 || (status.queue.oldest_pending_age_s || 0) > 600;
+    status.overall = degraded ? 'degraded' : 'operational';
+    res.json({ success: true, status });
+  } catch (err) {
+    logger.error('GET /api/status failed: %s', err.message);
+    status.overall = 'outage';
+    res.status(503).json({ success: false, status });
+  }
+});
 
 // Who am I? Lets the dashboard resolve the business behind an API key OR a
 // Clerk session token — requireAuth() accepts either transparently. A Clerk
@@ -187,7 +220,14 @@ function startCronJobs() {
     );
   }, { timezone: 'Africa/Accra' });
 
-  logger.info('Cron jobs scheduled (Africa/Accra) — 08:00 renewals, 09:00 reminders, 10:00 suspensions, 5-min payment sweeper, weekly prune.');
+  // Cart-abandonment nudges every 15 minutes (leader-locked, once per cart).
+  cron.schedule('*/15 * * * *', () => {
+    cartNudge.runCartNudgeJob().catch(err =>
+      logger.error('cartNudgeJob crashed: %s', err.message, { stack: err.stack })
+    );
+  }, { timezone: 'Africa/Accra' });
+
+  logger.info('Cron jobs scheduled (Africa/Accra) — 08:00 renewals, 09:00 reminders, 10:00 suspensions, 5-min payment sweeper, 15-min cart nudges, weekly prune.');
 }
 
 /* -------------------------------------------------------------------------

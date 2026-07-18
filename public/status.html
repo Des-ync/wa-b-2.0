@@ -15,85 +15,100 @@
 
 <section class="page-hero"><div class="wrap">
   <span class="eyebrow">System status</span>
-  <h1 style="margin-top:18px">All systems operational.</h1>
-  <p>Real-time health of every part of WA-B: webhooks, payment rails, dashboards, and queues. Updated every 60 seconds.</p>
+  <h1 style="margin-top:18px" id="statusHeadline">Checking systems…</h1>
+  <p>Live health of the WA-B platform: database, webhook intake, and the processing queue. Checked directly against production every 60 seconds — nothing on this page is hardcoded.</p>
 </div></section>
 
 <section class="section section--tight"><div class="wrap" style="max-width:920px">
   <div class="status-banner">
-    <span class="status-dot"></span>
+    <span class="status-dot" id="bannerDot"></span>
     <div>
-      <b>All systems operational</b>
-      <div style="font-size:13.5px;color:var(--muted);margin-top:2px">No incidents reported in the last 90 days.</div>
+      <b id="bannerTitle">Checking…</b>
+      <div style="font-size:13.5px;color:var(--muted);margin-top:2px" id="bannerSub">Contacting the live API…</div>
     </div>
   </div>
 
   <h2 class="h-card" style="font-size:18px;margin:48px 0 8px">Core services</h2>
   <div>
     <div class="status-row">
-      <div><b>WhatsApp Cloud API webhook</b><div style="font-size:13px;color:var(--muted);margin-top:2px">Inbound message receipt, signature verification, queueing</div></div>
-      <div class="status-bars" title="Last 90 days">
-        <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
-        <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
-        <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
-      </div>
-      <span class="uptime">99.99%</span>
+      <div><b>API &amp; database</b><div style="font-size:13px;color:var(--muted);margin-top:2px">HTTP API reachability and PostgreSQL connectivity</div></div>
+      <span class="uptime" id="svcDb">…</span>
     </div>
     <div class="status-row">
-      <div><b>Hubtel MoMo Collections</b><div style="font-size:13px;color:var(--muted);margin-top:2px">Subscription billing, customer order MoMo prompts</div></div>
-      <div class="status-bars">
-        <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
-        <span></span><span></span><span></span><span class="warn"></span><span></span><span></span><span></span><span></span><span></span><span></span>
-        <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
-      </div>
-      <span class="uptime">99.92%</span>
+      <div><b>Webhook intake</b><div style="font-size:13px;color:var(--muted);margin-top:2px">Inbound WhatsApp / payment events landing in the durable queue</div></div>
+      <span class="uptime" id="svcIntake">…</span>
     </div>
     <div class="status-row">
-      <div><b>Paystack card processing</b><div style="font-size:13px;color:var(--muted);margin-top:2px">Card payments, redirect callbacks, signature verification</div></div>
-      <div class="status-bars">
-        <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
-        <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
-        <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
-      </div>
-      <span class="uptime">100.00%</span>
+      <div><b>Webhook queue &amp; processor</b><div style="font-size:13px;color:var(--muted);margin-top:2px">Queue depth and oldest pending event age</div></div>
+      <span class="uptime" id="svcQueue">…</span>
     </div>
     <div class="status-row">
-      <div><b>Webhook queue &amp; processor</b><div style="font-size:13px;color:var(--muted);margin-top:2px">Durable queue, exponential backoff retries, leader election</div></div>
-      <div class="status-bars">
-        <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
-        <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
-        <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
-      </div>
-      <span class="uptime">99.98%</span>
-    </div>
-    <div class="status-row">
-      <div><b>Merchant dashboard</b><div style="font-size:13px;color:var(--muted);margin-top:2px">Web UI, API, authentication</div></div>
-      <div class="status-bars">
-        <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
-        <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
-        <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
-      </div>
-      <span class="uptime">99.97%</span>
-    </div>
-    <div class="status-row">
-      <div><b>Cron: renewals, reminders, suspensions</b><div style="font-size:13px;color:var(--muted);margin-top:2px">08:00 / 09:00 / 10:00 GMT daily, leader-locked</div></div>
-      <div class="status-bars">
-        <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
-        <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
-        <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
-      </div>
-      <span class="uptime">100.00%</span>
+      <div><b>Processing failures (24h)</b><div style="font-size:13px;color:var(--muted);margin-top:2px">Events that exhausted all retries in the last 24 hours</div></div>
+      <span class="uptime" id="svcFailed">…</span>
     </div>
   </div>
 
   <div class="dash-row" style="margin-top:48px">
-    <div class="dash-stat"><div class="dash-stat-label">90-day uptime</div><div class="dash-stat-val">99.97%</div><div class="dash-stat-delta">Above 99.95% SLA</div></div>
-    <div class="dash-stat"><div class="dash-stat-label">P50 reply latency</div><div class="dash-stat-val">1.2s</div><div class="dash-stat-delta">↓ 18% MoM</div></div>
-    <div class="dash-stat"><div class="dash-stat-label">Active incidents</div><div class="dash-stat-val">0</div><div class="dash-stat-delta">All clear</div></div>
+    <div class="dash-stat"><div class="dash-stat-label">Queue depth</div><div class="dash-stat-val" id="statDepth">—</div><div class="dash-stat-delta">pending events</div></div>
+    <div class="dash-stat"><div class="dash-stat-label">Last webhook received</div><div class="dash-stat-val" id="statLast">—</div><div class="dash-stat-delta">across all sources</div></div>
+    <div class="dash-stat"><div class="dash-stat-label">Failed (24h)</div><div class="dash-stat-val" id="statFailed">—</div><div class="dash-stat-delta" id="statFailedNote">after all retries</div></div>
   </div>
 
-  <h2 class="h-card" style="font-size:18px;margin:48px 0 8px">Recent incidents</h2>
-  <p style="color:var(--muted);font-size:14.5px">No incidents in the last 90 days. <a href="#" style="color:var(--ink);border-bottom:1px solid var(--line-2)">View incident history →</a></p>
+  <p style="color:var(--muted);font-size:13px;margin-top:32px" id="lastChecked"></p>
+
+<script>
+(function () {
+  const $ = id => document.getElementById(id);
+  const fmtAge = s => {
+    if (s == null) return 'no events yet';
+    if (s < 90) return s + 's ago';
+    if (s < 5400) return Math.round(s / 60) + 'm ago';
+    return Math.round(s / 3600) + 'h ago';
+  };
+  const setPill = (id, ok, text) => {
+    const el = $(id);
+    el.textContent = text;
+    el.style.color = ok ? 'var(--success, #1a7f4e)' : 'var(--warning, #b76e00)';
+  };
+
+  async function refresh() {
+    try {
+      const res = await fetch('/api/status');
+      const body = await res.json();
+      const st = body.status || {};
+      const q = st.queue || {};
+      const overall = st.overall || (st.db ? 'operational' : 'outage');
+
+      $('statusHeadline').textContent =
+        overall === 'operational' ? 'All systems operational.' :
+        overall === 'degraded' ? 'Degraded performance.' : 'Service disruption.';
+      $('bannerTitle').textContent = $('statusHeadline').textContent;
+      $('bannerSub').textContent = overall === 'operational'
+        ? 'Database reachable, queue draining normally.'
+        : (st.db ? 'The queue is running behind — events are safe and will be processed.' : 'The API could not reach the database.');
+      $('bannerDot').style.background = overall === 'operational' ? '' : 'var(--warning, #b76e00)';
+
+      setPill('svcDb', st.db, st.db ? 'Operational' : 'Down');
+      const intakeOk = q.last_webhook_age_s == null || q.last_webhook_age_s < 6 * 3600;
+      setPill('svcIntake', intakeOk, 'Last event ' + fmtAge(q.last_webhook_age_s));
+      const queueOk = (q.pending || 0) <= 100 && (q.oldest_pending_age_s || 0) <= 600;
+      setPill('svcQueue', queueOk, (q.pending || 0) + ' pending' + (q.processing ? ', ' + q.processing + ' in flight' : ''));
+      setPill('svcFailed', !(q.failed_24h > 0), (q.failed_24h || 0) + ' failed');
+
+      $('statDepth').textContent = q.pending != null ? q.pending : '—';
+      $('statLast').textContent = fmtAge(q.last_webhook_age_s);
+      $('statFailed').textContent = q.failed_24h != null ? q.failed_24h : '—';
+      $('lastChecked').textContent = 'Last checked ' + new Date().toLocaleTimeString() + ' · auto-refreshes every 60s';
+    } catch (err) {
+      $('statusHeadline').textContent = 'Status unavailable.';
+      $('bannerTitle').textContent = 'Status unavailable';
+      $('bannerSub').textContent = 'Could not reach the status API from your browser.';
+    }
+  }
+  refresh();
+  setInterval(refresh, 60_000);
+})();
+</script>
 
   <p style="color:var(--muted);font-size:13px;margin-top:48px;font-family:var(--font-mono)">Subscribe to status updates: <a href="#" style="color:var(--ink)">RSS</a> · <a href="#" style="color:var(--ink)">WhatsApp</a> · <a href="#" style="color:var(--ink)">Email</a></p>
 </div></section>

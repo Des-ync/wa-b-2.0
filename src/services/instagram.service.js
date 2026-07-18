@@ -146,6 +146,18 @@ async function sendText(to, body, meta = {}) {
 }
 
 /**
+ * Adapter parity with whatsapp.service.sendImage.
+ *
+ * TODO(IG-API): verify against Meta's Instagram Messaging API docs — the
+ * attachment payload shape for image sends. Routed through the same
+ * buildSendRequest() stub, so it fails loudly (never guesses) until filled in.
+ */
+async function sendImage(to, imageUrl, caption, meta = {}) {
+  const message = { type: 'image', url: String(imageUrl || ''), text: caption ? String(caption).slice(0, 1000) : undefined };
+  return sendRaw({ recipientId: to, message }, { ...meta, content: caption || `[image] ${imageUrl}` });
+}
+
+/**
  * Send text with quick-reply chips — the Instagram analogue of WhatsApp reply
  * buttons. options = [{ id: 'BTN_1', title: 'Yes' }, ...]
  *
@@ -221,6 +233,7 @@ module.exports = {
   resolveCredentials,
   sendRaw,
   sendText,
+  sendImage,
   sendQuickReplies,
   sendButtons,
   sendList,

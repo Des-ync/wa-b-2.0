@@ -37,6 +37,97 @@ router.get('/', async (req, res) => {
   }
 });
 
+/**
+ * GET /api/orders/stats/today?business_id= — merchant "how did I do today"
+ * counters, computed in Africa/Accra local time.
+ */
+router.get('/stats/today', async (req, res) => {
+  try {
+    const { business_id } = req.query;
+    if (!business_id) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (tenantBlocksBusinessId(req, business_id)) {
+      return res.status(403).json({ success: false, error: 'Key does not match business' });
+    }
+    const r = await query(
+      `WITH today AS (
+         SELECT * FROM orders
+          WHERE business_id = $1
+            AND created_at >= date_trunc('day', NOW() AT TIME ZONE 'Africa/Accra') AT TIME ZONE 'Africa/Accra'
+       )
+       SELECT
+         (SELECT COUNT(*)::int FROM today)                                          AS orders_count,
+         (SELECT COUNT(*)::int FROM today WHERE payment_status = 'paid')            AS paid_count,
+         (SELECT COALESCE(SUM(total_ghs),0) FROM today WHERE payment_status='paid') AS gmv_ghs,
+         (SELECT COUNT(*)::int FROM today WHERE payment_status = 'pending')         AS awaiting_payment,
+         (SELECT COUNT(*)::int FROM today WHERE status = 'cancelled')               AS cancelled_count,
+         (SELECT COUNT(*)::int FROM today WHERE payment_ref IS NOT NULL)            AS payment_attempts,
+         (SELECT COUNT(*)::int FROM orders
+           WHERE business_id = $1 AND status IN ('confirmed','paid','preparing'))   AS open_orders`,
+      [business_id]
+    );
+    const s = r.rows[0];
+    s.payment_success_rate = s.payment_attempts > 0
+      ? Math.round((s.paid_count / s.payment_attempts) * 100)
+      : null;
+    res.json({ success: true, stats: s });
+  } catch (err) {
+    logger.error('GET /orders/stats/today failed: %s', err.message);
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+/**
+ * GET /api/orders/export?business_id=&status= — CSV download of orders.
+ */
+router.get('/export', async (req, res) => {
+  try {
+    const { business_id, status } = req.query;
+    if (!business_id) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (tenantBlocksBusinessId(req, business_id)) {
+      return res.status(403).json({ success: false, error: 'Key does not match business' });
+    }
+    const params = [business_id];
+    let sql =
+      `SELECT o.order_number, o.created_at, c.whatsapp_number AS customer_phone,
+              c.display_name AS customer_name, o.items, o.subtotal_ghs, o.delivery_fee,
+              o.total_ghs, o.payment_status, o.payment_method, o.status, o.delivery_address, o.notes
+         FROM orders o
+         LEFT JOIN customers c ON c.id = o.customer_id
+        WHERE o.business_id = $1`;
+    if (status) {
+      params.push(status);
+      sql += ` AND o.status = $${params.length}`;
+    }
+    sql += ' ORDER BY o.created_at DESC LIMIT 5000';
+    const r = await query(sql, params);
+
+    const csvCell = v => {
+      const s = String(v == null ? '' : v);
+      return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    };
+    const header = ['order_number','created_at','customer_phone','customer_name','items',
+      'subtotal_ghs','delivery_fee_ghs','total_ghs','payment_status','payment_method',
+      'status','delivery_address','notes'];
+    const lines = [header.join(',')];
+    for (const o of r.rows) {
+      const items = (Array.isArray(o.items) ? o.items : [])
+        .map(i => `${i.quantity || 1}x ${i.name}`).join('; ');
+      lines.push([
+        o.order_number, new Date(o.created_at).toISOString(), o.customer_phone, o.customer_name,
+        items, o.subtotal_ghs, o.delivery_fee, o.total_ghs, o.payment_status,
+        o.payment_method, o.status, o.delivery_address, o.notes
+      ].map(csvCell).join(','));
+    }
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition',
+      `attachment; filename="orders-${new Date().toISOString().slice(0, 10)}.csv"`);
+    res.send(lines.join('\r\n'));
+  } catch (err) {
+    logger.error('GET /orders/export failed: %s', err.message);
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
 /** GET /api/orders/:id */
 router.get('/:id', async (req, res) => {
   try {

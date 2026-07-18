@@ -43,6 +43,18 @@ ALTER TABLE businesses ADD COLUMN IF NOT EXISTS clerk_user_id TEXT UNIQUE;
 -- Instagram DM channel (upgrade path for existing databases).
 ALTER TABLE businesses ADD COLUMN IF NOT EXISTS ig_business_account_id TEXT UNIQUE;
 ALTER TABLE businesses ADD COLUMN IF NOT EXISTS ig_page_access_token TEXT;
+-- Merchant-configurable bot settings (upgrade path for existing databases).
+-- welcome_message: branded greeting shown instead of the stock welcome.
+-- support_phone: number handed out on "Talk to us" (falls back to whatsapp_number).
+-- delivery_fee_ghs: flat delivery fee used when no zones are configured.
+-- delivery_zones: JSONB array of { name, fee_ghs } offered at checkout.
+-- open_time/close_time: 'HH:MM' business hours in Africa/Accra; NULL = always open.
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS welcome_message TEXT;
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS support_phone TEXT;
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS delivery_fee_ghs NUMERIC(10,2) NOT NULL DEFAULT 0;
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS delivery_zones JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS open_time TEXT;
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS close_time TEXT;
 
 -- =========================================================================
 -- plans: SaaS pricing tiers
@@ -212,6 +224,9 @@ CREATE TABLE IF NOT EXISTS conversation_state (
   updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_conv_state_expires ON conversation_state(expires_at);
+-- Cart-abandonment recovery: when the idle-cart nudge was last sent, so each
+-- abandoned cart gets at most one reminder (upgrade path for existing DBs).
+ALTER TABLE conversation_state ADD COLUMN IF NOT EXISTS nudge_sent_at TIMESTAMPTZ;
 
 -- =========================================================================
 -- message_log: full audit trail (de-duplicated by wa_message_id when present)

@@ -16,7 +16,9 @@ const {
   sleep,
   ORDER_NUMBER_RE,
   decayedTypingDelay,
-  buildMenuPage
+  buildMenuPage,
+  parseQuantityExpression,
+  isWithinBusinessHours
 } = require('../utils/helpers');
 
 /* -----------------------------------------------------------------
@@ -42,6 +44,42 @@ function nextTypingDelay(key) {
 
 const SUPPORT_NUMBER = process.env.SUPPORT_WHATSAPP_NUMBER || '+233241234567';
 const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || '';
+
+/* -----------------------------------------------------------------
+   Per-customer inbound rate limit. A hostile or looping customer spamming
+   the bot burns Meta conversation fees; past the soft cap they get ONE
+   cool-off notice per window, past the hard cap we stop replying entirely
+   (their messages are still logged/deduped above).
+   ----------------------------------------------------------------- */
+const RATE_WINDOW_MS = 10 * 60 * 1000;
+const RATE_SOFT_MAX = 25;   // replies allowed per window
+const RATE_HARD_MAX = 50;   // beyond this: silent drop
+const rateBuckets = new Map(); // customerId -> { timestamps: number[], warnedAt: number }
+
+function checkInboundRate(customerId) {
+  const now = Date.now();
+  if (rateBuckets.size > 10_000) {
+    for (const [k, v] of rateBuckets) {
+      if (!v.timestamps.length || now - v.timestamps[v.timestamps.length - 1] > RATE_WINDOW_MS) {
+        rateBuckets.delete(k);
+      }
+    }
+  }
+  const bucket = rateBuckets.get(customerId) || { timestamps: [], warnedAt: 0 };
+  bucket.timestamps = bucket.timestamps.filter(t => now - t < RATE_WINDOW_MS);
+  bucket.timestamps.push(now);
+  rateBuckets.set(customerId, bucket);
+
+  if (bucket.timestamps.length > RATE_HARD_MAX) return 'drop';
+  if (bucket.timestamps.length > RATE_SOFT_MAX) {
+    if (now - bucket.warnedAt > RATE_WINDOW_MS) {
+      bucket.warnedAt = now;
+      return 'warn';
+    }
+    return 'drop';
+  }
+  return 'ok';
+}
 
 /** Outbound adapter for a customer's channel (WhatsApp unless 'instagram'). */
 function chOf(customer) {
@@ -707,10 +745,39 @@ async function handleCommerce({ business, inbound }) {
     await sleep(nextTypingDelay(`cust:${customer.id}`));
   }
 
+  // Abuse guard: replies stop past the cap; the customer's messages are
+  // still logged above so nothing is lost, we just stop paying to answer.
+  const rate = checkInboundRate(customer.id);
+  if (rate === 'drop') {
+    logger.warn('Rate-limited customer %s (business %s) — dropping reply', customer.id, business.id);
+    return;
+  }
+  if (rate === 'warn') {
+    await ch.sendText(dest,
+      `You're sending messages a bit too fast. Please slow down — we'll pick up right where you left off in a few minutes. 🙏`,
+      { businessId: business.id, customerId: customer.id });
+    return;
+  }
+
   // Enforce subscription/trial access before serving any commerce flow.
   if (!await hasCommerceAccess(business)) {
     await ch.sendText(dest,
       `Sorry, ${business.name} is not accepting orders right now. Please check back later.`,
+      { businessId: business.id, customerId: customer.id });
+    return;
+  }
+
+  // Business hours: outside the configured window the bot auto-replies with
+  // the opening time instead of taking orders. Order-status lookups still work.
+  if (!isWithinBusinessHours(business.open_time, business.close_time)) {
+    const orderRef = (inbound.text || '').match(ORDER_NUMBER_RE);
+    if (orderRef) {
+      return customerOrderStatus({ business, customer, orderNumber: orderRef[0].toUpperCase() });
+    }
+    await ch.sendText(dest,
+      `🕐 *${business.name}* is closed right now.` +
+      (business.open_time ? ` We open at ${business.open_time}.` : '') +
+      `\n\nMessage us again during opening hours to place an order — we'd love to serve you!`,
       { businessId: business.id, customerId: customer.id });
     return;
   }
@@ -759,12 +826,110 @@ async function handleCommerce({ business, inbound }) {
     return startOrderingFlow({ business, customer });
   }
 
+  // Self-service order status: customer texts their order number.
+  const orderRef = (inbound.text || '').match(ORDER_NUMBER_RE);
+  if (orderRef) {
+    return customerOrderStatus({ business, customer, orderNumber: orderRef[0].toUpperCase() });
+  }
+
+  // Reorder: rebuild the cart from the customer's last order.
+  if (['REPEAT', 'REORDER'].includes(upper) || inbound.interactiveId === 'repeat_order') {
+    return reorderLastOrder({ business, customer });
+  }
+
   // Default fallback
   return sendWelcome({ business, customer });
 }
 
+/**
+ * Customer-facing order status lookup. Only reveals orders belonging to THIS
+ * customer at THIS business — an order number alone is not proof of ownership.
+ */
+async function customerOrderStatus({ business, customer, orderNumber }) {
+  const order = await orderService.getOrderByNumber(orderNumber);
+  if (!order || order.business_id !== business.id || order.customer_id !== customer.id) {
+    await chOf(customer).sendText(destOf(customer),
+      `We couldn't find order *${orderNumber}* on your account with ${business.name}. Reply *MENU* to place a new order.`,
+      { businessId: business.id, customerId: customer.id });
+    return;
+  }
+  const items = (Array.isArray(order.items) ? order.items : [])
+    .map(i => `• ${i.quantity || 1}× ${i.name}`).join('\n') || '(no items)';
+  const statusLine = {
+    pending: '⏳ Waiting for payment',
+    confirmed: '✅ Confirmed — the shop has your order',
+    paid: '✅ Paid — being processed',
+    preparing: '🍳 Being prepared',
+    ready: '📦 Ready for delivery/pickup',
+    delivered: '🎉 Delivered',
+    cancelled: '❌ Cancelled'
+  }[order.status] || order.status;
+  await chOf(customer).sendText(destOf(customer),
+`📋 Order *${order.order_number}* — ${business.name}
+
+${items}
+
+Total: ${formatGhs(order.total_ghs)}
+Payment: ${order.payment_status}
+Status: ${statusLine}`,
+    { businessId: business.id, customerId: customer.id });
+}
+
+/**
+ * "REPEAT" — rebuild the cart from the last non-cancelled order, using
+ * current prices and skipping items no longer in stock.
+ */
+async function reorderLastOrder({ business, customer }) {
+  const last = await orderService.getLastOrderForCustomer(customer.id, business.id);
+  const items = last && Array.isArray(last.items) ? last.items : [];
+  if (!items.length) {
+    await chOf(customer).sendText(destOf(customer),
+      `You don't have a previous order with ${business.name} yet. Reply *MENU* to browse.`,
+      { businessId: business.id, customerId: customer.id });
+    return;
+  }
+
+  const ids = items.map(i => i.product_id).filter(Boolean);
+  const res = ids.length
+    ? await query(
+        `SELECT id, name, price_ghs, in_stock FROM products
+          WHERE business_id = $1 AND id = ANY($2::uuid[])`,
+        [business.id, ids])
+    : { rows: [] };
+  const byId = new Map(res.rows.map(p => [p.id, p]));
+
+  const cart = [];
+  const dropped = [];
+  for (const item of items) {
+    const p = byId.get(item.product_id);
+    if (p && p.in_stock) {
+      cart.push({
+        product_id: p.id,
+        name: p.name,
+        price_ghs: Number(p.price_ghs),
+        quantity: Math.max(1, Number(item.quantity) || 1)
+      });
+    } else {
+      dropped.push(item.name);
+    }
+  }
+
+  if (!cart.length) {
+    await chOf(customer).sendText(destOf(customer),
+      `The items from your last order aren't available right now. Reply *MENU* to see today's menu.`,
+      { businessId: business.id, customerId: customer.id });
+    return;
+  }
+  if (dropped.length) {
+    await chOf(customer).sendText(destOf(customer),
+      `Heads up: ${dropped.join(', ')} ${dropped.length === 1 ? 'is' : 'are'} no longer available and ${dropped.length === 1 ? 'was' : 'were'} left out.`,
+      { businessId: business.id, customerId: customer.id });
+  }
+  return showCartReview({ business, customer, cart });
+}
+
 async function sendSupportContact({ business, customer }) {
-  const msisdn = String(business.whatsapp_number || '').replace(/[^\d]/g, '');
+  const msisdn = String(business.support_phone || business.whatsapp_number || '').replace(/[^\d]/g, '');
   const line = msisdn
     ? `You can reach *${business.name}* directly on WhatsApp: https://wa.me/${msisdn}`
     : `You can reach *${business.name}* directly on their WhatsApp line.`;
@@ -834,14 +999,23 @@ async function cancelUnpaidOrder({ business, customer, orderId }) {
 }
 
 async function sendWelcome({ business, customer }) {
-  const body =
-`👋 Welcome to *${business.name}*!
+  // Merchants can brand their greeting from the dashboard; the stock copy is
+  // only the fallback. The action buttons are always appended.
+  const greeting = String(business.welcome_message || '').trim();
+  const body = greeting
+    ? `${greeting.slice(0, 900)}\n\nTap *Order Now* to browse and pay with MoMo or card.`
+    : `👋 Welcome to *${business.name}*!
 
 Tap *Order Now* to browse our menu and place an order. Pay easily with MoMo or card.`;
-  await chOf(customer).sendButtons(destOf(customer), body, [
+  const buttons = [
     { id: 'start_order', title: 'Order Now' },
     { id: 'support_request', title: 'Talk to us' }
-  ], { businessId: business.id, customerId: customer.id });
+  ];
+  if (Number(customer.total_orders) > 0) {
+    buttons.push({ id: 'repeat_order', title: 'Repeat last order' });
+  }
+  await chOf(customer).sendButtons(destOf(customer), body, buttons,
+    { businessId: business.id, customerId: customer.id });
 }
 
 /* ---------- Ordering: STEP 1 (browse) ---------- */
@@ -951,6 +1125,23 @@ async function continueOrderingFlow({ business, customer, state, inbound }) {
     return captureAddress({ business, customer, cart, address: inbound.text, location: inbound.location });
   }
 
+  if (state.current_step === 'choose_zone') {
+    if (inbound.interactiveId && inbound.interactiveId.startsWith('zone_')) {
+      const idx = parseInt(inbound.interactiveId.slice('zone_'.length), 10);
+      const zones = deliveryZonesOf(business);
+      const zone = zones[idx];
+      if (zone) {
+        return showOrderConfirm({
+          business, customer, cart,
+          address: data.delivery_address,
+          fee: zone.fee_ghs,
+          zoneName: zone.name
+        });
+      }
+    }
+    return askForDeliveryZone({ business, customer, cart, address: data.delivery_address });
+  }
+
   if (state.current_step === 'confirm_order') {
     if (inbound.interactiveId === 'confirm_pay' || upper === 'CONFIRM & PAY' || upper === 'CONFIRM') {
       return finalizeOrderAndStartPayment({ business, customer, state });
@@ -963,11 +1154,33 @@ async function continueOrderingFlow({ business, customer, state, inbound }) {
     }
   }
 
+  // "2x Jollof" style quantity messages while browsing / adding.
+  if (!inbound.interactiveId && ['browse', 'await_more'].includes(state.current_step)) {
+    const qty = parseQuantityExpression(inbound.text);
+    if (qty) {
+      const match = await query(
+        `SELECT id FROM products
+          WHERE business_id = $1 AND in_stock = TRUE AND name ILIKE '%' || $2 || '%'
+          ORDER BY LENGTH(name) ASC LIMIT 1`,
+        [business.id, qty.name]
+      );
+      if (match.rows[0]) {
+        return addProductToCart({
+          business, customer, productId: match.rows[0].id, cart, quantity: qty.quantity
+        });
+      }
+      await chOf(customer).sendText(destOf(customer),
+        `We couldn't find "${qty.name}" on the menu. Tap *View menu* to pick from the list.`,
+        { businessId: business.id, customerId: customer.id });
+      return startOrderingFlow({ business, customer, page: data.menu_page || 0 });
+    }
+  }
+
   // Fallback while in flow
   return showCartReview({ business, customer, cart });
 }
 
-async function addProductToCart({ business, customer, productId, cart }) {
+async function addProductToCart({ business, customer, productId, cart, quantity = 1 }) {
   const res = await query(`SELECT * FROM products WHERE id = $1 AND business_id = $2`, [productId, business.id]);
   const product = res.rows[0];
   if (!product) {
@@ -981,20 +1194,36 @@ async function addProductToCart({ business, customer, productId, cart }) {
     return;
   }
 
+  const qty = Math.min(99, Math.max(1, Number(quantity) || 1));
   const existing = cart.find(c => c.product_id === product.id);
   if (existing) {
-    existing.quantity = (existing.quantity || 1) + 1;
+    existing.quantity = (existing.quantity || 1) + qty;
   } else {
     cart.push({
       product_id: product.id,
       name: product.name,
       price_ghs: Number(product.price_ghs),
-      quantity: 1
+      quantity: qty
     });
   }
 
+  // Product photo sells food better than text — send it with the add
+  // confirmation when the merchant has uploaded one. Best-effort only.
+  if (product.image_url && typeof chOf(customer).sendImage === 'function') {
+    try {
+      await chOf(customer).sendImage(destOf(customer), product.image_url,
+        `${product.name} — ${formatGhs(product.price_ghs)}`,
+        { businessId: business.id, customerId: customer.id });
+    } catch (err) {
+      logger.debug('product image send failed: %s', err.message);
+    }
+  }
+
   await saveState(customer.id, { flow: 'ordering', step: 'await_more', data: { cart } });
-  await promptAddMoreOrCheckout({ business, customer, justAdded: product.name });
+  await promptAddMoreOrCheckout({
+    business, customer,
+    justAdded: qty > 1 ? `${qty}× ${product.name}` : product.name
+  });
 }
 
 async function promptAddMoreOrCheckout({ business, customer, justAdded }) {
@@ -1050,6 +1279,17 @@ async function askForAddress({ business, customer }) {
     { businessId: business.id, customerId: customer.id });
 }
 
+/**
+ * Parse businesses.delivery_zones (JSONB) into a clean [{ name, fee_ghs }] list.
+ */
+function deliveryZonesOf(business) {
+  const raw = Array.isArray(business.delivery_zones) ? business.delivery_zones : [];
+  return raw
+    .filter(z => z && typeof z.name === 'string' && z.name.trim() && Number.isFinite(Number(z.fee_ghs)) && Number(z.fee_ghs) >= 0)
+    .slice(0, 9)
+    .map(z => ({ name: z.name.trim(), fee_ghs: Number(Number(z.fee_ghs).toFixed(2)) }));
+}
+
 async function captureAddress({ business, customer, cart, address, location }) {
   let trimmed = String(address || '').trim();
   // A shared WhatsApp location pin is a perfectly good delivery address.
@@ -1064,7 +1304,43 @@ async function captureAddress({ business, customer, cart, address, location }) {
       { businessId: business.id, customerId: customer.id });
     return;
   }
-  const totals = orderService.computeTotals(cart, 0);
+
+  // Zones configured → let the customer pick one (per-zone fee); otherwise
+  // apply the business's flat delivery fee (0 if unset).
+  const zones = deliveryZonesOf(business);
+  if (zones.length) {
+    return askForDeliveryZone({ business, customer, cart, address: trimmed });
+  }
+  return showOrderConfirm({
+    business, customer, cart,
+    address: trimmed,
+    fee: Number(business.delivery_fee_ghs) || 0
+  });
+}
+
+async function askForDeliveryZone({ business, customer, cart, address }) {
+  const zones = deliveryZonesOf(business);
+  await saveState(customer.id, {
+    flow: 'ordering',
+    step: 'choose_zone',
+    data: { cart, delivery_address: address }
+  });
+  const rows = zones.map((z, i) => ({
+    id: `zone_${i}`,
+    title: truncate(z.name, 24),
+    description: `Delivery ${formatGhs(z.fee_ghs)}`
+  }));
+  await chOf(customer).sendList(
+    destOf(customer),
+    'Delivery zone',
+    '📍 Which area are we delivering to? The delivery fee depends on your zone.',
+    [{ title: 'Zones', rows }],
+    { buttonLabel: 'Choose zone', businessId: business.id, customerId: customer.id }
+  );
+}
+
+async function showOrderConfirm({ business, customer, cart, address, fee, zoneName }) {
+  const totals = orderService.computeTotals(cart, fee);
   const lines = cart.map(i => `• ${i.quantity}× ${i.name} — ${formatGhs(i.price_ghs * i.quantity)}`).join('\n');
   const body =
 `📦 Order Summary
@@ -1072,17 +1348,17 @@ async function captureAddress({ business, customer, cart, address, location }) {
 ${lines}
 
 Subtotal: ${formatGhs(totals.subtotal_ghs)}
-Delivery: ${formatGhs(totals.delivery_fee)}
+Delivery${zoneName ? ` (${zoneName})` : ''}: ${formatGhs(totals.delivery_fee)}
 *Total: ${formatGhs(totals.total_ghs)}*
 
-Address: ${trimmed}
+Address: ${address}
 
 Confirm and pay now?`;
 
   await saveState(customer.id, {
     flow: 'ordering',
     step: 'confirm_order',
-    data: { cart, delivery_address: trimmed }
+    data: { cart, delivery_address: address, delivery_fee: totals.delivery_fee, delivery_zone: zoneName || null }
   });
 
   await chOf(customer).sendButtons(destOf(customer), body, [
@@ -1110,7 +1386,8 @@ async function finalizeOrderAndStartPayment({ business, customer, state }) {
       customerId: customer.id,
       cart,
       deliveryAddress: address,
-      deliveryFee: 0
+      deliveryFee: Number(state.flow_data?.delivery_fee) || 0,
+      notes: state.flow_data?.delivery_zone ? `Zone: ${state.flow_data.delivery_zone}` : undefined
     });
   } catch (err) {
     logger.error('createOrder failed: %s', err.message, { stack: err.stack });

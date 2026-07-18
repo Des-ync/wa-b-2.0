@@ -31,6 +31,10 @@
   .pill-off { background: var(--bg-2); color: var(--muted); }
   .dash .btn-xs { padding: 5px 10px; font-size: 12px; }
   .dash .muted { color: var(--muted); }
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 14px; }
+  .stat { border: 1px solid var(--line); border-radius: var(--r-sm, 8px); padding: 14px 16px; }
+  .stat-label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+  .stat-val { font-size: 24px; font-weight: 700; margin-top: 6px; }
   #toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 10px 18px; border-radius: 999px; font-size: 14px; opacity: 0; transition: opacity 200ms; pointer-events: none; z-index: 50; }
   #toast.show { opacity: 1; }
   @media (max-width: 720px) { .dash .row-form { grid-template-columns: 1fr 1fr; } .dash .scroll-x { overflow-x: auto; } }
@@ -78,6 +82,24 @@
   </div>
 
   <div id="app" style="display:none">
+    <!-- Today -->
+    <div class="dash-card">
+      <h2>Today</h2>
+      <div class="stat-grid">
+        <div class="stat"><div class="stat-label">Sales (paid)</div><div class="stat-val" id="stGmv">—</div></div>
+        <div class="stat"><div class="stat-label">Orders</div><div class="stat-val" id="stOrders">—</div></div>
+        <div class="stat"><div class="stat-label">Paid</div><div class="stat-val" id="stPaid">—</div></div>
+        <div class="stat"><div class="stat-label">Payment success</div><div class="stat-val" id="stRate">—</div></div>
+        <div class="stat"><div class="stat-label">Open orders</div><div class="stat-val" id="stOpen">—</div></div>
+      </div>
+    </div>
+
+    <!-- Subscription -->
+    <div class="dash-card">
+      <h2>Subscription</h2>
+      <div id="subBox" class="muted">Loading…</div>
+    </div>
+
     <!-- Products -->
     <div class="dash-card">
       <h2>Products</h2>
@@ -101,18 +123,52 @@
     <!-- Orders -->
     <div class="dash-card">
       <h2>Orders</h2>
-      <div style="margin-bottom:12px">
+      <div style="margin-bottom:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
         <select id="orderStatusFilter" onchange="loadOrders()" style="max-width:220px">
           <option value="">All statuses</option>
           <option>pending</option><option>confirmed</option><option>paid</option>
           <option>preparing</option><option>ready</option><option>delivered</option><option>cancelled</option>
         </select>
+        <button class="btn btn-ghost btn-sm" onclick="exportOrdersCsv()">Export CSV</button>
       </div>
       <div class="scroll-x">
         <table id="orderTable">
           <thead><tr><th>Order</th><th>Items</th><th>Total</th><th>Payment</th><th>Status</th><th>Update</th></tr></thead>
           <tbody></tbody>
         </table>
+      </div>
+    </div>
+
+    <!-- Customers -->
+    <div class="dash-card">
+      <h2>Customers</h2>
+      <div class="scroll-x">
+        <table id="customerTable">
+          <thead><tr><th>Customer</th><th>Channel</th><th>Orders</th><th>Total spent</th><th>Last seen</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Bot settings -->
+    <div class="dash-card">
+      <h2>Bot settings</h2>
+      <div style="display:grid;gap:14px;max-width:640px">
+        <div>
+          <label style="font-size:12px;color:var(--muted)">Welcome message (your bot's greeting — leave blank for the default)</label>
+          <textarea id="sWelcome" rows="3" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-sm,6px);font:inherit;background:var(--bg);color:var(--ink)" placeholder="👋 Akwaaba! Welcome to Auntie Ama's Kitchen…"></textarea>
+        </div>
+        <div class="row-form" style="grid-template-columns:1fr 1fr 1fr 1fr">
+          <div><label>Support number</label><input id="sSupport" placeholder="0241234567" /></div>
+          <div><label>Flat delivery fee GH₵</label><input id="sFee" type="number" min="0" step="0.01" placeholder="0.00" /></div>
+          <div><label>Opens (HH:MM)</label><input id="sOpen" placeholder="08:00" /></div>
+          <div><label>Closes (HH:MM)</label><input id="sClose" placeholder="21:00" /></div>
+        </div>
+        <div>
+          <label style="font-size:12px;color:var(--muted)">Delivery zones — one per line as <code>Zone name: fee</code> (overrides the flat fee; customers pick their zone at checkout)</label>
+          <textarea id="sZones" rows="4" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-sm,6px);font:inherit;background:var(--bg);color:var(--ink)" placeholder="East Legon: 15&#10;Osu: 10&#10;Madina: 20"></textarea>
+        </div>
+        <div><button class="btn btn-primary btn-sm" onclick="saveSettings()">Save settings</button></div>
       </div>
     </div>
   </div>
@@ -187,7 +243,13 @@ async function onAuthStateChange() {
     BIZ = me.business;
     document.getElementById('bizName').textContent = BIZ.name + ' · ' + BIZ.status;
     showCard('app');
-    await Promise.all([loadProducts(), loadOrders()]);
+    await Promise.all([
+      loadProducts(), loadOrders(),
+      loadTodayStats().catch(() => {}),
+      loadSubscription().catch(() => {}),
+      loadCustomers().catch(() => {}),
+      loadSettings().catch(() => {})
+    ]);
   } catch (err) {
     if (err.code === 'not_linked') {
       showCard('linkCard');
@@ -357,6 +419,120 @@ async function setOrderStatus(id, status) {
     await api('/orders/' + id + '/status', { method: 'PATCH', body: JSON.stringify({ status }) });
     toast('Order updated. Customer notified on WhatsApp');
     await loadOrders();
+  } catch (err) { toast(err.message); }
+}
+
+/* ---------------- Today stats ---------------- */
+
+const ghs = n => 'GH₵' + Number(n || 0).toLocaleString('en-GH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+async function loadTodayStats() {
+  const { stats } = await api('/orders/stats/today?business_id=' + BIZ.id);
+  document.getElementById('stGmv').textContent = ghs(stats.gmv_ghs);
+  document.getElementById('stOrders').textContent = stats.orders_count;
+  document.getElementById('stPaid').textContent = stats.paid_count;
+  document.getElementById('stRate').textContent = stats.payment_success_rate == null ? '—' : stats.payment_success_rate + '%';
+  document.getElementById('stOpen').textContent = stats.open_orders;
+}
+
+/* ---------------- Subscription ---------------- */
+
+async function loadSubscription() {
+  const box = document.getElementById('subBox');
+  try {
+    const { subscription: sub } = await api('/subscriptions/' + BIZ.id);
+    if (!sub) {
+      box.innerHTML = 'No subscription on file yet. Message the WA-B bot on WhatsApp with <strong>PAY</strong> to pick a plan.';
+      return;
+    }
+    const pill = sub.status === 'active' ? 'pill-ok' : (['grace','pending'].includes(sub.status) ? 'pill-warn' : 'pill-off');
+    box.innerHTML = `
+      <div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap">
+        <div><strong>${esc(sub.plan_display_name || sub.plan_name || 'Plan')}</strong>
+          <span class="pill ${pill}" style="margin-left:8px">${esc(sub.status)}</span></div>
+        <div class="muted">${sub.next_billing_date ? 'Next billing: ' + new Date(sub.next_billing_date).toLocaleDateString() : ''}</div>
+        <button class="btn btn-primary btn-xs" onclick="renewSubscription()">Renew now</button>
+      </div>
+      ${['grace','suspended'].includes(sub.status) ? '<p class="muted" style="margin-top:10px">⚠️ Your last payment didn\'t go through — renew now to keep your bot taking orders.</p>' : ''}`;
+  } catch (err) {
+    box.textContent = 'Could not load subscription: ' + err.message;
+  }
+}
+
+async function renewSubscription() {
+  try {
+    await api('/subscriptions/' + BIZ.id + '/renew', { method: 'POST' });
+    toast('MoMo charge initiated — approve the prompt on your phone');
+  } catch (err) { toast(err.message); }
+}
+
+/* ---------------- Customers ---------------- */
+
+async function loadCustomers() {
+  const { customers } = await api('/customers?business_id=' + BIZ.id + '&limit=50');
+  const tbody = document.querySelector('#customerTable tbody');
+  tbody.innerHTML = customers.map(c => `
+    <tr>
+      <td><strong>${esc(c.display_name || c.whatsapp_number)}</strong><br><span class="muted" style="font-size:12px">${esc(c.whatsapp_number)}</span></td>
+      <td class="muted">${esc(c.channel || 'whatsapp')}</td>
+      <td>${c.total_orders}</td>
+      <td>${ghs(c.total_spent_ghs)}</td>
+      <td class="muted">${new Date(c.last_seen_at).toLocaleDateString()}</td>
+    </tr>`).join('') || '<tr><td colspan="5" class="muted">No customers yet.</td></tr>';
+}
+
+/* ---------------- CSV export ---------------- */
+
+async function exportOrdersCsv() {
+  try {
+    const token = await window.Clerk.session.getToken();
+    const status = document.getElementById('orderStatusFilter').value;
+    const res = await fetch('/api/orders/export?business_id=' + BIZ.id + (status ? '&status=' + status : ''), {
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const blob = await res.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'orders-' + new Date().toISOString().slice(0, 10) + '.csv';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  } catch (err) { toast('Export failed: ' + err.message); }
+}
+
+/* ---------------- Bot settings ---------------- */
+
+async function loadSettings() {
+  const { settings } = await api('/business/settings');
+  document.getElementById('sWelcome').value = settings.welcome_message || '';
+  document.getElementById('sSupport').value = settings.support_phone || '';
+  document.getElementById('sFee').value = settings.delivery_fee_ghs != null ? Number(settings.delivery_fee_ghs).toFixed(2) : '';
+  document.getElementById('sOpen').value = settings.open_time || '';
+  document.getElementById('sClose').value = settings.close_time || '';
+  const zones = Array.isArray(settings.delivery_zones) ? settings.delivery_zones : [];
+  document.getElementById('sZones').value = zones.map(z => z.name + ': ' + Number(z.fee_ghs).toFixed(2)).join('\n');
+}
+
+async function saveSettings() {
+  const zonesText = document.getElementById('sZones').value.trim();
+  const zones = [];
+  for (const line of zonesText ? zonesText.split('\n') : []) {
+    const m = line.match(/^(.+?):\s*(\d+(?:\.\d{1,2})?)\s*$/);
+    if (!m) return toast('Zone line not understood: "' + line.trim() + '" — use "Name: fee"');
+    zones.push({ name: m[1].trim(), fee_ghs: parseFloat(m[2]) });
+  }
+  const feeRaw = document.getElementById('sFee').value.trim();
+  const body = {
+    welcome_message: document.getElementById('sWelcome').value.trim() || null,
+    support_phone: document.getElementById('sSupport').value.trim() || null,
+    delivery_zones: zones,
+    open_time: document.getElementById('sOpen').value.trim() || null,
+    close_time: document.getElementById('sClose').value.trim() || null
+  };
+  if (feeRaw !== '') body.delivery_fee_ghs = parseFloat(feeRaw);
+  try {
+    await api('/business/settings', { method: 'PATCH', body: JSON.stringify(body) });
+    toast('Settings saved — live on your bot now');
   } catch (err) { toast(err.message); }
 }
 

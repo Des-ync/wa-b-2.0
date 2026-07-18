@@ -131,6 +131,23 @@ async function sendText(to, body, meta = {}) {
 }
 
 /**
+ * Send an image by public URL with an optional caption.
+ */
+async function sendImage(to, imageUrl, caption, meta = {}) {
+  const payload = {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    ...recipientField(to),
+    type: 'image',
+    image: {
+      link: String(imageUrl || ''),
+      caption: caption ? truncate(caption, 1024) : undefined
+    }
+  };
+  return sendRaw(payload, { ...meta, content: caption || `[image] ${imageUrl}` });
+}
+
+/**
  * Send up to 3 reply buttons.
  *   buttons = [{ id: 'BTN_1', title: 'Yes' }, ...]
  */
@@ -382,6 +399,7 @@ Reply *PAY* to choose a plan and switch back on instantly.`;
 module.exports = {
   sendRaw,
   sendText,
+  sendImage,
   sendButtons,
   sendList,
   sendTemplate,
