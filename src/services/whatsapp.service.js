@@ -17,6 +17,19 @@ const http = axios.create({
 });
 
 /**
+ * Meta's Business-Scoped User ID (BSUID) format: <2-letter country>.<alphanumeric>,
+ * e.g. "GH.1051901200567604" — assigned when someone messages a business via
+ * WhatsApp's "don't share my phone number" mode. The /messages endpoint rejects
+ * these under `to` (expects E.164) and requires `recipient` instead, with `to`
+ * omitted entirely. Real phone-shaped recipients keep using `to` as before.
+ */
+const BSUID_RE = /^[A-Za-z]{2}\.[A-Za-z0-9]+$/;
+
+function recipientField(to) {
+  return BSUID_RE.test(String(to || '')) ? { recipient: to } : { to: toWaRecipient(to) };
+}
+
+/**
  * Resolve per-tenant WhatsApp credentials, falling back to global env vars.
  * Tenant credentials are stored in businesses.wa_phone_number_id / wa_access_token.
  *
@@ -91,7 +104,7 @@ async function sendRaw(payload, meta = {}) {
     return { success: true, messageId: waId, raw: res.data };
   } catch (err) {
     const status = err.response?.status;
-    logger.error('WhatsApp send failed (%s): %s | type=%s to=%s', status, err.message, payload.type, payload.to);
+    logger.error('WhatsApp send failed (%s): %s | type=%s to=%s', status, err.message, payload.type, payload.to || payload.recipient);
     await logOutbound({
       businessId: meta.businessId,
       customerId: meta.customerId,
@@ -110,7 +123,7 @@ async function sendText(to, body, meta = {}) {
   const payload = {
     messaging_product: 'whatsapp',
     recipient_type: 'individual',
-    to: toWaRecipient(to),
+    ...recipientField(to),
     type: 'text',
     text: { body: String(body || '').slice(0, 4096), preview_url: !!meta.previewUrl }
   };
@@ -133,7 +146,7 @@ async function sendButtons(to, body, buttons = [], meta = {}) {
   const payload = {
     messaging_product: 'whatsapp',
     recipient_type: 'individual',
-    to: toWaRecipient(to),
+    ...recipientField(to),
     type: 'interactive',
     interactive: {
       type: 'button',
@@ -161,7 +174,7 @@ async function sendList(to, header, body, sections = [], meta = {}) {
   const payload = {
     messaging_product: 'whatsapp',
     recipient_type: 'individual',
-    to: toWaRecipient(to),
+    ...recipientField(to),
     type: 'interactive',
     interactive: {
       type: 'list',
@@ -212,7 +225,7 @@ async function sendTemplate(to, templateName, { language, bodyParams = [] } = {}
   const payload = {
     messaging_product: 'whatsapp',
     recipient_type: 'individual',
-    to: toWaRecipient(to),
+    ...recipientField(to),
     type: 'template',
     template: {
       name: templateName,
