@@ -35,7 +35,7 @@ router.get('/', async (req, res) => {
          LEFT JOIN LATERAL (
            SELECT content, direction, created_at FROM message_log
             WHERE customer_id = c.id
-            ORDER BY created_at DESC LIMIT 1
+            ORDER BY created_at DESC, id DESC LIMIT 1
          ) lm ON TRUE
         WHERE c.business_id = $1
         ORDER BY COALESCE(lm.created_at, c.last_seen_at) DESC
@@ -70,7 +70,7 @@ router.get('/:customerId/messages', async (req, res) => {
       `SELECT direction, message_type, content, status, created_at
          FROM message_log
         WHERE customer_id = $1
-        ORDER BY created_at DESC
+        ORDER BY created_at DESC, id DESC
         LIMIT $2`,
       [customer.id, limit]
     );
