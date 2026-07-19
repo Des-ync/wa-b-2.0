@@ -269,6 +269,16 @@ h1, h2, h3, h4 {
   border-radius: 50%;
   border: 2px solid var(--bg);
 }
+.brand-logo {
+  height: 26px;
+  width: auto;
+  display: block;
+}
+.brand-logo-dark { display: none; }
+[data-theme="dark"] .brand-logo-light { display: none; }
+[data-theme="dark"] .brand-logo-dark { display: block; }
+.brand-logo-lg { height: 44px; }
+.brand-logo-xl { height: 72px; }
 .nav-links {
   display: flex;
   gap: 28px;
