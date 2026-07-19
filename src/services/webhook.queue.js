@@ -2,6 +2,7 @@ const os = require('os');
 const crypto = require('crypto');
 const { query, transaction } = require('../config/database');
 const logger = require('../utils/logger');
+const { alertOps } = require('./alert.service');
 
 const WORKER_ID = `${os.hostname()}-${process.pid}-${crypto.randomBytes(3).toString('hex')}`;
 const LOCK_TTL_SECONDS = 60;
@@ -94,7 +95,7 @@ async function markDone(eventId) {
   );
 }
 
-async function markFailed(eventId, errorMsg, attempts) {
+async function markFailed(eventId, errorMsg, attempts, source) {
   const idx = Math.min(Math.max(attempts - 1, 0), BACKOFF_SECONDS.length - 1);
   const delay = BACKOFF_SECONDS[idx];
   const exhausted = attempts >= MAX_ATTEMPTS;
@@ -111,6 +112,15 @@ async function markFailed(eventId, errorMsg, attempts) {
      exhausted ? 'failed' : 'pending',
      String(delay)]
   );
+
+  // A webhook that never processes after every retry is real money or a
+  // real message stuck in limbo — worth a page, not just a log line.
+  if (exhausted) {
+    alertOps(
+      `Webhook gave up after ${MAX_ATTEMPTS} attempts`,
+      `source=${source || 'unknown'} event=${eventId}\n${errorMsg}`
+    );
+  }
 }
 
 /**
@@ -134,6 +144,10 @@ async function reclaimStuck() {
   );
   if (failed.rowCount) {
     logger.error('Gave up on %d stuck webhook event(s) after %d attempts', failed.rowCount, MAX_ATTEMPTS);
+    alertOps(
+      'Webhook worker kept dying mid-processing',
+      `${failed.rowCount} event(s) gave up after ${MAX_ATTEMPTS} attempts (worker crashed before completing them each time)`
+    );
   }
 
   const res = await query(
@@ -167,7 +181,7 @@ async function drain(processors, { maxBatch = 50 } = {}) {
 
     const fn = processors[event.source];
     if (!fn) {
-      await markFailed(event.id, `No processor for source=${event.source}`, event.attempts);
+      await markFailed(event.id, `No processor for source=${event.source}`, event.attempts, event.source);
       continue;
     }
 
@@ -176,7 +190,7 @@ async function drain(processors, { maxBatch = 50 } = {}) {
       await markDone(event.id);
     } catch (err) {
       logger.error('Webhook event %s (%s) failed: %s', event.id, event.source, err.message);
-      await markFailed(event.id, err.message, event.attempts);
+      await markFailed(event.id, err.message, event.attempts, event.source);
     }
   }
   return processed;

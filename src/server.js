@@ -11,6 +11,8 @@ const webhookProcessor = require('./services/webhook.processor');
 const paymentSweeper = require('./services/payment.sweeper');
 const cartNudge = require('./services/cart.nudge');
 const broadcastSender = require('./services/broadcast.sender');
+const { alertOps } = require('./services/alert.service');
+const dbBackup = require('./jobs/db.backup');
 const { requireAuth } = require('./middleware/auth');
 
 const webhookRoutes = require('./routes/webhook.routes');
@@ -269,7 +271,15 @@ function startCronJobs() {
     );
   }, { timezone: 'Africa/Accra' });
 
-  logger.info('Cron jobs scheduled (Africa/Accra) — 08:00 renewals, 09:00 reminders, 10:00 suspensions, 5-min payment sweeper, 15-min cart nudges, 1-min broadcast drain, weekly prune.');
+  // Nightly DB backup (03:15 Africa/Accra, low-traffic hour). No-op unless
+  // DB_BACKUP_ENABLED=true — see .env.example.
+  cron.schedule('15 3 * * *', () => {
+    dbBackup.runDbBackupJob().catch(err =>
+      logger.error('dbBackupJob crashed: %s', err.message, { stack: err.stack })
+    );
+  }, { timezone: 'Africa/Accra' });
+
+  logger.info('Cron jobs scheduled (Africa/Accra) — 08:00 renewals, 09:00 reminders, 10:00 suspensions, 5-min payment sweeper, 15-min cart nudges, 1-min broadcast drain, 03:15 db backup, weekly prune.');
 }
 
 /* -------------------------------------------------------------------------
@@ -291,10 +301,13 @@ const server = app.listen(PORT, () => {
 });
 
 process.on('unhandledRejection', reason => {
-  logger.error('Unhandled promise rejection: %s', reason && reason.stack ? reason.stack : reason);
+  const detail = reason && reason.stack ? reason.stack : String(reason);
+  logger.error('Unhandled promise rejection: %s', detail);
+  alertOps('Unhandled promise rejection', detail);
 });
 process.on('uncaughtException', err => {
   logger.error('Uncaught exception: %s', err.stack || err.message);
+  alertOps('Uncaught exception', err.stack || err.message);
 });
 
 function gracefulShutdown(signal) {
