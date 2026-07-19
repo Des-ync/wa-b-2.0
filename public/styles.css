@@ -91,10 +91,41 @@
 
 * { box-sizing: border-box; }
 
-/* Signature: thin kente band across the very top of every page */
+/* Signature: thin kente band across the very top of every page.
+   script.js upgrades this into a live scroll-progress bar on pages that
+   load it; this static border is the fallback for pages that don't
+   (dashboard/login/signup) and for no-JS visits. */
 body {
   border-top: 4px solid var(--gold);
   border-image: var(--kente) 1;
+}
+
+/* Live scroll-progress bar (injected by script.js). Swap the static
+   border for a fixed track so the band stays pinned to the viewport
+   top while scrolling, and reserve the same 4px with padding so
+   nothing shifts when the class is added. */
+html.has-kente-progress body {
+  border-top: none;
+  padding-top: 4px;
+}
+html.has-kente-progress .nav {
+  top: 4px;
+}
+.kente-progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 4px;
+  z-index: 300;
+  background: var(--line-2);
+  overflow: hidden;
+}
+.kente-progress__fill {
+  height: 100%;
+  width: 0%;
+  background: var(--kente);
+  background-size: 84px 4px;
 }
 
 html, body {

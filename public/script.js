@@ -2,6 +2,52 @@
 (function () {
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+  // kente scroll-progress bar: the top band fills left-to-right as you move
+  // through the page, reaching 100% width exactly at the bottom. Each page
+  // has its own scrollHeight, so this is measured live rather than assumed.
+  (function setupKenteProgress() {
+    const bar = document.createElement('div');
+    bar.className = 'kente-progress';
+    bar.setAttribute('role', 'progressbar');
+    bar.setAttribute('aria-label', 'Page scroll progress');
+    bar.setAttribute('aria-valuemin', '0');
+    bar.setAttribute('aria-valuemax', '100');
+    bar.setAttribute('aria-valuenow', '0');
+
+    const fill = document.createElement('div');
+    fill.className = 'kente-progress__fill';
+    bar.appendChild(fill);
+
+    document.body.prepend(bar);
+    document.documentElement.classList.add('has-kente-progress');
+
+    let ticking = false;
+    function update() {
+      ticking = false;
+      const doc = document.documentElement;
+      const max = doc.scrollHeight - doc.clientHeight;
+      const pct = max > 0 ? Math.min(100, Math.max(0, (window.scrollY / max) * 100)) : 100;
+      fill.style.width = pct + '%';
+      bar.setAttribute('aria-valuenow', String(Math.round(pct)));
+    }
+    function onScroll() {
+      if (!ticking) {
+        ticking = true;
+        requestAnimationFrame(update);
+      }
+    }
+
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll);
+    window.addEventListener('load', update);
+    // Catches height changes from lazy images, fonts, or async content
+    // that a resize/scroll listener alone wouldn't fire for.
+    if ('ResizeObserver' in window) {
+      new ResizeObserver(onScroll).observe(document.body);
+    }
+    update();
+  })();
+
   // sticky nav border: sentinel + IntersectionObserver (no scroll listener)
   const nav = document.querySelector('.nav');
   if (nav && 'IntersectionObserver' in window) {
