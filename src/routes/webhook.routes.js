@@ -135,9 +135,10 @@ router.get('/instagram', (req, res) => {
  * defensive way externalIdFor() does for WhatsApp: real message id first,
  * deterministic hash fallback.
  *
- * TODO(IG-API): verify against Meta's Instagram Messaging API docs — the
- * entry[].messaging[].message.mid path below is a stub. The hash fallback
- * keeps idempotency correct even if the path is wrong.
+ * entry[].messaging[].message.mid confirmed against Meta's Instagram API
+ * with Instagram Login webhooks docs (sample messages/quick-reply
+ * notification payload). The hash fallback still covers any event shape
+ * without a message (e.g. postbacks, reactions).
  */
 function igExternalIdFor(payload) {
   try {
@@ -158,10 +159,9 @@ function igExternalIdFor(payload) {
  * raw body, persist to webhook_events (idempotent on (source, external_id))
  * BEFORE responding, worker drains durably.
  *
- * TODO(IG-API): verify against Meta's Instagram Messaging API docs — confirm
- * the signature header name (x-hub-signature-256 assumed, matching Meta's
- * WhatsApp webhooks) and that the HMAC is SHA-256 over the raw body with the
- * app secret.
+ * x-hub-signature-256 + SHA-256 HMAC over the raw body with the app secret,
+ * confirmed against Meta's Instagram Platform webhooks docs (same scheme as
+ * every other Meta webhook product).
  */
 router.post('/instagram', async (req, res) => {
   const rawBody = req.body; // Buffer from express.raw() mounted in server.js

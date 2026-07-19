@@ -10,23 +10,25 @@ const { t } = require('../utils/i18n');
  * resolveCredentials (per-tenant with env fallback), sendRaw, logOutbound into
  * message_log, sendText, and sendQuickReplies (the analogue of sendButtons).
  *
- * Wire format implemented from Meta's Instagram Messaging docs
- * (developers.facebook.com/docs/messenger-platform/instagram):
- *   POST https://graph.facebook.com/<v>/me/messages?access_token=<PAGE_TOKEN>
- *   text:          { recipient: {id}, message: { text } }            (≤1000 chars)
+ * Wire format implemented from Meta's Instagram API with Instagram Login docs
+ * (developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login/messaging-api):
+ *   POST https://graph.instagram.com/<v>/me/messages
+ *   Authorization: Bearer <INSTAGRAM_USER_ACCESS_TOKEN>  (no Facebook Page involved)
+ *   text:          { recipient: {id}, message: { text } }            (≤1000 bytes)
  *   quick replies: message.quick_replies [{content_type:'text',
  *                  title (≤20 chars), payload}], max 13 per message
  *   image:         message.attachment { type:'image', payload:{url} }
  *   response:      { recipient_id, message_id }
  * The webhook receives the tapped quick reply's title in `text` and its
  * payload in `quick_reply.payload` (matches extractInstagramInbound).
+ * Permissions required: instagram_business_basic, instagram_business_manage_messages.
  */
 
-const IG_API_VERSION = process.env.IG_API_VERSION || 'v19.0';
+const IG_API_VERSION = process.env.IG_API_VERSION || 'v21.0';
 const IG_ACCESS_TOKEN = process.env.IG_ACCESS_TOKEN;
 const IG_BUSINESS_ACCOUNT_ID = process.env.IG_BUSINESS_ACCOUNT_ID;
 
-const BASE_URL = `https://graph.facebook.com/${IG_API_VERSION}`;
+const BASE_URL = `https://graph.instagram.com/${IG_API_VERSION}`;
 
 const http = axios.create({
   baseURL: BASE_URL,
@@ -37,10 +39,12 @@ const http = axios.create({
 /**
  * Resolve per-tenant Instagram credentials, falling back to global env vars.
  * Tenant credentials live in businesses.ig_business_account_id /
- * ig_page_access_token.
+ * ig_page_access_token (despite the column name, this holds the Instagram
+ * User access token from Business Login for Instagram — no Facebook Page
+ * is involved in this flow).
  *
  * Safety (same rule as WhatsApp): a tenant routed on its OWN IG account id
- * but missing its page access token must fail loudly — silently falling back
+ * but missing its access token must fail loudly — silently falling back
  * to the platform credentials would send its replies from the platform's IG
  * account, leaking messages across tenants.
  */
