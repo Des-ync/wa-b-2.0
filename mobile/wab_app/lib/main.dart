@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'screens/login.dart';
 import 'screens/onboarding.dart';
 import 'screens/shell.dart';
+import 'screens/splash.dart';
 import 'services/push.dart';
 import 'state/session.dart';
 import 'theme.dart';
@@ -42,6 +43,7 @@ class _Gate extends StatefulWidget {
 class _GateState extends State<_Gate> {
   bool? _seenOnboarding;
   bool _pushStarted = false;
+  bool _showSplash = true;
 
   @override
   void initState() {
@@ -64,6 +66,10 @@ class _GateState extends State<_Gate> {
 
   @override
   Widget build(BuildContext context) {
+    if (_showSplash) {
+      return SplashScreen(onDone: () => setState(() => _showSplash = false));
+    }
+
     final session = context.watch<Session>();
 
     if (_seenOnboarding == null || session.restoring) {

@@ -145,7 +145,7 @@ class _AdminBusinessDetailScreenState extends State<AdminBusinessDetailScreen> {
         ],
       ),
     );
-    if (send != true || controller.text.trim().isEmpty) return;
+    if (send != true || controller.text.trim().isEmpty || !mounted) return;
     try {
       await context.read<Session>().api.post(
         '/api/admin/businesses/${widget.businessId}/message',

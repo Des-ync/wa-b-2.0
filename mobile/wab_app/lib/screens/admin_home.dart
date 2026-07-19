@@ -4,6 +4,11 @@ import 'package:provider/provider.dart';
 import '../state/session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import 'admin_business_detail.dart';
+import 'admin_issues.dart';
+import 'admin_messages.dart';
+import 'admin_onboard.dart';
+import 'admin_ops.dart';
 
 class AdminHomeScreen extends StatefulWidget {
   const AdminHomeScreen({super.key});
@@ -14,10 +19,17 @@ class AdminHomeScreen extends StatefulWidget {
 
 class _AdminHomeScreenState extends State<AdminHomeScreen> {
   int _tab = 0;
+  final _businessesKey = GlobalKey<_AdminBusinessesState>();
 
   @override
   Widget build(BuildContext context) {
-    const pages = [_AdminStats(), _AdminBusinesses(), _AdminBilling()];
+    final pages = [
+      const _AdminStats(),
+      _AdminBusinesses(key: _businessesKey),
+      const AdminMessagesTab(),
+      const AdminIssuesTab(),
+      const AdminOpsTab(),
+    ];
     return Scaffold(
       appBar: AppBar(
         title: const Text('WA-B Admin'),
@@ -48,6 +60,23 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
         ],
       ),
       body: IndexedStack(index: _tab, children: pages),
+      floatingActionButton: _tab == 1
+          ? FloatingActionButton.extended(
+              onPressed: () async {
+                final created = await Navigator.push<bool>(
+                  context,
+                  MaterialPageRoute(builder: (_) => const AdminOnboardScreen()),
+                );
+                if (created == true) {
+                  _businessesKey.currentState?.reload();
+                }
+              },
+              backgroundColor: WabColors.accent,
+              foregroundColor: Colors.white,
+              icon: const Icon(Icons.add_business_rounded),
+              label: const Text('Onboard'),
+            )
+          : null,
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tab,
         onDestinationSelected: (i) => setState(() => _tab = i),
@@ -59,11 +88,19 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
           NavigationDestination(
               icon: Icon(Icons.storefront_outlined),
               selectedIcon: Icon(Icons.storefront_rounded),
-              label: 'Businesses'),
+              label: 'Clients'),
           NavigationDestination(
-              icon: Icon(Icons.payments_outlined),
-              selectedIcon: Icon(Icons.payments_rounded),
-              label: 'Billing'),
+              icon: Icon(Icons.forum_outlined),
+              selectedIcon: Icon(Icons.forum_rounded),
+              label: 'Messages'),
+          NavigationDestination(
+              icon: Icon(Icons.report_problem_outlined),
+              selectedIcon: Icon(Icons.report_problem_rounded),
+              label: 'Issues'),
+          NavigationDestination(
+              icon: Icon(Icons.tune_outlined),
+              selectedIcon: Icon(Icons.tune_rounded),
+              label: 'Ops'),
         ],
       ),
     );
@@ -156,75 +193,90 @@ class _AdminStatsState extends State<_AdminStats> {
   }
 }
 
-class _AdminBusinesses extends StatelessWidget {
-  const _AdminBusinesses();
+class _AdminBusinesses extends StatefulWidget {
+  const _AdminBusinesses({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    return AsyncList<Map<String, dynamic>>(
-      load: () async {
-        final res = await context
-            .read<Session>()
-            .api
-            .get('/api/admin/businesses', query: {'limit': 200});
-        return ((res['businesses'] as List?) ?? []).cast<Map<String, dynamic>>();
-      },
-      emptyTitle: 'No businesses yet',
-      emptyIcon: Icons.storefront_rounded,
-      itemBuilder: (ctx, b) => Card(
-        child: ListTile(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-          title: Text('${b['name']}',
-              style: const TextStyle(fontWeight: FontWeight.w700)),
-          subtitle: Text(
-              '${b['whatsapp_number'] ?? ''} · ${b['industry'] ?? ''} · joined ${timeAgo(b['created_at'])}',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: WabColors.muted)),
-          trailing: StatusChip('${b['status']}'),
-        ),
-      ),
-    );
-  }
+  State<_AdminBusinesses> createState() => _AdminBusinessesState();
 }
 
-class _AdminBilling extends StatelessWidget {
-  const _AdminBilling();
+class _AdminBusinessesState extends State<_AdminBusinesses> {
+  String _search = '';
+  int _reloadKey = 0;
+
+  void reload() => setState(() => _reloadKey++);
 
   @override
   Widget build(BuildContext context) {
-    return AsyncList<Map<String, dynamic>>(
-      load: () async {
-        final res = await context
-            .read<Session>()
-            .api
-            .get('/api/admin/billing', query: {'limit': 100});
-        return ((res['transactions'] as List?) ?? []).cast<Map<String, dynamic>>();
-      },
-      emptyTitle: 'No billing activity',
-      emptyIcon: Icons.payments_rounded,
-      itemBuilder: (ctx, t) => Card(
-        child: ListTile(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-          title: Text('${t['business_name'] ?? t['business_id'] ?? ''}',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontWeight: FontWeight.w700)),
-          subtitle: Text(
-              '${t['gateway'] ?? ''} · ${timeAgo(t['initiated_at'] ?? t['created_at'])}',
-              style: const TextStyle(color: WabColors.muted)),
-          trailing: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(ghs(t['amount_ghs']),
-                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
-              const SizedBox(height: 4),
-              StatusChip('${t['status']}'),
-            ],
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          child: TextField(
+            onChanged: (v) => setState(() => _search = v.trim().toLowerCase()),
+            decoration: InputDecoration(
+              hintText: 'Search by name, phone or industry…',
+              prefixIcon: const Icon(Icons.search_rounded, size: 20),
+              isDense: true,
+              border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: WabColors.line)),
+            ),
           ),
         ),
-      ),
+        Expanded(
+          child: KeyedSubtree(
+            key: ValueKey(_reloadKey),
+            child: AsyncList<Map<String, dynamic>>(
+              load: () async {
+                final res = await context
+                    .read<Session>()
+                    .api
+                    .get('/api/admin/businesses', query: {'limit': 200});
+                var list = ((res['businesses'] as List?) ?? [])
+                    .cast<Map<String, dynamic>>();
+                if (_search.isNotEmpty) {
+                  list = list.where((b) {
+                    final hay =
+                        '${b['name']} ${b['whatsapp_number']} ${b['industry']} ${b['owner_name']}'
+                            .toLowerCase();
+                    return hay.contains(_search);
+                  }).toList();
+                }
+                return list;
+              },
+              emptyTitle: _search.isEmpty ? 'No businesses yet' : 'No matches',
+              emptySubtitle: _search.isEmpty
+                  ? 'Tap Onboard to sign up your first client.'
+                  : '',
+              emptyIcon: Icons.storefront_rounded,
+              itemBuilder: (ctx, b) => Card(
+                child: ListTile(
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14)),
+                  title: Text('${b['name']}',
+                      style: const TextStyle(fontWeight: FontWeight.w700)),
+                  subtitle: Text(
+                      '${b['whatsapp_number'] ?? ''} · ${b['industry'] ?? ''} · joined ${timeAgo(b['created_at'])}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: WabColors.muted)),
+                  trailing: StatusChip('${b['status']}'),
+                  onTap: () async {
+                    await Navigator.push(
+                      ctx,
+                      MaterialPageRoute(
+                          builder: (_) => AdminBusinessDetailScreen(
+                              businessId: '${b['id']}')),
+                    );
+                    reload();
+                  },
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
