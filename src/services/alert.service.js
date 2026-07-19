@@ -1,5 +1,6 @@
 const logger = require('../utils/logger');
 const wa = require('./whatsapp.service');
+const push = require('./push.service');
 
 // How rarely we're willing to text ops. A crash loop that throws every
 // request must not turn into hundreds of WhatsApp messages — one alert
@@ -37,6 +38,11 @@ function alertOps(title, detail) {
   const body = `🚨 WA-B error: ${title}\n\n${String(detail || '').slice(0, 800)}${suppressedNote}`;
   wa.sendText(to, body).catch(err => {
     logger.error('alertOps: failed to send ops alert: %s', err.message);
+  });
+  push.pushToAdmins({
+    title: `🚨 WA-B error: ${title}`,
+    body: String(detail || '').slice(0, 200),
+    data: { type: 'ops_alert' }
   });
 }
 

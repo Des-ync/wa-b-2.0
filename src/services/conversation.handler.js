@@ -6,6 +6,7 @@ const paystack = require('./paystack.service');
 const orderService = require('./order.service');
 const subService = require('./subscription.service');
 const notificationService = require('./notification.service');
+const push = require('./push.service');
 const {
   normalizeGhanaPhone,
   detectNetwork,
@@ -770,6 +771,11 @@ async function handleCommerce({ business, inbound }) {
   // already logged above, that's all the merchant needs.
   if (customer.bot_paused) {
     logger.debug('Bot paused for customer %s — skipping auto-reply', customer.id);
+    push.pushToBusiness(business.id, {
+      title: `💬 ${customer.display_name || customer.whatsapp_number || 'Customer'}`,
+      body: (inbound.text || 'New message').slice(0, 200),
+      data: { type: 'message', customer_id: customer.id }
+    });
     return;
   }
 
@@ -1723,6 +1729,11 @@ async function handlePaymentSuccess({ reference, gatewayRef, amount }) {
         `📉 Low stock: *${p.name}* — ${qtyLabel}. Update it from your dashboard.`,
         { businessId: business.id }
       ).catch(err => logger.warn('low-stock nudge failed for %s: %s', p.id, err.message));
+      push.pushToBusiness(business.id, {
+        title: '📉 Low stock',
+        body: `${p.name} — ${qtyLabel}`,
+        data: { type: 'product', product_id: p.id }
+      });
     }
   }
 

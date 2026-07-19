@@ -6,6 +6,7 @@ const lock = require('./worker.lock');
 const { query } = require('../config/database');
 const { formatGhs } = require('../utils/helpers');
 const { t, langOf } = require('../utils/i18n');
+const push = require('./push.service');
 
 const WEBHOOK_RETENTION_DAYS = parseInt(process.env.WEBHOOK_RETENTION_DAYS || '30', 10);
 const MESSAGE_LOG_RETENTION_DAYS = parseInt(process.env.MESSAGE_LOG_RETENTION_DAYS || '90', 10);
@@ -183,6 +184,12 @@ async function notifyOrderPaid({ order, business, customer }) {
   results.forEach(r => {
     if (r.status === 'rejected') logger.warn('notifyOrderPaid send rejected: %s', r.reason?.message);
   });
+
+  push.pushToBusiness(business?.id, {
+    title: '💰 New paid order',
+    body: `${customer?.display_name || customer?.whatsapp_number || 'A customer'} paid ${formatGhs(order.total_ghs)} — #${order.order_number}`,
+    data: { type: 'order', order_id: order.id }
+  });
 }
 
 /**
@@ -266,6 +273,11 @@ async function notifySubscriptionRenewed({ business, planName, amountGhs, period
   } catch (err) {
     logger.warn('notifySubscriptionRenewed send failed: %s', err.message);
   }
+  push.pushToBusiness(business.id, {
+    title: '✅ Subscription renewed',
+    body: `${planName} — ${formatGhs(amountGhs)} paid. Active until ${new Date(periodEnd).toLocaleDateString('en-GB')}.`,
+    data: { type: 'subscription' }
+  });
 }
 
 /**
@@ -285,6 +297,11 @@ Reply *RETRY* to try again or *SUPPORT* if you need help.`;
   } catch (err) {
     logger.warn('notifySubscriptionFailed send failed: %s', err.message);
   }
+  push.pushToBusiness(business.id, {
+    title: '⚠️ Subscription payment failed',
+    body: `${planName} — ${formatGhs(amountGhs)}. Open the app to retry.`,
+    data: { type: 'subscription' }
+  });
 }
 
 module.exports = {

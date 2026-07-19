@@ -419,6 +419,25 @@ CREATE INDEX IF NOT EXISTS idx_api_keys_business ON api_keys(business_id);
 CREATE INDEX IF NOT EXISTS idx_api_keys_active   ON api_keys(scope) WHERE revoked_at IS NULL;
 
 -- =========================================================================
+-- device_tokens: FCM push tokens for the mobile app. business_id NULL means
+-- an admin/team device (registered with an admin-scoped key). A token is
+-- globally unique — re-registering moves it to the new owner, which is what
+-- you want when a phone switches accounts.
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS device_tokens (
+  id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  business_id   UUID REFERENCES businesses(id) ON DELETE CASCADE,
+  scope         TEXT NOT NULL DEFAULT 'tenant' CHECK (scope IN ('admin','tenant')),
+  fcm_token     TEXT NOT NULL UNIQUE,
+  platform      TEXT NOT NULL DEFAULT 'android' CHECK (platform IN ('ios','android')),
+  device_name   TEXT,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_seen_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_device_tokens_business ON device_tokens(business_id);
+CREATE INDEX IF NOT EXISTS idx_device_tokens_scope ON device_tokens(scope);
+
+-- =========================================================================
 -- Upgrade path: databases created before the pawaPay gateway existed carry
 -- CHECK constraints without 'pawapay'. Drop-and-recreate is re-runnable.
 -- =========================================================================

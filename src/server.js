@@ -29,6 +29,7 @@ const conversationsRoutes = require('./routes/conversations.routes');
 const broadcastRoutes = require('./routes/broadcast.routes');
 const promoRoutes = require('./routes/promo.routes');
 const receiptRoutes = require('./routes/receipt.routes');
+const deviceRoutes = require('./routes/device.routes');
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
@@ -149,6 +150,7 @@ app.use('/api/analytics', apiLimiter, analyticsRoutes);
 app.use('/api/conversations', apiLimiter, conversationsRoutes);
 app.use('/api/broadcasts', apiLimiter, broadcastRoutes);
 app.use('/api/promos', apiLimiter, promoRoutes);
+app.use('/api/devices', apiLimiter, deviceRoutes);
 // Public, unauthenticated — the order id itself is the shareable capability.
 app.use('/api/receipts', apiLimiter, receiptRoutes);
 
