@@ -28,11 +28,12 @@ function init() {
       return false;
     }
     // Lazy require so the app still boots if the dependency is missing.
-    const admin = require('firebase-admin');
-    if (!admin.apps.length) {
-      admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
+    const { initializeApp, cert, getApps } = require('firebase-admin/app');
+    const { getMessaging } = require('firebase-admin/messaging');
+    if (!getApps().length) {
+      initializeApp({ credential: cert(serviceAccount) });
     }
-    messaging = admin.messaging();
+    messaging = getMessaging();
     logger.info('push: Firebase initialized (project %s)', serviceAccount.project_id);
     return true;
   } catch (err) {
