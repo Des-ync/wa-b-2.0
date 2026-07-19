@@ -18,7 +18,7 @@ const { query } = require('../config/database');
 const paystack = require('./paystack.service');
 const orderService = require('./order.service');
 const conversation = require('./conversation.handler');
-const wa = require('./whatsapp.service');
+const { getAdapter, destOf } = require('./channel.adapter');
 const lock = require('./worker.lock');
 
 const PENDING_TTL_MINUTES = parseInt(process.env.PAYMENT_PENDING_TTL_MINUTES || '15', 10);
@@ -31,7 +31,9 @@ async function expirePendingPayment(order) {
     const customerRes = await query('SELECT * FROM customers WHERE id = $1', [order.customer_id]);
     const customer = customerRes.rows[0];
     if (customer) {
-      await wa.sendButtons(customer.whatsapp_number,
+      // Route via the customer's channel: for Instagram rows whatsapp_number
+      // holds the IG-scoped id, and a WhatsApp send to it would just fail.
+      await getAdapter(customer.channel).sendButtons(destOf(customer),
         `⏰ We didn't receive payment for order *${order.order_number}*.\n\nYour order is still saved — want to try paying again?`,
         [
           { id: `retrypay_${order.id}`, title: 'Try again' },

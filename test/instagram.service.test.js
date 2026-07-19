@@ -34,7 +34,12 @@ test('IG text send matches Meta wire format and returns the message id', async (
   assert.equal(result.messageId, 'mid.TEST');
 
   const req = captured[0];
-  assert.ok(req.url.startsWith('/me/messages?access_token='), 'token goes in the query string');
+  assert.equal(req.url, '/me/messages');
+  assert.ok(!req.url.includes('access_token'), 'token must NOT be in the query string');
+  assert.ok(
+    (req.opts?.headers?.Authorization || '').startsWith('Bearer '),
+    'token goes in the Authorization header'
+  );
   assert.deepEqual(req.body.recipient, { id: '1234567890' });
   assert.equal(req.body.message.text, 'Hello there');
 });

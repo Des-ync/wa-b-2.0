@@ -212,6 +212,25 @@ CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
 CREATE INDEX IF NOT EXISTS idx_orders_payment_ref ON orders(payment_ref);
 
 -- =========================================================================
+-- payment_attempts: EVERY payment reference ever issued for an order.
+-- orders.payment_ref only tracks the LATEST attempt; when a customer retries
+-- payment, the earlier still-live gateway charge keeps its old reference.
+-- Without this table a success webhook for that old reference finds no order
+-- and the money silently vanishes from our books.
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS payment_attempts (
+  reference   TEXT PRIMARY KEY,
+  order_id    UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  method      TEXT,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_payment_attempts_order ON payment_attempts(order_id);
+-- Backfill: pre-existing orders' current refs stay resolvable.
+INSERT INTO payment_attempts (reference, order_id, method)
+SELECT payment_ref, id, payment_method FROM orders WHERE payment_ref IS NOT NULL
+ON CONFLICT (reference) DO NOTHING;
+
+-- =========================================================================
 -- conversation_state: per-customer flow tracker
 -- =========================================================================
 CREATE TABLE IF NOT EXISTS conversation_state (

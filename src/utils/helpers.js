@@ -68,12 +68,20 @@ function formatGhs(amount) {
 }
 
 /**
- * Generate a human-friendly order number: ORD-YYYY-NNNN (random 4-digit suffix).
+ * Generate a human-friendly order number: ORD-YYYY-XXXXXX.
+ * Suffix alphabet omits 0/O/1/I/L so numbers survive being read aloud or
+ * retyped from a chat. 31^6 ≈ 887M combinations per year — the old 4-digit
+ * suffix (9,000/year, globally unique) started colliding at a few thousand
+ * orders and would have hard-failed order creation once exhausted.
  */
+const ORDER_SUFFIX_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 function generateOrderNumber() {
   const year = new Date().getFullYear();
-  const random = crypto.randomInt(1000, 9999);
-  return `ORD-${year}-${random}`;
+  let suffix = '';
+  for (let i = 0; i < 6; i++) {
+    suffix += ORDER_SUFFIX_ALPHABET[crypto.randomInt(ORDER_SUFFIX_ALPHABET.length)];
+  }
+  return `ORD-${year}-${suffix}`;
 }
 
 /**
@@ -137,6 +145,21 @@ function truncate(s, n) {
 }
 
 /**
+ * Strip EVERY credential column from a business row before it leaves the API.
+ * Add new secret columns here, not at call sites — this is the single place
+ * that decides what a business row may expose.
+ */
+function sanitizeBusiness(business) {
+  if (!business || typeof business !== 'object') return business;
+  const {
+    wa_access_token: _wa,
+    ig_page_access_token: _ig,
+    ...safe
+  } = business;
+  return safe;
+}
+
+/**
  * Sleep helper for retry/backoff loops.
  */
 function sleep(ms) {
@@ -157,9 +180,11 @@ function safeJsonParse(value, fallback = null) {
 }
 
 /**
- * Matches order numbers like ORD-2026-4821 anywhere in a message.
+ * Matches order numbers anywhere in a message — both the legacy 4-digit
+ * suffix (ORD-2026-4821) and the current 6-char alphanumeric suffix
+ * (ORD-2026-K7M2XQ).
  */
-const ORDER_NUMBER_RE = /\bORD-\d{4}-\d{4}\b/i;
+const ORDER_NUMBER_RE = /\bORD-\d{4}-[A-Z0-9]{4,8}\b/i;
 
 /**
  * Typing-indicator delay that decays per conversation: the first reply waits
@@ -263,6 +288,7 @@ module.exports = {
   addDays,
   formatDate,
   truncate,
+  sanitizeBusiness,
   sleep,
   safeJsonParse,
   ORDER_NUMBER_RE,

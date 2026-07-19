@@ -114,9 +114,11 @@ function buildSendRequest({ igAccountId: _igAccountId, accessToken, recipientId,
     msg = { text: String(message.text || '').slice(0, 1000) };
   }
   return {
-    url: `/me/messages?access_token=${encodeURIComponent(accessToken)}`,
+    // Token travels in the Authorization header, never the query string —
+    // URLs leak into proxy logs, axios error objects, and APM traces.
+    url: '/me/messages',
     body: { recipient: { id: String(recipientId) }, message: msg },
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
     extractMessageId: data => data?.message_id || null
   };
 }

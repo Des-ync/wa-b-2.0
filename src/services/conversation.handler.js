@@ -52,6 +52,11 @@ const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || '';
    cool-off notice per window, past the hard cap we stop replying entirely
    (their messages are still logged/deduped above).
    ----------------------------------------------------------------- */
+// NOTE: this limiter (like typingCounts above) is in-memory and therefore
+// per-process. It is only effective while exactly ONE process runs the
+// webhook processor (the current pm2 setup). Scaling RUN_PROCESSOR to
+// multiple instances multiplies every customer's budget — move these
+// counters to Postgres before doing that.
 const RATE_WINDOW_MS = 10 * 60 * 1000;
 const RATE_SOFT_MAX = 25;   // replies allowed per window
 const RATE_HARD_MAX = 50;   // beyond this: silent drop
@@ -1161,7 +1166,8 @@ async function continueOrderingFlow({ business, customer, state, inbound }) {
         `SELECT id FROM products
           WHERE business_id = $1 AND in_stock = TRUE AND name ILIKE '%' || $2 || '%'
           ORDER BY LENGTH(name) ASC LIMIT 1`,
-        [business.id, qty.name]
+        // Escape ILIKE metacharacters so customer text can't wildcard-match.
+        [business.id, qty.name.replace(/[\\%_]/g, '\\$&')]
       );
       if (match.rows[0]) {
         return addProductToCart({
@@ -1571,7 +1577,17 @@ async function handlePaymentSuccess({ reference, gatewayRef, amount }) {
   if (!result) return { handled: false };
 
   if (result.alreadyPaid) {
-    logger.info('handlePaymentSuccess: order %s already paid (idempotent skip)', result.order.order_number);
+    // Same reference replayed → normal idempotent skip. A DIFFERENT reference
+    // succeeding against an already-paid order means the customer approved
+    // two live prompts — money was collected twice and a refund is owed.
+    if (result.order.payment_ref && result.order.payment_ref !== reference) {
+      logger.error(
+        'POSSIBLE DOUBLE CHARGE: success for ref=%s but order %s was already paid via ref=%s — refund ref=%s at the gateway',
+        reference, result.order.order_number, result.order.payment_ref, reference
+      );
+    } else {
+      logger.info('handlePaymentSuccess: order %s already paid (idempotent skip)', result.order.order_number);
+    }
     return { handled: true, alreadyPaid: true };
   }
   if (result.mismatch) {
@@ -1609,6 +1625,13 @@ async function handlePaymentSuccess({ reference, gatewayRef, amount }) {
 async function handlePaymentFailure({ reference }) {
   const order = await orderService.getOrderByPaymentRef(reference);
   if (!order) return { handled: false };
+  // A failure for a SUPERSEDED attempt (customer already retried with a new
+  // reference) must not clobber the newer in-flight payment's state.
+  if (order.payment_ref && order.payment_ref !== reference) {
+    logger.info('handlePaymentFailure: stale attempt ref=%s for order %s (current ref=%s) — ignoring',
+      reference, order.order_number, order.payment_ref);
+    return { handled: true, stale: true };
+  }
   await orderService.markOrderFailed({ orderId: order.id, paymentRef: reference });
 
   const customerRes = await query('SELECT * FROM customers WHERE id = $1', [order.customer_id]);

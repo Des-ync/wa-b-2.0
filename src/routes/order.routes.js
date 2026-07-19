@@ -102,7 +102,11 @@ router.get('/export', async (req, res) => {
     const r = await query(sql, params);
 
     const csvCell = v => {
-      const s = String(v == null ? '' : v);
+      let s = String(v == null ? '' : v);
+      // Neutralize spreadsheet formula injection: customer-typed names,
+      // addresses and notes land in this file, and Excel/Sheets execute
+      // cells starting with = + - @ (or tab/CR).
+      if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
       return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
     };
     const header = ['order_number','created_at','customer_phone','customer_name','items',
@@ -181,15 +185,20 @@ router.post('/', async (req, res) => {
       phoneNetwork: detectNetwork(wa)
     });
 
-    // Resolve product details for each item.
+    // Resolve product details for all items in one query.
+    const wanted = items.filter(i => i.product_id);
+    const ids = [...new Set(wanted.map(i => String(i.product_id)))];
+    const r = ids.length
+      ? await query(
+          `SELECT id, name, price_ghs FROM products WHERE business_id = $1 AND id = ANY($2::uuid[])`,
+          [business_id, ids]
+        )
+      : { rows: [] };
+    const byId = new Map(r.rows.map(p => [p.id, p]));
+
     const cart = [];
-    for (const item of items) {
-      if (!item.product_id) continue;
-      const r = await query(
-        `SELECT id, name, price_ghs FROM products WHERE id = $1 AND business_id = $2`,
-        [item.product_id, business_id]
-      );
-      const p = r.rows[0];
+    for (const item of wanted) {
+      const p = byId.get(String(item.product_id));
       if (!p) {
         return res.status(400).json({
           success: false,

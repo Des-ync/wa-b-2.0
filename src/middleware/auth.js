@@ -127,6 +127,14 @@ function requireAuth(requiredScope = 'any') {
           if (requiredScope === 'admin') {
             return res.status(403).json({ success: false, error: 'Admin scope required' });
           }
+          // Same guarantee as the API-key path below: on tenant-scoped routes
+          // a :businessId path param must match the caller's own business.
+          if (requiredScope === 'tenant') {
+            const pathBiz = req.params.businessId;
+            if (pathBiz && pathBiz !== business.id) {
+              return res.status(403).json({ success: false, error: 'Session does not match business' });
+            }
+          }
           req.auth = { keyId: null, businessId: business.id, scope: 'tenant', clerkUserId };
           return next();
         } catch (err) {

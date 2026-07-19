@@ -29,9 +29,31 @@ const PORT = parseInt(process.env.PORT || '3000', 10);
 // limiter) reflects the real client, not 127.0.0.1.
 app.set('trust proxy', 1);
 
-// Security headers. CSP is off because the marketing site and dashboard use
-// inline scripts; everything else (frameguard, nosniff, HSTS via nginx) applies.
-app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
+// Security headers. The marketing site and dashboard rely on inline scripts
+// and Clerk's hosted JS, so the CSP below is deliberately permissive
+// ('unsafe-inline' + any https: origin) — but it still blocks http: script
+// injection, plugin/object embedding, and base-tag hijacking, which is far
+// better than no CSP at all. Tighten to nonces if the inline scripts move out.
+app.use(helmet({
+  contentSecurityPolicy: {
+    useDefaults: true,
+    directives: {
+      'script-src': ["'self'", "'unsafe-inline'", 'https:'],
+      'script-src-attr': ["'unsafe-inline'"],
+      'style-src': ["'self'", "'unsafe-inline'", 'https:'],
+      'img-src': ["'self'", 'data:', 'https:'],
+      'connect-src': ["'self'", 'https:'],
+      'font-src': ["'self'", 'data:', 'https:'],
+      'frame-src': ['https:'],
+      'worker-src': ["'self'", 'blob:'],
+      'object-src': ["'none'"],
+      'base-uri': ["'self'"],
+      // Don't force-upgrade in local http dev; HSTS in production is nginx's job.
+      'upgrade-insecure-requests': null
+    }
+  },
+  crossOriginEmbedderPolicy: false
+}));
 
 // In a multi-instance deployment, set RUN_CRON=false on every replica except one
 // (or run the dedicated worker via `node src/worker.js` instead). The worker_lock

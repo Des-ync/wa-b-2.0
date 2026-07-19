@@ -28,7 +28,7 @@
     <article class="feat"><h3 class="h-card">Multi-tenant isolation</h3><p>Every query is row-level-security scoped to the merchant's tenant ID. Zero cross-tenant data exposure by construction.</p></article>
     <article class="feat"><h3 class="h-card">Idempotency &amp; replay protection</h3><p>Webhook processor uses idempotency keys; duplicate events are detected and dropped. Replay windows enforced on signed payloads.</p></article>
     <article class="feat"><h3 class="h-card">RBAC &amp; audit log</h3><p>Owner / Manager / Cashier roles. Every action (login, payment, refund, settings change) is logged with actor, IP, and timestamp.</p></article>
-    <article class="feat"><h3 class="h-card">Secrets management</h3><p>All credentials live in a dedicated secret store (HashiCorp Vault). Rotated quarterly. Never in code or env files.</p></article>
+    <article class="feat"><h3 class="h-card">Secrets management</h3><p>Credentials are kept in server-side environment configuration on access-controlled infrastructure — never committed to code or exposed to the browser. API keys are stored only as SHA-256 hashes.</p></article>
     <article class="feat"><h3 class="h-card">SSO &amp; 2FA</h3><p>2FA available for all merchant accounts. SSO (Google, Microsoft) on Market plan. WA-B staff use SSO + hardware keys.</p></article>
     <article class="feat"><h3 class="h-card">Backups</h3><p>Encrypted point-in-time backups every 5 minutes. Quarterly restore drills. 30-day retention.</p></article>
   </div>

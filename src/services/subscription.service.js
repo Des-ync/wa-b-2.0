@@ -257,8 +257,9 @@ async function applySuccessfulPayment({ reference, transactionId, amount }) {
       return { applied: false, reason: `billing_${billing.status}`, billing };
     }
 
-    // Amount check: gateway must have collected at least the row's amount.
-    // Also reject overpayments wildly larger than expected (likely confusion).
+    // Amount check: gateway must have collected at least the row's amount
+    // (within 1 pesewa). Overpayments are accepted as-is — the gateway is the
+    // source of truth for what was actually collected.
     const expected = Number(billing.amount_ghs);
     const collected = amount != null ? Number(amount) : expected;
     if (!Number.isFinite(collected) || collected < expected - 0.01) {
@@ -360,12 +361,17 @@ async function markPaymentFailed({ reference, errorPayload }) {
     );
     const billing = billingRes.rows[0];
 
+    // Only demote to grace when the PAID period has actually lapsed. A failed
+    // mid-period charge (e.g. a declined upgrade attempt) must not push an
+    // otherwise fully paid subscription into the grace→suspension pipeline.
     await client.query(
       `UPDATE subscriptions
           SET retry_count = retry_count + 1,
               pending_plan_id = NULL,
               status = CASE
-                         WHEN status = 'active' THEN 'grace'
+                         WHEN status = 'active'
+                          AND (current_period_end IS NULL OR current_period_end <= NOW())
+                         THEN 'grace'
                          ELSE status
                        END
         WHERE id = $1`,

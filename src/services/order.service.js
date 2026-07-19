@@ -142,9 +142,22 @@ async function getOrderByNumber(orderNumber) {
   return res.rows[0] || null;
 }
 
+/**
+ * Resolve an order from ANY payment reference ever issued for it — the
+ * current orders.payment_ref OR an earlier attempt recorded in
+ * payment_attempts. A customer can retry payment (new ref) and then approve
+ * the ORIGINAL gateway prompt; that success must still find its order.
+ */
 async function getOrderByPaymentRef(paymentRef) {
   const res = await query('SELECT * FROM orders WHERE payment_ref = $1', [paymentRef]);
-  return res.rows[0] || null;
+  if (res.rows[0]) return res.rows[0];
+  const attempt = await query(
+    `SELECT o.* FROM orders o
+       JOIN payment_attempts pa ON pa.order_id = o.id
+      WHERE pa.reference = $1`,
+    [paymentRef]
+  );
+  return attempt.rows[0] || null;
 }
 
 /**
@@ -185,15 +198,25 @@ async function updateOrderStatus(orderId, newStatus) {
 }
 
 async function attachPaymentReference(orderId, paymentRef, paymentMethod) {
-  const res = await query(
-    `UPDATE orders
-        SET payment_ref    = $2,
-            payment_method = COALESCE($3, payment_method),
-            payment_status = 'pending'
-      WHERE id = $1 RETURNING *`,
-    [orderId, paymentRef, paymentMethod || null]
-  );
-  return res.rows[0] || null;
+  return transaction(async client => {
+    // Record the attempt so this reference stays resolvable even after a
+    // later retry overwrites orders.payment_ref with a fresh one.
+    await client.query(
+      `INSERT INTO payment_attempts (reference, order_id, method)
+       VALUES ($1,$2,$3)
+       ON CONFLICT (reference) DO NOTHING`,
+      [paymentRef, orderId, paymentMethod || null]
+    );
+    const res = await client.query(
+      `UPDATE orders
+          SET payment_ref    = $2,
+              payment_method = COALESCE($3, payment_method),
+              payment_status = 'pending'
+        WHERE id = $1 RETURNING *`,
+      [orderId, paymentRef, paymentMethod || null]
+    );
+    return res.rows[0] || null;
+  });
 }
 
 /**
@@ -225,10 +248,17 @@ async function markOrderPaid({ orderId, paymentRef, paymentMethod, amount }) {
       return { order: existing, alreadyPaid: false, refunded: true };
     }
 
-    // Bind the payment_ref to this order BEFORE accepting the payment, so a
-    // second order using the same ref cannot also be marked paid.
+    // A reference other than the current payment_ref may only pay this order
+    // if it was genuinely issued FOR this order (an earlier retry attempt);
+    // anything else is a conflict and is refused.
     if (paymentRef && existing.payment_ref && existing.payment_ref !== paymentRef) {
-      return { order: existing, mismatch: true, reason: 'payment_ref_conflict' };
+      const attempt = await client.query(
+        `SELECT 1 FROM payment_attempts WHERE reference = $1 AND order_id = $2`,
+        [paymentRef, existing.id]
+      );
+      if (!attempt.rowCount) {
+        return { order: existing, mismatch: true, reason: 'payment_ref_conflict' };
+      }
     }
 
     if (amount != null) {

@@ -3,7 +3,7 @@ const express = require('express');
 const logger = require('../utils/logger');
 const { query } = require('../config/database');
 const { verifyClerkSession, JWT_SHAPE_RE } = require('../middleware/auth');
-const { normalizeGhanaPhone, generateOtp } = require('../utils/helpers');
+const { normalizeGhanaPhone, generateOtp, sanitizeBusiness } = require('../utils/helpers');
 const wa = require('../services/whatsapp.service');
 
 const router = express.Router();
@@ -84,9 +84,14 @@ router.post('/clerk/link/request', requireClerkToken, async (req, res) => {
     const business = await resolveLinkableBusiness(req, res);
     if (!business) return; // response already sent
 
+    // Cooldown is scoped to (business, clerk user): one account requesting a
+    // code must not block a different legitimate account for the same shop
+    // (that would also confirm the business exists to a griefing caller).
     const lastSent = await query(
-      `SELECT created_at FROM business_link_otps WHERE business_id = $1 ORDER BY created_at DESC LIMIT 1`,
-      [business.id]
+      `SELECT created_at FROM business_link_otps
+        WHERE business_id = $1 AND clerk_user_id = $2
+        ORDER BY created_at DESC LIMIT 1`,
+      [business.id, req.clerkUserId]
     );
     if (lastSent.rows[0]) {
       const elapsedMs = Date.now() - new Date(lastSent.rows[0].created_at).getTime();
@@ -156,13 +161,22 @@ router.post('/clerk/link/verify', requireClerkToken, async (req, res) => {
     if (!otp || new Date(otp.expires_at) < new Date()) {
       return res.status(400).json({ success: false, error: 'Code expired or never requested. Send a new code.' });
     }
-    if (otp.attempts >= OTP_MAX_ATTEMPTS) {
+
+    // Consume an attempt ATOMICALLY before checking the code. The previous
+    // check-then-increment let N parallel requests each read attempts < max
+    // and collectively exceed the guess budget.
+    const claim = await query(
+      `UPDATE business_link_otps SET attempts = attempts + 1
+        WHERE id = $1 AND attempts < $2
+        RETURNING attempts`,
+      [otp.id, OTP_MAX_ATTEMPTS]
+    );
+    if (!claim.rowCount) {
       return res.status(429).json({ success: false, error: 'Too many incorrect attempts. Send a new code.' });
     }
 
     if (hashOtp(code) !== otp.code_hash) {
-      await query(`UPDATE business_link_otps SET attempts = attempts + 1 WHERE id = $1`, [otp.id]);
-      const remaining = OTP_MAX_ATTEMPTS - (otp.attempts + 1);
+      const remaining = OTP_MAX_ATTEMPTS - claim.rows[0].attempts;
       return res.status(400).json({
         success: false,
         error: remaining > 0 ? `Incorrect code. ${remaining} attempt(s) left.` : 'Incorrect code. Send a new code.'
@@ -182,9 +196,6 @@ router.post('/clerk/link/verify', requireClerkToken, async (req, res) => {
   }
 });
 
-function sanitize(business) {
-  const { wa_access_token: _omit, ...safe } = business;
-  return safe;
-}
+const sanitize = sanitizeBusiness;
 
 module.exports = router;

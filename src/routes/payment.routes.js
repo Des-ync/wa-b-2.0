@@ -1,4 +1,5 @@
 const express = require('express');
+const rateLimit = require('express-rate-limit');
 const logger = require('../utils/logger');
 const paystack = require('../services/paystack.service');
 const hubtel = require('../services/hubtel.service');
@@ -64,8 +65,18 @@ router.post('/paystack/webhook', async (req, res) => {
 /**
  * Browser callback after a card payment. Used as `callback_url` in initialize.
  * Verify on the server and enqueue a synthetic event so the worker handles it.
+ *
+ * Rate-limited (unlike the webhook POSTs, which must never be): each hit
+ * triggers an outbound Paystack verify call, so an attacker spraying random
+ * references would otherwise burn our API quota.
  */
-router.get('/paystack/callback', async (req, res) => {
+const callbackLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false
+});
+router.get('/paystack/callback', callbackLimiter, async (req, res) => {
   const reference = req.query.reference || req.query.trxref;
   if (!reference) return res.status(400).send('Missing reference');
 

@@ -1,7 +1,7 @@
 const express = require('express');
 const logger = require('../utils/logger');
 const subService = require('../services/subscription.service');
-const { normalizeGhanaPhone } = require('../utils/helpers');
+const { normalizeGhanaPhone, sanitizeBusiness } = require('../utils/helpers');
 const { requireAuth } = require('../middleware/auth');
 
 const router = express.Router();
@@ -44,7 +44,7 @@ router.post('/', requireAuth('admin'), async (req, res) => {
 
     const result = await subService.initiateRenewal({ business, plan });
 
-    const { wa_access_token: _omit, ...safeBusiness } = business;
+    const safeBusiness = sanitizeBusiness(business);
     if (!result.success) {
       return res.status(502).json({ success: false, error: result.error, business: safeBusiness });
     }
@@ -71,8 +71,7 @@ router.get('/:businessId', requireAuth('any'), async (req, res) => {
     const business = await subService.getBusinessById(req.params.businessId);
     if (!business) return res.status(404).json({ success: false, error: 'Business not found' });
     const sub = await subService.getActiveSubscription(business.id);
-    const { wa_access_token: _omit, ...safeBusiness } = business;
-    res.json({ success: true, business: safeBusiness, subscription: sub });
+    res.json({ success: true, business: sanitizeBusiness(business), subscription: sub });
   } catch (err) {
     logger.error('GET /subscriptions/:id failed: %s', err.message);
     res.status(500).json({ success: false, error: 'Internal server error' });
