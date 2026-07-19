@@ -3,6 +3,8 @@ const crypto = require('crypto');
 const { query, transaction } = require('../config/database');
 const logger = require('../utils/logger');
 const { alertOps } = require('./alert.service');
+const metrics = require('../utils/metrics');
+const requestContext = require('../utils/requestContext');
 
 const WORKER_ID = `${os.hostname()}-${process.pid}-${crypto.randomBytes(3).toString('hex')}`;
 const LOCK_TTL_SECONDS = 60;
@@ -179,18 +181,31 @@ async function drain(processors, { maxBatch = 50 } = {}) {
     if (!event) break;
     processed++;
 
+    if (event.received_at) {
+      metrics.recordTiming(`webhook_queue_wait_ms.${event.source}`, Date.now() - new Date(event.received_at).getTime());
+    }
+
     const fn = processors[event.source];
     if (!fn) {
       await markFailed(event.id, `No processor for source=${event.source}`, event.attempts, event.source);
+      metrics.increment(`webhook_failed_total.${event.source}`);
       continue;
     }
 
+    const start = Date.now();
+    // Correlate every log line this event's processing produces (including
+    // deep async work) with the event's own id — the same trick requestId
+    // middleware does for HTTP requests, applied to the queue.
     try {
-      await fn(event.payload, event);
+      await requestContext.run({ requestId: `webhook:${event.id}` }, () => fn(event.payload, event));
       await markDone(event.id);
+      metrics.recordTiming(`webhook_processing_ms.${event.source}`, Date.now() - start);
+      metrics.increment(`webhook_done_total.${event.source}`);
     } catch (err) {
       logger.error('Webhook event %s (%s) failed: %s', event.id, event.source, err.message);
       await markFailed(event.id, err.message, event.attempts, event.source);
+      metrics.recordTiming(`webhook_processing_ms.${event.source}`, Date.now() - start);
+      metrics.increment(`webhook_failed_total.${event.source}`);
     }
   }
   return processed;

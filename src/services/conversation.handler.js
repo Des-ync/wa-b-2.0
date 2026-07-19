@@ -8,6 +8,7 @@ const orderService = require('./order.service');
 const subService = require('./subscription.service');
 const notificationService = require('./notification.service');
 const push = require('./push.service');
+const dashboardNotify = require('./dashboard.notify');
 const {
   normalizeGhanaPhone,
   detectNetwork,
@@ -22,7 +23,12 @@ const {
   parseQuantityExpression,
   isWithinBusinessHours
 } = require('../utils/helpers');
-const { t, langOf } = require('../utils/i18n');
+const { t, langOf, detectLikelyLanguage } = require('../utils/i18n');
+const { detectProductQuery } = require('../utils/productQuery');
+const { fuzzyMatchProducts } = require('../utils/fuzzyMatch');
+const { pickFrequentlyBoughtSuggestion, pickVariantUpgrade } = require('../utils/upsell');
+const { generateReferralCode } = require('../utils/loyalty');
+const { setBusinessId } = require('../utils/requestContext');
 
 /* -----------------------------------------------------------------
    Typing indicator pacing: the first reply in a conversation waits the
@@ -30,6 +36,17 @@ const { t, langOf } = require('../utils/i18n');
    queue drains fast while single messages still feel human.
    ----------------------------------------------------------------- */
 const TYPING_RESET_MS = 10 * 60 * 1000;
+
+// orderService.validatePromoCode's error codes -> customer-facing i18n keys.
+const PROMO_ERROR_KEYS = {
+  expired: 'promo_expired',
+  exhausted: 'promo_exhausted',
+  min_order_not_met: 'promo_min_order_not_met',
+  first_order_only: 'promo_first_order_only',
+  not_eligible: 'promo_not_eligible',
+  product_not_in_cart: 'promo_wrong_items',
+  category_not_in_cart: 'promo_wrong_items'
+};
 const typingCounts = new Map(); // key -> { count, ts }
 
 function nextTypingDelay(key) {
@@ -433,6 +450,7 @@ async function getBusinessByIgAccountId(igAccountId) {
    ================================================================= */
 
 async function handleSaasBilling({ business, inbound }) {
+  setBusinessId(business.id);
   const text = inbound.text;
   const upper = text.toUpperCase().trim();
 
@@ -745,6 +763,7 @@ async function hasCommerceAccess(business) {
 }
 
 async function handleCommerce({ business, inbound }) {
+  setBusinessId(business.id);
   const channel = inbound.channel || 'whatsapp';
   const isWhatsApp = channel === 'whatsapp';
   const network = isWhatsApp ? detectNetwork(inbound.from) : null;
@@ -788,6 +807,20 @@ async function handleCommerce({ business, inbound }) {
     });
     return;
   }
+
+  // Per-customer language: a confident signal in what they just typed
+  // updates their stored preference; business.bot_language is mutated
+  // in-memory (this `business` object is freshly fetched per request, never
+  // shared/cached) so every langOf(business) call below — and in every
+  // helper this request calls — picks it up without threading `customer`
+  // through two dozen call sites.
+  const detectedLang = detectLikelyLanguage(inbound.text);
+  if (detectedLang && detectedLang !== customer.language_override) {
+    customer.language_override = detectedLang;
+    query('UPDATE customers SET language_override = $2 WHERE id = $1', [customer.id, detectedLang])
+      .catch(err => logger.debug('language_override update failed: %s', err.message));
+  }
+  if (customer.language_override) business.bot_language = customer.language_override;
 
   // Abuse guard: replies stop past the cap; the customer's messages are
   // still logged above so nothing is lost, we just stop paying to answer.
@@ -918,7 +951,7 @@ async function handleCommerce({ business, inbound }) {
   // Accept the tap payload OR the typed button label (see normalizeIntent).
   if (inbound.interactiveId === 'support_request'
       || titleMatches(inbound.text, 'btn_talk_to_us')) {
-    return sendSupportContact({ business, customer });
+    return sendSupportContact({ business, customer, lastMessage: inbound.text });
   }
 
   // Payment retry / order cancel buttons work from ANY state (they arrive
@@ -956,6 +989,22 @@ async function handleCommerce({ business, inbound }) {
   if (['REPEAT', 'REORDER'].includes(upper) || inbound.interactiveId === 'repeat_order'
       || titleMatches(inbound.text, 'btn_repeat')) {
     return reorderLastOrder({ business, customer });
+  }
+
+  // Referral: "REFERRAL <code>" self-links a brand-new customer to whoever
+  // referred them; "MY CODE" hands back their own shareable code.
+  const referralMatch = !inbound.interactiveId && /^REFERRAL\s+(\S+)/i.exec(inbound.text || '');
+  if (referralMatch) {
+    return applyReferralCode({ business, customer, code: referralMatch[1] });
+  }
+  if (upper === 'MY CODE' || upper === 'REFERRAL CODE') {
+    return sendMyReferralCode({ business, customer });
+  }
+
+  // A question before the customer has even opened the menu ("Do you have
+  // jollof?", "Anything below 50 cedis?") — answer it directly.
+  if (!inbound.interactiveId && await tryProductInquiry({ business, customer, text: inbound.text })) {
+    return;
   }
 
   // Default fallback
@@ -1048,13 +1097,88 @@ async function reorderLastOrder({ business, customer }) {
   return showCartReview({ business, customer, cart });
 }
 
-async function sendSupportContact({ business, customer }) {
-  const msisdn = String(business.support_phone || business.whatsapp_number || '').replace(/[^\d]/g, '');
+/** Lazily assign this customer their own shareable referral code. */
+async function getOrCreateReferralCode(customerId) {
+  const existing = await query('SELECT referral_code FROM customers WHERE id = $1', [customerId]);
+  if (existing.rows[0]?.referral_code) return existing.rows[0].referral_code;
+
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const code = generateReferralCode();
+    try {
+      await query('UPDATE customers SET referral_code = $2 WHERE id = $1', [customerId, code]);
+      return code;
+    } catch (err) {
+      if (err.code === '23505') continue; // UNIQUE collision — vanishingly rare, just retry
+      throw err;
+    }
+  }
+  throw new Error('Failed to allocate a unique referral code');
+}
+
+async function sendMyReferralCode({ business, customer }) {
+  const lang = langOf(business, customer);
+  const code = await getOrCreateReferralCode(customer.id);
   await chOf(customer).sendText(destOf(customer),
-    t(langOf(business), 'support_direct', {
-      shop: business.name,
-      link: msisdn ? `https://wa.me/${msisdn}` : null
-    }),
+    t(lang, 'my_referral_code', { code, shop: business.name }),
+    { businessId: business.id, customerId: customer.id });
+}
+
+/**
+ * Self-reported referral link: a brand-new customer types "REFERRAL <code>"
+ * to credit whoever sent them. Guards against abuse — only works before the
+ * customer's first paid order, can't self-refer, and can only be set once.
+ */
+async function applyReferralCode({ business, customer, code }) {
+  const lang = langOf(business, customer);
+  const clean = String(code || '').trim().toUpperCase();
+
+  if (customer.referred_by_customer_id) {
+    await chOf(customer).sendText(destOf(customer), t(lang, 'referral_already_linked'),
+      { businessId: business.id, customerId: customer.id });
+    return;
+  }
+  const paidRes = await query(
+    `SELECT COUNT(*)::int AS n FROM orders WHERE customer_id = $1 AND payment_status = 'paid'`,
+    [customer.id]
+  );
+  if (paidRes.rows[0].n > 0) {
+    await chOf(customer).sendText(destOf(customer), t(lang, 'referral_not_new'),
+      { businessId: business.id, customerId: customer.id });
+    return;
+  }
+
+  const referrerRes = await query(
+    'SELECT id FROM customers WHERE business_id = $1 AND referral_code = $2',
+    [business.id, clean]
+  );
+  const referrer = referrerRes.rows[0];
+  if (!referrer) {
+    await chOf(customer).sendText(destOf(customer), t(lang, 'referral_invalid'),
+      { businessId: business.id, customerId: customer.id });
+    return;
+  }
+  if (referrer.id === customer.id) {
+    await chOf(customer).sendText(destOf(customer), t(lang, 'referral_self'),
+      { businessId: business.id, customerId: customer.id });
+    return;
+  }
+
+  await query('UPDATE customers SET referred_by_customer_id = $2 WHERE id = $1', [customer.id, referrer.id]);
+  await chOf(customer).sendText(destOf(customer), t(lang, 'referral_applied', { shop: business.name }),
+    { businessId: business.id, customerId: customer.id });
+}
+
+/**
+ * "Talk to a human" handoff: pause the bot for this customer (so the state
+ * machine goes silent — see the bot_paused check at the top of handleInbound)
+ * and make sure the merchant actually notices, then reassure the customer.
+ */
+async function sendSupportContact({ business, customer, lastMessage }) {
+  await query('UPDATE customers SET bot_paused = TRUE WHERE id = $1', [customer.id]);
+  notificationService.notifyHumanHandoffRequested({ business, customer, lastMessage })
+    .catch(err => logger.warn('human handoff notify failed: %s', err.message));
+  await chOf(customer).sendText(destOf(customer),
+    t(langOf(business), 'human_handoff', { shop: business.name }),
     { businessId: business.id, customerId: customer.id, previewUrl: false });
 }
 
@@ -1114,6 +1238,7 @@ async function cancelUnpaidOrder({ business, customer, orderId }) {
     return;
   }
   await orderService.updateOrderStatus(order.id, 'cancelled');
+  notificationService.notifyOrderCancelled({ order, business, customer });
   await resetState(customer.id);
   await chOf(customer).sendText(destOf(customer),
     t(lang, 'order_cancelled_ok', { n: order.order_number }),
@@ -1147,17 +1272,34 @@ async function sendWelcome({ business, customer }) {
  * WhatsApp allows max 10 list rows total, so long catalogs are paginated
  * with prev/next rows (handled via `menu_page_<n>` interactive ids).
  */
-async function startOrderingFlow({ business, customer, page = 0 }) {
+/**
+ * The full "what can a customer currently see" product set: in stock, not
+ * hidden (product or category), and inside its availability window if it
+ * has one. Shared by the menu, NL product search, and the typed-add
+ * fallback so an inquiry can never reveal something the menu itself hides.
+ */
+async function fetchVisibleProducts(businessId) {
   const products = await query(
-    `SELECT id, name, description, price_ghs, category
-       FROM products
-      WHERE business_id = $1 AND in_stock = TRUE
-      ORDER BY category ASC, name ASC
+    `SELECT p.id, p.name, p.description, p.price_ghs, p.category,
+            p.featured, p.available_from, p.available_to
+       FROM products p
+       LEFT JOIN categories c ON c.business_id = p.business_id AND lower(c.name) = lower(p.category)
+      WHERE p.business_id = $1 AND p.in_stock = TRUE AND p.hidden = FALSE
+        AND COALESCE(c.hidden, FALSE) = FALSE
+      ORDER BY p.featured DESC, COALESCE(c.sort_order, 0) ASC, p.category ASC, p.sort_order ASC, p.name ASC
       LIMIT 200`,
-    [business.id]
+    [businessId]
   );
+  // Availability windows (e.g. a breakfast menu, 07:00-11:00) are time-zone
+  // sensitive, so filter in JS with the same Africa/Accra helper business
+  // hours already use, rather than juggling SQL time-zone conversions.
+  return products.rows.filter(p => isWithinBusinessHours(p.available_from, p.available_to));
+}
+
+async function startOrderingFlow({ business, customer, page = 0 }) {
   const lang = langOf(business);
-  if (!products.rows.length) {
+  const available = await fetchVisibleProducts(business.id);
+  if (!available.length) {
     await chOf(customer).sendText(destOf(customer),
       t(lang, 'no_products', { shop: business.name }),
       { businessId: business.id, customerId: customer.id });
@@ -1168,7 +1310,7 @@ async function startOrderingFlow({ business, customer, page = 0 }) {
   const state = await loadOrCreateState(customer.id);
   const cart = Array.isArray(state.flow_data?.cart) ? state.flow_data.cart : [];
 
-  const menu = buildMenuPage(products.rows, page);
+  const menu = buildMenuPage(available, page);
   const sections = [{
     title: menu.totalPages > 1 ? `Menu ${menu.page + 1}/${menu.totalPages}` : 'Menu',
     rows: menu.rows
@@ -1180,9 +1322,21 @@ async function startOrderingFlow({ business, customer, page = 0 }) {
     data: { cart, menu_page: menu.page }
   });
 
-  const cartNote = cart.length
+  let cartNote = cart.length
     ? t(lang, 'cart_note', { count: cart.reduce((n, i) => n + (i.quantity || 1), 0) })
     : '';
+  // "Your usual" only on the very first browse of a fresh cart — repeating
+  // it on every page flip or after items are added would just be noise.
+  if (page === 0 && !cart.length) {
+    try {
+      const top = await orderService.getTopOrderedItem(customer.id);
+      if (top && available.some(p => p.name.toLowerCase() === top.name.toLowerCase())) {
+        cartNote += t(lang, 'usual_hint', { name: top.name });
+      }
+    } catch (err) {
+      logger.debug('usual-item lookup failed: %s', err.message);
+    }
+  }
   await chOf(customer).sendList(
     destOf(customer),
     t(lang, 'menu_title', { shop: business.name }),
@@ -1221,6 +1375,27 @@ async function continueOrderingFlow({ business, customer, state, inbound }) {
     return addProductToCart({ business, customer, productId, cart });
   }
 
+  // Picking a variant (size/color/flavor/bundle) for a product that has them
+  if (state.current_step === 'choose_variant') {
+    let variantInteractiveId = inbound.interactiveId;
+    if (!variantInteractiveId) {
+      // Typed fallback (Instagram / re-typed number): a bare number picks
+      // the Nth variant from the list this step just sent.
+      const options = Array.isArray(data.pending_variant_options) ? data.pending_variant_options : [];
+      const n = /^\d{1,2}$/.test(upper) ? parseInt(upper, 10) : NaN;
+      if (n >= 1 && n <= options.length) variantInteractiveId = `variant_${options[n - 1]}`;
+    }
+    if (variantInteractiveId) {
+      return chooseVariant({ business, customer, state, interactiveId: variantInteractiveId });
+    }
+    return startOrderingFlow({ business, customer });
+  }
+
+  // Typed multi-select of add-ons ("1,3" or "0" for none)
+  if (state.current_step === 'choose_addons' && !inbound.interactiveId) {
+    return chooseAddons({ business, customer, state, text: inbound.text });
+  }
+
   // After adding, ask "Add more or checkout?"
   if (state.current_step === 'await_more') {
     if (inbound.interactiveId === 'add_more' || upper === 'ADD MORE' || upper === 'MORE'
@@ -1236,6 +1411,11 @@ async function continueOrderingFlow({ business, customer, state, inbound }) {
       await resetState(customer.id);
       await chOf(customer).sendText(destOf(customer), t(lang, 'order_cancelled_menu'),
         { businessId: business.id, customerId: customer.id });
+      return;
+    }
+    // A question ("Anything below 50 cedis?") gets answered without
+    // touching the cart or derailing the add-more/checkout prompt.
+    if (!inbound.interactiveId && await tryProductInquiry({ business, customer, text: inbound.text })) {
       return;
     }
     // Typing another item ("2x Jollof" or just "Jollof") keeps ordering.
@@ -1307,6 +1487,12 @@ async function continueOrderingFlow({ business, customer, state, inbound }) {
     }
   }
 
+  // A question ("Do you have spicy rice?") gets answered in place.
+  if (!inbound.interactiveId && state.current_step === 'browse'
+      && await tryProductInquiry({ business, customer, text: inbound.text })) {
+    return;
+  }
+
   // Typed product picks while browsing: "2x Jollof" or just "Jollof".
   if (!inbound.interactiveId && state.current_step === 'browse'
       && await tryTypedProductAdd({ business, customer, cart, inbound, page: data.menu_page || 0 })) {
@@ -1333,16 +1519,14 @@ async function tryTypedProductAdd({ business, customer, cart, inbound, page = 0 
   const name = explicit ? explicit.name : String(inbound.text || '').trim();
   if (!name || name.length < 3) return false;
 
-  const match = await query(
-    `SELECT id FROM products
-      WHERE business_id = $1 AND in_stock = TRUE AND name ILIKE '%' || $2 || '%'
-      ORDER BY LENGTH(name) ASC LIMIT 1`,
-    // Escape ILIKE metacharacters so customer text can't wildcard-match.
-    [business.id, name.replace(/[\\%_]/g, '\\$&')]
-  );
-  if (match.rows[0]) {
+  // Fuzzy match (typo tolerance + synonyms) against the same visible-product
+  // set the menu itself shows — a customer typing "waachy" or "kelly welly"
+  // still lands on the right item.
+  const visible = await fetchVisibleProducts(business.id);
+  const [hit] = fuzzyMatchProducts(name, visible, { maxResults: 1 });
+  if (hit) {
     await addProductToCart({
-      business, customer, productId: match.rows[0].id, cart,
+      business, customer, productId: hit.id, cart,
       quantity: explicit ? explicit.quantity : 1
     });
     return true;
@@ -1356,6 +1540,45 @@ async function tryTypedProductAdd({ business, customer, cart, inbound, page = 0 
     return true;
   }
   return false;
+}
+
+/**
+ * Answer a natural-language product question ("Do you have spicy rice?",
+ * "Anything below 50 cedis?") without touching the cart — these are
+ * inquiries, not add-to-cart actions. Falls through (returns false) for
+ * anything that doesn't look like a question so the caller's normal
+ * add/re-prompt logic still runs.
+ */
+async function tryProductInquiry({ business, customer, text }) {
+  const parsed = detectProductQuery(text);
+  if (!parsed) return false;
+
+  const lang = langOf(business);
+  const visible = await fetchVisibleProducts(business.id);
+
+  let matches;
+  if (parsed.type === 'availability') {
+    matches = fuzzyMatchProducts(parsed.term, visible, { maxResults: 5 });
+  } else if (parsed.type === 'price_below') {
+    matches = visible.filter(p => Number(p.price_ghs) <= parsed.max);
+  } else if (parsed.type === 'price_above') {
+    matches = visible.filter(p => Number(p.price_ghs) >= parsed.min);
+  } else if (parsed.type === 'price_between') {
+    matches = visible.filter(p => Number(p.price_ghs) >= parsed.min && Number(p.price_ghs) <= parsed.max);
+  } else {
+    return false;
+  }
+
+  if (!matches.length) {
+    await chOf(customer).sendText(destOf(customer), t(lang, 'product_query_none', { shop: business.name }),
+      { businessId: business.id, customerId: customer.id });
+    return true;
+  }
+
+  const list = matches.slice(0, 8).map(p => `• ${p.name} — ${formatGhs(p.price_ghs)}`).join('\n');
+  await chOf(customer).sendText(destOf(customer), t(lang, 'product_query_results', { list }),
+    { businessId: business.id, customerId: customer.id });
+  return true;
 }
 
 async function addProductToCart({ business, customer, productId, cart, quantity = 1 }) {
@@ -1374,15 +1597,194 @@ async function addProductToCart({ business, customer, productId, cart, quantity 
   }
 
   const qty = Math.min(99, Math.max(1, Number(quantity) || 1));
-  const existing = cart.find(c => c.product_id === product.id);
+
+  // Products with variants (size/color/flavor/bundle) can't be added
+  // straight to the cart — the customer picks one first. This is the only
+  // branch point: a product with no variants behaves exactly as before.
+  const variantsRes = await query(
+    `SELECT * FROM product_variants WHERE product_id = $1 ORDER BY sort_order ASC, name ASC`,
+    [product.id]
+  );
+  if (variantsRes.rows.length) {
+    return askForVariant({ business, customer, cart, product, variants: variantsRes.rows, quantity: qty });
+  }
+
+  return addResolvedItemToCart({ business, customer, cart, product, quantity: qty });
+}
+
+/**
+ * Sends the variant list. WhatsApp list rows top out at 10, so a product
+ * with more than 10 variants keeps only the first 10 — rare in practice for
+ * size/color/flavor style choices, but worth a debug log if it happens.
+ */
+async function askForVariant({ business, customer, cart, product, variants, quantity }) {
+  const lang = langOf(business);
+  if (variants.length > 10) {
+    logger.debug('product %s has %d variants — truncating to 10 for the WhatsApp list', product.id, variants.length);
+  }
+  const limited = variants.slice(0, 10);
+  await saveState(customer.id, {
+    flow: 'ordering',
+    step: 'choose_variant',
+    data: {
+      cart, pending_product_id: product.id, pending_quantity: quantity,
+      pending_variant_options: limited.map(v => v.id)
+    }
+  });
+  const rows = limited.map(v => ({
+    id: `variant_${v.id}`,
+    title: truncate(v.name, 24),
+    description: formatGhs(Number(product.price_ghs) + Number(v.price_delta_ghs))
+  }));
+  await chOf(customer).sendList(
+    destOf(customer),
+    t(lang, 'variant_header', { name: product.name }),
+    t(lang, 'variant_body'),
+    [{ title: product.name, rows }],
+    { buttonLabel: t(lang, 'btn_choose_option'), businessId: business.id, customerId: customer.id }
+  );
+}
+
+async function chooseVariant({ business, customer, state, interactiveId }) {
+  const lang = langOf(business);
+  const data = state.flow_data || {};
+  const cart = Array.isArray(data.cart) ? data.cart : [];
+  const variantId = interactiveId && interactiveId.startsWith('variant_')
+    ? interactiveId.slice('variant_'.length) : null;
+
+  if (!variantId || !data.pending_product_id) {
+    return startOrderingFlow({ business, customer });
+  }
+
+  const [productRes, variantRes] = await Promise.all([
+    query('SELECT * FROM products WHERE id = $1 AND business_id = $2', [data.pending_product_id, business.id]),
+    query('SELECT * FROM product_variants WHERE id = $1 AND product_id = $2', [variantId, data.pending_product_id])
+  ]);
+  const product = productRes.rows[0];
+  const variant = variantRes.rows[0];
+  if (!product || !variant) {
+    await chOf(customer).sendText(destOf(customer), t(lang, 'item_gone'),
+      { businessId: business.id, customerId: customer.id });
+    return startOrderingFlow({ business, customer });
+  }
+  if (variant.stock_qty !== null && variant.stock_qty <= 0) {
+    await chOf(customer).sendText(destOf(customer),
+      t(lang, 'variant_out_of_stock', { name: `${product.name} (${variant.name})` }),
+      { businessId: business.id, customerId: customer.id });
+    return askForVariant({
+      business, customer, cart, product,
+      variants: (await query('SELECT * FROM product_variants WHERE product_id = $1 ORDER BY sort_order ASC, name ASC', [product.id])).rows,
+      quantity: data.pending_quantity || 1
+    });
+  }
+
+  return addResolvedItemToCart({
+    business, customer, cart, product, variant,
+    quantity: data.pending_quantity || 1
+  });
+}
+
+/**
+ * After a product (and its variant, if any) is resolved, offer add-ons —
+ * these are typed multi-select (WhatsApp list/button messages are
+ * single-select only, and this also keeps Instagram, which has no
+ * interactive lists, working the same way).
+ */
+async function addResolvedItemToCart({ business, customer, cart, product, variant = null, quantity }) {
+  const addonsRes = await query(
+    `SELECT * FROM product_addons WHERE product_id = $1 ORDER BY sort_order ASC, name ASC LIMIT 20`,
+    [product.id]
+  );
+  if (addonsRes.rows.length) {
+    return askForAddons({ business, customer, cart, product, variant, quantity, addons: addonsRes.rows });
+  }
+  return finalizeCartAdd({ business, customer, cart, product, variant, addons: [], quantity });
+}
+
+async function askForAddons({ business, customer, cart, product, variant, quantity, addons }) {
+  const lang = langOf(business);
+  await saveState(customer.id, {
+    flow: 'ordering',
+    step: 'choose_addons',
+    data: {
+      cart,
+      pending_product_id: product.id,
+      pending_variant_id: variant ? variant.id : null,
+      pending_quantity: quantity,
+      pending_addon_options: addons.map(a => ({ id: a.id, name: a.name, price_ghs: Number(a.price_ghs) }))
+    }
+  });
+  const lines = addons.map((a, i) => `${i + 1}. ${a.name} — ${formatGhs(a.price_ghs)}`).join('\n');
+  await chOf(customer).sendText(destOf(customer),
+    t(lang, 'addon_prompt', { name: product.name, lines }),
+    { businessId: business.id, customerId: customer.id });
+}
+
+async function chooseAddons({ business, customer, state, text }) {
+  const lang = langOf(business);
+  const data = state.flow_data || {};
+  const cart = Array.isArray(data.cart) ? data.cart : [];
+  const options = Array.isArray(data.pending_addon_options) ? data.pending_addon_options : [];
+
+  const raw = String(text || '').trim();
+  let chosen = [];
+  if (raw !== '0' && raw !== '') {
+    const indices = raw.split(',').map(s => parseInt(s.trim(), 10));
+    const valid = indices.every(n => Number.isInteger(n) && n >= 1 && n <= options.length);
+    if (!valid || !indices.length) {
+      await chOf(customer).sendText(destOf(customer), t(lang, 'addon_invalid'),
+        { businessId: business.id, customerId: customer.id });
+      return;
+    }
+    chosen = [...new Set(indices)].map(n => options[n - 1]);
+  }
+
+  const [productRes, variantRes] = await Promise.all([
+    query('SELECT * FROM products WHERE id = $1 AND business_id = $2', [data.pending_product_id, business.id]),
+    data.pending_variant_id
+      ? query('SELECT * FROM product_variants WHERE id = $1', [data.pending_variant_id])
+      : Promise.resolve({ rows: [] })
+  ]);
+  const product = productRes.rows[0];
+  if (!product) {
+    await chOf(customer).sendText(destOf(customer), t(lang, 'item_gone'),
+      { businessId: business.id, customerId: customer.id });
+    return startOrderingFlow({ business, customer });
+  }
+  const variant = variantRes.rows[0] || null;
+
+  return finalizeCartAdd({
+    business, customer, cart, product, variant, addons: chosen,
+    quantity: data.pending_quantity || 1
+  });
+}
+
+async function finalizeCartAdd({ business, customer, cart, product, variant, addons = [], quantity }) {
+  const qty = Math.min(99, Math.max(1, Number(quantity) || 1));
+  const addonsTotal = addons.reduce((sum, a) => sum + Number(a.price_ghs), 0);
+  const unitPrice = Number(product.price_ghs) + (variant ? Number(variant.price_delta_ghs) : 0) + addonsTotal;
+  const displayName = variant ? `${product.name} (${variant.name})` : product.name;
+  const addonSuffix = addons.length ? ` + ${addons.map(a => a.name).join(', ')}` : '';
+
+  // Variant/add-on combinations are distinct cart lines — merging "Large +
+  // extra sauce" into a plain "Large" line would silently drop the add-on.
+  const existing = cart.find(c =>
+    c.product_id === product.id &&
+    (c.variant_id || null) === (variant ? variant.id : null) &&
+    JSON.stringify((c.addon_ids || []).slice().sort()) === JSON.stringify(addons.map(a => a.id).sort())
+  );
   if (existing) {
     existing.quantity = (existing.quantity || 1) + qty;
   } else {
     cart.push({
       product_id: product.id,
-      name: product.name,
-      price_ghs: Number(product.price_ghs),
-      quantity: qty
+      name: displayName + addonSuffix,
+      price_ghs: Number(unitPrice.toFixed(2)),
+      quantity: qty,
+      variant_id: variant ? variant.id : undefined,
+      variant_name: variant ? variant.name : undefined,
+      addon_ids: addons.length ? addons.map(a => a.id) : undefined,
+      addons: addons.length ? addons.map(a => ({ id: a.id, name: a.name, price_ghs: Number(a.price_ghs) })) : undefined
     });
   }
 
@@ -1391,7 +1793,7 @@ async function addProductToCart({ business, customer, productId, cart, quantity 
   if (product.image_url && typeof chOf(customer).sendImage === 'function') {
     try {
       await chOf(customer).sendImage(destOf(customer), product.image_url,
-        `${product.name} — ${formatGhs(product.price_ghs)}`,
+        `${displayName} — ${formatGhs(unitPrice)}`,
         { businessId: business.id, customerId: customer.id });
     } catch (err) {
       logger.debug('product image send failed: %s', err.message);
@@ -1401,15 +1803,48 @@ async function addProductToCart({ business, customer, productId, cart, quantity 
   await saveState(customer.id, { flow: 'ordering', step: 'await_more', data: { cart } });
   await promptAddMoreOrCheckout({
     business, customer,
-    justAdded: qty > 1 ? `${qty}× ${product.name}` : product.name
+    justAdded: qty > 1 ? `${qty}× ${displayName}` : displayName,
+    upsell: await buildUpsellHint({ business, cart, product, variant })
   });
 }
 
-async function promptAddMoreOrCheckout({ business, customer, justAdded }) {
+/**
+ * One short upsell line, or null: a variant upgrade takes priority over a
+ * frequently-bought-together suggestion (both would be noisy together).
+ * Best-effort — a failure here must never block the add-to-cart flow.
+ */
+async function buildUpsellHint({ business, cart, product, variant }) {
+  try {
+    if (variant) {
+      const variantsRes = await query(
+        'SELECT name, price_delta_ghs FROM product_variants WHERE product_id = $1',
+        [product.id]
+      );
+      const upgrade = pickVariantUpgrade(variant, variantsRes.rows);
+      if (upgrade) {
+        const delta = Number(upgrade.price_delta_ghs) - Number(variant.price_delta_ghs);
+        return t(langOf(business), 'upsell_variant', { name: upgrade.name, delta: formatGhs(delta) });
+      }
+    }
+    const cartNames = cart.map(i => i.name);
+    const coRows = await orderService.getFrequentlyBoughtWith(business.id, cartNames);
+    if (coRows.length) {
+      const visible = await fetchVisibleProducts(business.id);
+      const pick = pickFrequentlyBoughtSuggestion(coRows, visible, cartNames);
+      if (pick) return t(langOf(business), 'upsell_frequently_bought', { name: pick.name });
+    }
+  } catch (err) {
+    logger.debug('buildUpsellHint failed: %s', err.message);
+  }
+  return null;
+}
+
+async function promptAddMoreOrCheckout({ business, customer, justAdded, upsell }) {
   const lang = langOf(business);
-  const body = justAdded
+  let body = justAdded
     ? t(lang, 'added_prompt', { name: justAdded })
     : t(lang, 'add_or_checkout');
+  if (upsell) body += `\n\n${upsell}`;
   await chOf(customer).sendButtons(destOf(customer), body,
     [
       { id: 'add_more', title: t(lang, 'btn_add_more') },
@@ -1430,9 +1865,26 @@ async function showCartReview({ business, customer, cart, promoCode }) {
     await resetState(customer.id);
     return;
   }
-  const promo = promoCode ? (await orderService.validatePromoCode(business.id, promoCode)).promo : null;
+  let promo = promoCode ? (await orderService.validatePromoCode(business.id, promoCode, customer.id, cart)).promo : null;
+
+  // Auto-apply the best available discount when the customer hasn't typed a
+  // code themselves — once applied it's stored on the flow state, so this
+  // only ever fires the FIRST time cart review is shown for a given cart.
+  let autoApplied = null;
+  if (!promo) {
+    promo = await orderService.findBestApplicablePromo(business.id, customer.id, cart);
+    if (promo) autoApplied = promo;
+  }
+
   const totals = orderService.computeTotals(cart, 0, promo);
-  const lines = cart.map(i => `• ${i.quantity}× ${i.name} — ${formatGhs(i.price_ghs * i.quantity)}`).join('\n');
+  let lines = cart.map(i => `• ${i.quantity}× ${i.name} — ${formatGhs(i.price_ghs * i.quantity)}`).join('\n');
+
+  if (autoApplied) {
+    lines += `\n\n${t(lang, 'promo_auto_applied', { code: autoApplied.code, discount: formatGhs(totals.discount_ghs) })}`;
+  }
+
+  const upsell = await buildUpsellHint({ business, cart, product: {}, variant: null });
+  if (upsell) lines += `\n\n${upsell}`;
 
   await saveState(customer.id, { flow: 'ordering', step: 'cart_review', data: { cart, promo_code: promo ? promo.code : null } });
   await chOf(customer).sendButtons(destOf(customer),
@@ -1453,9 +1905,9 @@ async function showCartReview({ business, customer, cart, promoCode }) {
  */
 async function applyPromoCode({ business, customer, state, cart, code }) {
   const lang = langOf(business);
-  const { promo, error } = await orderService.validatePromoCode(business.id, code);
+  const { promo, error } = await orderService.validatePromoCode(business.id, code, customer.id, cart);
   if (error) {
-    const key = error === 'expired' ? 'promo_expired' : error === 'exhausted' ? 'promo_exhausted' : 'promo_invalid';
+    const key = PROMO_ERROR_KEYS[error] || 'promo_invalid';
     await chOf(customer).sendText(destOf(customer), t(lang, key),
       { businessId: business.id, customerId: customer.id });
   } else {
@@ -1554,7 +2006,7 @@ async function askForDeliveryZone({ business, customer, cart, address, promoCode
 
 async function showOrderConfirm({ business, customer, cart, address, fee, zoneName, promoCode }) {
   const lang = langOf(business);
-  const promo = promoCode ? (await orderService.validatePromoCode(business.id, promoCode)).promo : null;
+  const promo = promoCode ? (await orderService.validatePromoCode(business.id, promoCode, customer.id, cart)).promo : null;
   const totals = orderService.computeTotals(cart, fee, promo);
   const lines = cart.map(i => `• ${i.quantity}× ${i.name} — ${formatGhs(i.price_ghs * i.quantity)}`).join('\n');
 
@@ -1599,7 +2051,7 @@ async function finalizeOrderAndStartPayment({ business, customer, state }) {
   // the gap between confirm-order and this tap. Silently proceed without the
   // discount rather than block the order over a stale promo.
   const promoCode = state.flow_data?.promo_code || null;
-  const promo = promoCode ? (await orderService.validatePromoCode(business.id, promoCode)).promo : null;
+  const promo = promoCode ? (await orderService.validatePromoCode(business.id, promoCode, customer.id, cart)).promo : null;
 
   let order;
   try {
@@ -1672,7 +2124,8 @@ async function continuePaymentFlow({ business, customer, state, inbound }) {
       return startCardPayment({ business, customer, orderId });
     }
     if (inbound.interactiveId === 'cancel_order' || upper === 'CANCEL') {
-      await orderService.updateOrderStatus(orderId, 'cancelled');
+      const cancelled = await orderService.updateOrderStatus(orderId, 'cancelled');
+      if (cancelled) notificationService.notifyOrderCancelled({ order: cancelled, business, customer });
       await resetState(customer.id);
       await chOf(customer).sendText(destOf(customer), t(lang, 'order_cancelled_short'),
         { businessId: business.id, customerId: customer.id });
@@ -1857,6 +2310,37 @@ async function handlePaymentSuccess({ reference, gatewayRef, amount }) {
         body: `${p.name} — ${qtyLabel}`,
         data: { type: 'product', product_id: p.id }
       });
+      dashboardNotify.notifyDashboard(business.id, {
+        type: 'low_stock', title: '📉 Low stock', body: `${p.name} — ${qtyLabel}`,
+        data: { product_id: p.id }
+      });
+    }
+  }
+
+  if (customer && result.loyalty) {
+    const lang = langOf(business, customer);
+    const parts = [];
+    if (result.loyalty.pointsEarned > 0) {
+      parts.push(t(lang, 'loyalty_points_earned', { points: result.loyalty.pointsEarned, total: result.loyalty.stamps }));
+    }
+    if (result.loyalty.freeItemReward) {
+      parts.push(t(lang, 'loyalty_free_item_earned', { code: result.loyalty.freeItemReward.code, value: formatGhs(result.loyalty.freeItemReward.value_ghs) }));
+    }
+    if (parts.length) {
+      chOf(customer).sendText(destOf(customer), parts.join('\n\n'), { businessId: business.id, customerId: customer.id })
+        .catch(err => logger.debug('loyalty notify failed: %s', err.message));
+    }
+    if (result.loyalty.referrerReward) {
+      const referrerRes = await query('SELECT * FROM customers WHERE id = $1', [result.loyalty.referrerReward.customerId]);
+      const referrer = referrerRes.rows[0];
+      if (referrer) {
+        chOf(referrer).sendText(destOf(referrer),
+          t(langOf(business, referrer), 'loyalty_referral_earned', {
+            code: result.loyalty.referrerReward.code, value: formatGhs(result.loyalty.referrerReward.value_ghs), shop: business.name
+          }),
+          { businessId: business.id, customerId: referrer.id }
+        ).catch(err => logger.debug('referral reward notify failed: %s', err.message));
+      }
     }
   }
 
@@ -1874,6 +2358,11 @@ async function handlePaymentFailure({ reference }) {
     return { handled: true, stale: true };
   }
   await orderService.markOrderFailed({ orderId: order.id, paymentRef: reference });
+  dashboardNotify.notifyDashboard(order.business_id, {
+    type: 'failed_payment', title: '⚠️ Payment failed',
+    body: `Order #${order.order_number} — GH₵${Number(order.total_ghs).toFixed(2)} payment did not go through.`,
+    data: { order_id: order.id, order_number: order.order_number }
+  });
 
   const customerRes = await query('SELECT * FROM customers WHERE id = $1', [order.customer_id]);
   const customer = customerRes.rows[0];

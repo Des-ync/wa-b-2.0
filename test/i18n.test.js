@@ -1,14 +1,15 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { t, langOf, STRINGS } = require('../src/utils/i18n');
+const { t, langOf, STRINGS, detectLikelyLanguage } = require('../src/utils/i18n');
 
 const SAMPLE_PARAMS = {
   shop: 'Auntie Ama', n: 'ORD-2026-1234', total: 'GH₵50.00', subtotal: 'GH₵45.00',
   fee: 'GH₵5.00', lines: '• 1× Jollof', address: 'East Legon', open: '08:00',
   name: 'Jollof', list: 'Jollof, Waakye', count: 2, cartNote: '', number: '+233241234567',
   err: 'timeout', url: 'https://pay.example', display: 'Approve the prompt',
-  items: '• 1× Jollof', payment: 'paid', status: 'paid', link: 'https://wa.me/233', zone: 'Osu'
+  items: '• 1× Jollof', payment: 'paid', status: 'paid', link: 'https://wa.me/233', zone: 'Osu',
+  delta: 'GH₵5.00', points: 5, code: 'FREE-8K3P2Q', value: 'GH₵5.00'
 };
 
 test('every string key renders non-empty in both en and tw', () => {
@@ -49,4 +50,32 @@ test('langOf maps business rows to a supported language', () => {
   assert.equal(langOf({ bot_language: 'en' }), 'en');
   assert.equal(langOf({ bot_language: null }), 'en');
   assert.equal(langOf(null), 'en');
+});
+
+test('langOf lets a customer language_override win over the shop default', () => {
+  assert.equal(langOf({ bot_language: 'en' }, { language_override: 'tw' }), 'tw');
+  assert.equal(langOf({ bot_language: 'tw' }, { language_override: 'en' }), 'en');
+});
+
+test('langOf ignores an invalid or missing customer override', () => {
+  assert.equal(langOf({ bot_language: 'tw' }, { language_override: null }), 'tw');
+  assert.equal(langOf({ bot_language: 'tw' }, { language_override: 'fr' }), 'tw');
+  assert.equal(langOf({ bot_language: 'tw' }, {}), 'tw');
+});
+
+test('detectLikelyLanguage flags Twi vowels', () => {
+  assert.equal(detectLikelyLanguage('Ɛte sɛn?'), 'tw');
+  assert.equal(detectLikelyLanguage('me pɛ jollof'), 'tw');
+});
+
+test('detectLikelyLanguage flags known Twi signal words', () => {
+  assert.equal(detectLikelyLanguage('Medaase pa'), 'tw');
+  assert.equal(detectLikelyLanguage('Maakye, wo ho te sɛn'), 'tw');
+});
+
+test('detectLikelyLanguage returns null for plain English and empty input', () => {
+  assert.equal(detectLikelyLanguage('Do you have jollof?'), null);
+  assert.equal(detectLikelyLanguage('checkout'), null);
+  assert.equal(detectLikelyLanguage(''), null);
+  assert.equal(detectLikelyLanguage(null), null);
 });

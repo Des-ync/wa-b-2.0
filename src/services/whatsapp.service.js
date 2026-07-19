@@ -4,6 +4,7 @@ const logger = require('../utils/logger');
 const { query } = require('../config/database');
 const { toWaRecipient, formatGhs, formatDate, truncate } = require('../utils/helpers');
 const { t } = require('../utils/i18n');
+const metrics = require('../utils/metrics');
 
 const WA_API_VERSION = process.env.WA_API_VERSION || 'v19.0';
 const WA_PHONE_NUMBER_ID = process.env.WA_PHONE_NUMBER_ID;
@@ -102,6 +103,7 @@ async function sendRaw(payload, meta = {}) {
       waMessageId: waId,
       status: 'sent'
     });
+    metrics.increment('wa_send_success_total');
     return { success: true, messageId: waId, raw: res.data };
   } catch (err) {
     const status = err.response?.status;
@@ -113,6 +115,7 @@ async function sendRaw(payload, meta = {}) {
       content: meta.content || JSON.stringify(payload).slice(0, 1000),
       status: 'failed'
     });
+    metrics.increment('wa_send_failure_total');
     return { success: false, error: err.message, status };
   }
 }

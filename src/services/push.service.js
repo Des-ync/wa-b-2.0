@@ -117,7 +117,13 @@ async function sendToTokens(tokens, { title, body, data = {} }) {
       // FCM data payloads must be flat string maps.
       data: Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v)])),
       android: { priority: 'high', notification: { channelId: 'wab_default' } },
-      apns: { payload: { aps: { sound: 'default', badge: 1 } } }
+      apns: {
+        headers: { 'apns-priority': '10' },
+        // thread-id groups notifications of the same kind (orders together,
+        // messages together) in the iOS notification center. No badge: we
+        // never clear it server-side, so a count would just go stale.
+        payload: { aps: { sound: 'default', 'thread-id': data.type ? String(data.type) : 'wab' } }
+      }
     };
     const resp = await messaging.sendEachForMulticast(message);
     const dead = [];

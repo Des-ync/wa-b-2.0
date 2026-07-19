@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const { verifyToken } = require('@clerk/backend');
 const { query } = require('../config/database');
 const logger = require('../utils/logger');
+const { setBusinessId } = require('../utils/requestContext');
 
 const CLERK_SECRET_KEY = process.env.CLERK_SECRET_KEY;
 // A Clerk session token is a JWT: three base64url segments separated by dots.
@@ -136,6 +137,7 @@ function requireAuth(requiredScope = 'any') {
             }
           }
           req.auth = { keyId: null, businessId: business.id, scope: 'tenant', clerkUserId };
+          setBusinessId(business.id);
           return next();
         } catch (err) {
           if (err.code === 'not_linked') {
@@ -164,6 +166,7 @@ function requireAuth(requiredScope = 'any') {
         }
       }
       req.auth = { keyId: row.id, businessId: row.business_id, scope: row.scope };
+      if (row.business_id) setBusinessId(row.business_id);
       return next();
     } catch (err) {
       logger.error('auth middleware error: %s', err.message);

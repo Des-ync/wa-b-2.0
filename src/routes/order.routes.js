@@ -5,6 +5,7 @@ const notification = require('../services/notification.service');
 const { query } = require('../config/database');
 const { normalizeGhanaPhone, detectNetwork } = require('../utils/helpers');
 const { requireAuth } = require('../middleware/auth');
+const { csvCell } = require('../utils/csv');
 
 const router = express.Router();
 
@@ -101,14 +102,6 @@ router.get('/export', async (req, res) => {
     sql += ' ORDER BY o.created_at DESC LIMIT 5000';
     const r = await query(sql, params);
 
-    const csvCell = v => {
-      let s = String(v == null ? '' : v);
-      // Neutralize spreadsheet formula injection: customer-typed names,
-      // addresses and notes land in this file, and Excel/Sheets execute
-      // cells starting with = + - @ (or tab/CR).
-      if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
-      return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
-    };
     const header = ['order_number','created_at','customer_phone','customer_name','items',
       'subtotal_ghs','delivery_fee_ghs','total_ghs','payment_status','payment_method',
       'status','delivery_address','notes'];
@@ -185,31 +178,57 @@ router.post('/', async (req, res) => {
       phoneNetwork: detectNetwork(wa)
     });
 
-    // Resolve product details for all items in one query.
+    // Resolve product (and optional variant/add-on) details for all items.
     const wanted = items.filter(i => i.product_id);
     const ids = [...new Set(wanted.map(i => String(i.product_id)))];
-    const r = ids.length
-      ? await query(
-          `SELECT id, name, price_ghs FROM products WHERE business_id = $1 AND id = ANY($2::uuid[])`,
-          [business_id, ids]
-        )
-      : { rows: [] };
+    const variantIds = [...new Set(wanted.map(i => i.variant_id).filter(Boolean).map(String))];
+    const addonIds = [...new Set(wanted.flatMap(i => Array.isArray(i.addon_ids) ? i.addon_ids : []).filter(Boolean).map(String))];
+    const [r, vr, ar] = await Promise.all([
+      ids.length
+        ? query(`SELECT id, name, price_ghs FROM products WHERE business_id = $1 AND id = ANY($2::uuid[])`, [business_id, ids])
+        : Promise.resolve({ rows: [] }),
+      variantIds.length
+        ? query(`SELECT id, product_id, name, price_delta_ghs FROM product_variants WHERE business_id = $1 AND id = ANY($2::uuid[])`, [business_id, variantIds])
+        : Promise.resolve({ rows: [] }),
+      addonIds.length
+        ? query(`SELECT id, product_id, name, price_ghs FROM product_addons WHERE business_id = $1 AND id = ANY($2::uuid[])`, [business_id, addonIds])
+        : Promise.resolve({ rows: [] })
+    ]);
     const byId = new Map(r.rows.map(p => [p.id, p]));
+    const variantById = new Map(vr.rows.map(v => [v.id, v]));
+    const addonById = new Map(ar.rows.map(a => [a.id, a]));
 
     const cart = [];
     for (const item of wanted) {
       const p = byId.get(String(item.product_id));
       if (!p) {
-        return res.status(400).json({
-          success: false,
-          error: `Product not found: ${item.product_id}`
-        });
+        return res.status(400).json({ success: false, error: `Product not found: ${item.product_id}` });
       }
+      const variant = item.variant_id ? variantById.get(String(item.variant_id)) : null;
+      if (item.variant_id && (!variant || variant.product_id !== p.id)) {
+        return res.status(400).json({ success: false, error: `Variant not found: ${item.variant_id}` });
+      }
+      const addons = (Array.isArray(item.addon_ids) ? item.addon_ids : [])
+        .map(id => addonById.get(String(id)))
+        .filter(a => a && a.product_id === p.id);
+      if (Array.isArray(item.addon_ids) && addons.length !== item.addon_ids.length) {
+        return res.status(400).json({ success: false, error: `One or more add-ons not found for product ${p.id}` });
+      }
+
+      const addonsTotal = addons.reduce((sum, a) => sum + Number(a.price_ghs), 0);
+      const unitPrice = Number(p.price_ghs) + (variant ? Number(variant.price_delta_ghs) : 0) + addonsTotal;
+      const displayName = (variant ? `${p.name} (${variant.name})` : p.name)
+        + (addons.length ? ` + ${addons.map(a => a.name).join(', ')}` : '');
+
       cart.push({
         product_id: p.id,
-        name: p.name,
-        price_ghs: Number(p.price_ghs),
-        quantity: Math.max(1, parseInt(item.quantity, 10) || 1)
+        name: displayName,
+        price_ghs: Number(unitPrice.toFixed(2)),
+        quantity: Math.max(1, parseInt(item.quantity, 10) || 1),
+        variant_id: variant ? variant.id : undefined,
+        variant_name: variant ? variant.name : undefined,
+        addon_ids: addons.length ? addons.map(a => a.id) : undefined,
+        addons: addons.length ? addons.map(a => ({ id: a.id, name: a.name, price_ghs: Number(a.price_ghs) })) : undefined
       });
     }
 
@@ -232,10 +251,10 @@ router.post('/', async (req, res) => {
   }
 });
 
-/** PATCH /api/orders/:id/status — body: { status } */
+/** PATCH /api/orders/:id/status — body: { status, reason? } (reason only used for 'cancelled') */
 router.patch('/:id/status', async (req, res) => {
   try {
-    const { status } = req.body || {};
+    const { status, reason } = req.body || {};
     if (!orderService.VALID_STATUSES.includes(status)) {
       return res.status(400).json({
         success: false,
@@ -247,7 +266,7 @@ router.patch('/:id/status', async (req, res) => {
     if (tenantBlocksBusinessId(req, existing.business_id)) {
       return res.status(403).json({ success: false, error: 'Key does not match business' });
     }
-    const order = await orderService.updateOrderStatus(req.params.id, status);
+    const order = await orderService.updateOrderStatus(req.params.id, status, { reason });
 
     // Keep the customer in the loop, same as the merchant chat flow does.
     if (order && order.status !== existing.status) {
@@ -260,6 +279,132 @@ router.patch('/:id/status', async (req, res) => {
   } catch (err) {
     logger.error('PATCH /orders/:id/status failed: %s', err.message);
     res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+/**
+ * GET /api/orders/:id — full order detail for the dashboard: the order row,
+ * its status timeline, payment attempts, and any refunds.
+ */
+router.get('/:id', async (req, res) => {
+  try {
+    const order = await orderService.getOrderById(req.params.id);
+    if (!order) return res.status(404).json({ success: false, error: 'Order not found' });
+    if (tenantBlocksBusinessId(req, order.business_id)) {
+      return res.status(403).json({ success: false, error: 'Key does not match business' });
+    }
+    const [history, refunds, attempts, customerRes] = await Promise.all([
+      orderService.getOrderHistory(order.id),
+      orderService.getOrderRefunds(order.id),
+      query('SELECT reference, method, created_at FROM payment_attempts WHERE order_id = $1 ORDER BY created_at ASC', [order.id]),
+      query('SELECT id, display_name, whatsapp_number, channel FROM customers WHERE id = $1', [order.customer_id])
+    ]);
+    res.json({
+      success: true,
+      order,
+      history,
+      refunds,
+      payment_attempts: attempts.rows,
+      customer: customerRes.rows[0] || null
+    });
+  } catch (err) {
+    logger.error('GET /orders/:id failed: %s', err.message);
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+/** PATCH /api/orders/:id/notes — body: { note } — appends a merchant-only note. */
+router.patch('/:id/notes', async (req, res) => {
+  try {
+    const existing = await orderService.getOrderById(req.params.id);
+    if (!existing) return res.status(404).json({ success: false, error: 'Order not found' });
+    if (tenantBlocksBusinessId(req, existing.business_id)) {
+      return res.status(403).json({ success: false, error: 'Key does not match business' });
+    }
+    const note = String(req.body?.note || '').trim();
+    if (!note) return res.status(400).json({ success: false, error: 'note is required' });
+    const order = await orderService.addOrderNote(req.params.id, note);
+    res.json({ success: true, order });
+  } catch (err) {
+    logger.error('PATCH /orders/:id/notes failed: %s', err.message);
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+/** PATCH /api/orders/:id/delivery — body: { rider_name, rider_phone?, delivery_status?, delivery_proof_url? } */
+router.patch('/:id/delivery', async (req, res) => {
+  try {
+    const existing = await orderService.getOrderById(req.params.id);
+    if (!existing) return res.status(404).json({ success: false, error: 'Order not found' });
+    if (tenantBlocksBusinessId(req, existing.business_id)) {
+      return res.status(403).json({ success: false, error: 'Key does not match business' });
+    }
+    const body = req.body || {};
+    let order = existing;
+    if (body.rider_name !== undefined) {
+      order = await orderService.assignDelivery(req.params.id, { riderName: body.rider_name, riderPhone: body.rider_phone });
+    }
+    if (body.delivery_status !== undefined) {
+      if (!orderService.VALID_DELIVERY_STATUSES.includes(body.delivery_status)) {
+        return res.status(400).json({
+          success: false,
+          error: `delivery_status must be one of: ${orderService.VALID_DELIVERY_STATUSES.join(', ')}`
+        });
+      }
+      order = await orderService.updateDeliveryStatus(req.params.id, body.delivery_status, { proofUrl: body.delivery_proof_url });
+    }
+    res.json({ success: true, order });
+  } catch (err) {
+    logger.error('PATCH /orders/:id/delivery failed: %s', err.message);
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+/** PATCH /api/orders/:id/estimates — body: { estimated_ready_at?, estimated_delivery_at? } (ISO timestamps, or null to clear) */
+router.patch('/:id/estimates', async (req, res) => {
+  try {
+    const existing = await orderService.getOrderById(req.params.id);
+    if (!existing) return res.status(404).json({ success: false, error: 'Order not found' });
+    if (tenantBlocksBusinessId(req, existing.business_id)) {
+      return res.status(403).json({ success: false, error: 'Key does not match business' });
+    }
+    const body = req.body || {};
+    if (body.estimated_ready_at === undefined && body.estimated_delivery_at === undefined) {
+      return res.status(400).json({ success: false, error: 'estimated_ready_at or estimated_delivery_at is required' });
+    }
+    const order = await orderService.setEstimates(req.params.id, {
+      readyAt: body.estimated_ready_at,
+      deliveryAt: body.estimated_delivery_at
+    });
+    res.json({ success: true, order });
+  } catch (err) {
+    logger.error('PATCH /orders/:id/estimates failed: %s', err.message);
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+/** POST /api/orders/:id/refund — body: { amount_ghs, reason? } */
+router.post('/:id/refund', async (req, res) => {
+  try {
+    const existing = await orderService.getOrderById(req.params.id);
+    if (!existing) return res.status(404).json({ success: false, error: 'Order not found' });
+    if (tenantBlocksBusinessId(req, existing.business_id)) {
+      return res.status(403).json({ success: false, error: 'Key does not match business' });
+    }
+    const amount = Number(req.body?.amount_ghs);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return res.status(400).json({ success: false, error: 'amount_ghs must be a positive number' });
+    }
+    const refund = await orderService.createRefund({
+      orderId: req.params.id,
+      businessId: existing.business_id,
+      amountGhs: amount,
+      reason: req.body?.reason
+    });
+    res.status(201).json({ success: true, refund });
+  } catch (err) {
+    logger.error('POST /orders/:id/refund failed: %s', err.message);
+    res.status(400).json({ success: false, error: err.message || 'Refund failed' });
   }
 });
 

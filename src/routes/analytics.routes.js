@@ -99,38 +99,47 @@ router.get('/', async (req, res) => {
         WHERE business_id = $1 AND created_at >= NOW() - ($2 || ' days')::interval`,
         [business_id, days]
       ),
-      // Cart-nudge recovery: of customers nudged in the window, how many went
-      // on to complete a paid order afterward. Uses the nudge_sent_at column
-      // the cart-abandonment cron already writes — no new tracking needed.
+      // Cart-nudge recovery: of nudges sent in the window (from the cart_nudges
+      // log, one row per actual send), how many were followed by a paid order
+      // within 48h — with revenue and an A/B breakdown by variant.
       query(
-        `WITH nudged AS (
-           SELECT cs.customer_id, cs.nudge_sent_at
-             FROM conversation_state cs
-             JOIN customers c ON c.id = cs.customer_id
-            WHERE c.business_id = $1
-              AND cs.nudge_sent_at IS NOT NULL
-              AND cs.nudge_sent_at >= NOW() - ($2 || ' days')::interval
-         )
-         SELECT
+        `SELECT
+           cn.variant,
            COUNT(*)::int AS nudged_count,
            COUNT(*) FILTER (
              WHERE EXISTS (
                SELECT 1 FROM orders o
-                WHERE o.customer_id = nudged.customer_id
+                WHERE o.customer_id = cn.customer_id
                   AND o.business_id = $1
                   AND o.payment_status = 'paid'
-                  AND o.created_at >= nudged.nudge_sent_at
-                  AND o.created_at <= nudged.nudge_sent_at + INTERVAL '48 hours'
+                  AND o.created_at >= cn.sent_at
+                  AND o.created_at <= cn.sent_at + INTERVAL '48 hours'
              )
-           )::int AS recovered_count
-         FROM nudged`,
+           )::int AS recovered_count,
+           COALESCE(SUM(
+             (SELECT SUM(o.total_ghs) FROM orders o
+               WHERE o.customer_id = cn.customer_id
+                 AND o.business_id = $1
+                 AND o.payment_status = 'paid'
+                 AND o.created_at >= cn.sent_at
+                 AND o.created_at <= cn.sent_at + INTERVAL '48 hours')
+           ), 0) AS recovered_revenue_ghs
+         FROM cart_nudges cn
+        WHERE cn.business_id = $1
+          AND cn.sent_at >= NOW() - ($2 || ' days')::interval
+        GROUP BY cn.variant`,
         [business_id, days]
       )
     ]);
 
     const rep = repeat.rows[0];
     const ab = abandonment.rows[0];
-    const nu = nudges.rows[0];
+    const byVariant = nudges.rows;
+    const nu = byVariant.reduce((acc, r) => ({
+      nudged_count: acc.nudged_count + r.nudged_count,
+      recovered_count: acc.recovered_count + r.recovered_count,
+      recovered_revenue_ghs: acc.recovered_revenue_ghs + Number(r.recovered_revenue_ghs)
+    }), { nudged_count: 0, recovered_count: 0, recovered_revenue_ghs: 0 });
 
     res.json({
       success: true,
@@ -151,8 +160,17 @@ router.get('/', async (req, res) => {
         nudge_recovery: {
           nudges_sent: nu.nudged_count,
           recovered: nu.recovered_count,
+          recovered_revenue_ghs: Number(nu.recovered_revenue_ghs.toFixed(2)),
           recovery_rate_pct: nu.nudged_count > 0
-            ? Math.round((nu.recovered_count / nu.nudged_count) * 100) : null
+            ? Math.round((nu.recovered_count / nu.nudged_count) * 100) : null,
+          by_variant: byVariant.map(r => ({
+            variant: r.variant,
+            nudges_sent: r.nudged_count,
+            recovered: r.recovered_count,
+            recovered_revenue_ghs: Number(Number(r.recovered_revenue_ghs).toFixed(2)),
+            recovery_rate_pct: r.nudged_count > 0
+              ? Math.round((r.recovered_count / r.nudged_count) * 100) : null
+          }))
         }
       }
     });

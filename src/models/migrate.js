@@ -57,6 +57,29 @@ ALTER TABLE businesses ADD COLUMN IF NOT EXISTS open_time TEXT;
 ALTER TABLE businesses ADD COLUMN IF NOT EXISTS close_time TEXT;
 -- Customer-facing bot language: 'en' | 'tw' (Twi). Merchant flows stay English.
 ALTER TABLE businesses ADD COLUMN IF NOT EXISTS bot_language TEXT NOT NULL DEFAULT 'en';
+-- Onboarding: where settlement payouts land, and proof the merchant fired a
+-- test message end-to-end (upgrade path for existing databases).
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS payout_momo_number TEXT;
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS payout_momo_network TEXT
+  CHECK (payout_momo_network IS NULL OR payout_momo_network IN ('mtn','vodafone','airteltigo'));
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS onboarding_test_message_sent_at TIMESTAMPTZ;
+
+-- Loyalty & rewards program settings, per business. All amounts/rates are
+-- merchant-configurable; 0 or a 0-length JSON array disables that mechanic.
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS loyalty_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS loyalty_points_per_ghs NUMERIC(6,2) NOT NULL DEFAULT 1 CHECK (loyalty_points_per_ghs >= 0);
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS loyalty_points_redemption_rate_ghs NUMERIC(8,4) NOT NULL DEFAULT 0.05 CHECK (loyalty_points_redemption_rate_ghs >= 0);
+-- "Buy N, get 1 free": 0 = disabled. free_item_value_ghs is the fixed
+-- discount granted when a customer's stamp count reaches the target.
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS loyalty_stamps_target INT NOT NULL DEFAULT 0 CHECK (loyalty_stamps_target >= 0);
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS loyalty_free_item_value_ghs NUMERIC(10,2) NOT NULL DEFAULT 0 CHECK (loyalty_free_item_value_ghs >= 0);
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS loyalty_referral_reward_ghs NUMERIC(10,2) NOT NULL DEFAULT 0 CHECK (loyalty_referral_reward_ghs >= 0);
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS loyalty_birthday_discount_type TEXT NOT NULL DEFAULT 'percent'
+  CHECK (loyalty_birthday_discount_type IN ('percent','fixed'));
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS loyalty_birthday_discount_value NUMERIC(10,2) NOT NULL DEFAULT 0 CHECK (loyalty_birthday_discount_value >= 0);
+-- VIP tiers: [{ "name": "Silver", "min_spend_ghs": 200 }, ...] — purely
+-- derived display, no separate storage of "which tier a customer is in".
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS loyalty_vip_tiers JSONB NOT NULL DEFAULT '[]'::jsonb;
 
 -- =========================================================================
 -- plans: SaaS pricing tiers
@@ -169,6 +192,48 @@ ALTER TABLE customers ADD COLUMN IF NOT EXISTS bot_paused BOOLEAN NOT NULL DEFAU
 -- Broadcast opt-out (WhatsApp "STOP"). Strictly enforced — never broadcast to
 -- an opted-out customer, regardless of who's sending.
 ALTER TABLE customers ADD COLUMN IF NOT EXISTS opted_out BOOLEAN NOT NULL DEFAULT FALSE;
+-- Free-form merchant tags (VIP, wholesale, delivery area, high-risk, ...) —
+-- not a fixed enum, merchants coin their own.
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS tags TEXT[] NOT NULL DEFAULT '{}';
+CREATE INDEX IF NOT EXISTS idx_customers_tags ON customers USING GIN (tags);
+-- Per-customer language, auto-detected from what they actually type (see
+-- detectLikelyLanguage in utils/i18n.js) and overriding the shop's default
+-- bot_language for that one customer — a Twi-typing customer gets Twi
+-- replies even if the shop's default is English, and vice versa.
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS language_override TEXT
+  CHECK (language_override IS NULL OR language_override IN ('en','tw'));
+-- Loyalty & rewards state.
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS loyalty_points INT NOT NULL DEFAULT 0 CHECK (loyalty_points >= 0);
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS loyalty_stamps INT NOT NULL DEFAULT 0 CHECK (loyalty_stamps >= 0);
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS date_of_birth DATE;
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS referral_code TEXT UNIQUE;
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS referred_by_customer_id UUID REFERENCES customers(id);
+-- Set once the referrer's reward has been granted, so a referred customer's
+-- SECOND, THIRD, ... paid order can never re-trigger the referrer's reward.
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS referral_reward_granted_at TIMESTAMPTZ;
+
+-- =========================================================================
+-- customer_rewards: issued, per-customer redemption codes — stamp free
+-- items, referral credit, birthday coupons, and manual points redemptions.
+-- Redeemed the same way as a promos.code at checkout (see
+-- order.service.js#validatePromoCode), but scoped to one customer so a
+-- reward can't be shared/guessed by anyone else.
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS customer_rewards (
+  id             UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  business_id    UUID NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  customer_id    UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  type           TEXT NOT NULL CHECK (type IN ('stamp_free_item','referral_credit','birthday_coupon','points_redemption')),
+  code           TEXT NOT NULL,
+  description    TEXT,
+  discount_type  TEXT NOT NULL CHECK (discount_type IN ('percent','fixed')),
+  discount_value NUMERIC(10,2) NOT NULL CHECK (discount_value > 0),
+  redeemed_at    TIMESTAMPTZ,
+  expires_at     TIMESTAMPTZ,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (business_id, code)
+);
+CREATE INDEX IF NOT EXISTS idx_customer_rewards_customer ON customer_rewards(customer_id);
 
 -- =========================================================================
 -- products: business catalogues
@@ -193,6 +258,63 @@ CREATE INDEX IF NOT EXISTS idx_products_in_stock ON products(in_stock);
 ALTER TABLE products ADD COLUMN IF NOT EXISTS stock_qty INT CHECK (stock_qty IS NULL OR stock_qty >= 0);
 -- Merchant is warned once per dip below the threshold, not on every sale.
 ALTER TABLE products ADD COLUMN IF NOT EXISTS low_stock_notified BOOLEAN NOT NULL DEFAULT FALSE;
+-- Catalog upgrades: per-product low-stock threshold (was a hard-coded "3"),
+-- featured/hidden display flags, manual sort order within a category, and an
+-- optional daily availability window ('07:00'..'11:00' for a breakfast menu;
+-- both NULL = always available whenever open).
+ALTER TABLE products ADD COLUMN IF NOT EXISTS low_stock_threshold INT NOT NULL DEFAULT 3 CHECK (low_stock_threshold >= 0);
+ALTER TABLE products ADD COLUMN IF NOT EXISTS featured BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS hidden BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS sort_order INT NOT NULL DEFAULT 0;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS available_from TEXT;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS available_to TEXT;
+CREATE INDEX IF NOT EXISTS idx_products_hidden ON products(hidden);
+
+-- =========================================================================
+-- categories: per-business display metadata for products.category (free
+-- text on products; this table only carries sort order / visibility so
+-- existing category strings never need a backfill or FK migration).
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS categories (
+  id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  business_id  UUID NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  name         TEXT NOT NULL,
+  sort_order   INT NOT NULL DEFAULT 0,
+  hidden       BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_categories_business_name ON categories(business_id, lower(name));
+
+-- =========================================================================
+-- product_variants: size/color/flavor/bundle options. price_delta_ghs is
+-- added to the product's base price_ghs; stock_qty NULL = untracked, same
+-- convention as products.stock_qty.
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS product_variants (
+  id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  product_id      UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  business_id     UUID NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  name            TEXT NOT NULL,
+  price_delta_ghs NUMERIC(10,2) NOT NULL DEFAULT 0,
+  stock_qty       INT CHECK (stock_qty IS NULL OR stock_qty >= 0),
+  sort_order      INT NOT NULL DEFAULT 0,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_product_variants_product ON product_variants(product_id);
+
+-- =========================================================================
+-- product_addons: optional extras ("extra chicken", "delivery insurance").
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS product_addons (
+  id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  product_id   UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  business_id  UUID NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  name         TEXT NOT NULL,
+  price_ghs    NUMERIC(10,2) NOT NULL DEFAULT 0,
+  sort_order   INT NOT NULL DEFAULT 0,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_product_addons_product ON product_addons(product_id);
 
 -- =========================================================================
 -- orders: customer purchases via WhatsApp
@@ -225,6 +347,49 @@ CREATE INDEX IF NOT EXISTS idx_orders_payment_ref ON orders(payment_ref);
 -- Discount code applied at checkout (upgrade path for existing databases).
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS promo_code TEXT;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS discount_ghs NUMERIC(10,2) NOT NULL DEFAULT 0;
+-- Order lifecycle: merchant-only notes, cancellation reason, prep/delivery
+-- ETAs, rider assignment, and delivery proof (upgrade path for existing DBs).
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS internal_notes TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS cancellation_reason TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS estimated_ready_at TIMESTAMPTZ;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS estimated_delivery_at TIMESTAMPTZ;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS rider_name TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS rider_phone TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_status TEXT NOT NULL DEFAULT 'unassigned'
+  CHECK (delivery_status IN ('unassigned','assigned','picked_up','delivered'));
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_proof_url TEXT;
+
+-- =========================================================================
+-- order_status_history: append-only timeline for the order detail page.
+-- One row per status change, delivery update, or refund — not just the
+-- current status column, which only ever shows the latest value.
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS order_status_history (
+  id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  order_id    UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  event       TEXT NOT NULL,
+  note        TEXT,
+  changed_by  TEXT NOT NULL DEFAULT 'system' CHECK (changed_by IN ('system','merchant','customer')),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_order_status_history_order ON order_status_history(order_id, created_at);
+
+-- =========================================================================
+-- order_refunds: partial/full refunds with a reason, separate from the
+-- order's own payment_status so multiple partial refunds can be tracked.
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS order_refunds (
+  id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  order_id      UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  business_id   UUID NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  amount_ghs    NUMERIC(12,2) NOT NULL CHECK (amount_ghs > 0),
+  reason        TEXT,
+  status        TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','processed','failed')),
+  gateway_ref   TEXT,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  processed_at  TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_order_refunds_order ON order_refunds(order_id);
 
 -- =========================================================================
 -- payment_attempts: EVERY payment reference ever issued for an order.
@@ -263,6 +428,41 @@ CREATE INDEX IF NOT EXISTS idx_conv_state_expires ON conversation_state(expires_
 -- Cart-abandonment recovery: when the idle-cart nudge was last sent, so each
 -- abandoned cart gets at most one reminder (upgrade path for existing DBs).
 ALTER TABLE conversation_state ADD COLUMN IF NOT EXISTS nudge_sent_at TIMESTAMPTZ;
+-- How many nudges this cart has received so far, checked against the
+-- business's cart_nudge_max_per_cart setting.
+ALTER TABLE conversation_state ADD COLUMN IF NOT EXISTS nudge_count INT NOT NULL DEFAULT 0;
+
+-- Per-business cart-abandonment recovery settings.
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS cart_nudge_enabled BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS cart_nudge_delay_minutes INT NOT NULL DEFAULT 60
+  CHECK (cart_nudge_delay_minutes BETWEEN 5 AND 1440);
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS cart_nudge_max_per_cart INT NOT NULL DEFAULT 1
+  CHECK (cart_nudge_max_per_cart BETWEEN 1 AND 5);
+-- Custom nudge copy; NULL falls back to the built-in i18n template. Supports
+-- {shop} and {count} placeholders. _template_b enables a simple 50/50 A/B
+-- test (variant assigned once per customer, deterministically).
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS cart_nudge_message_template TEXT;
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS cart_nudge_template_b TEXT;
+-- Promo code text (not FK'd to promos — a merchant may delete/expire the
+-- promo independently; the nudge just stops mentioning a coupon that 404s).
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS cart_nudge_coupon_code TEXT;
+
+-- =========================================================================
+-- cart_nudges: one row per reminder actually sent, for recovered-revenue
+-- and A/B analytics. cart_value_ghs is a snapshot at send time.
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS cart_nudges (
+  id             UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  business_id    UUID NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  customer_id    UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  nudge_number   INT NOT NULL,
+  variant        TEXT NOT NULL DEFAULT 'a' CHECK (variant IN ('a','b')),
+  coupon_code    TEXT,
+  cart_value_ghs NUMERIC(12,2) NOT NULL DEFAULT 0,
+  sent_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_cart_nudges_business_sent ON cart_nudges(business_id, sent_at);
+CREATE INDEX IF NOT EXISTS idx_cart_nudges_customer ON cart_nudges(customer_id);
 
 -- =========================================================================
 -- message_log: full audit trail (de-duplicated by wa_message_id when present)
@@ -358,6 +558,14 @@ CREATE TABLE IF NOT EXISTS promos (
   UNIQUE (business_id, code)
 );
 CREATE INDEX IF NOT EXISTS idx_promos_business ON promos(business_id);
+-- Targeting rules — all optional, ANDed together when set (upgrade path).
+ALTER TABLE promos ADD COLUMN IF NOT EXISTS min_order_ghs NUMERIC(10,2) CHECK (min_order_ghs IS NULL OR min_order_ghs >= 0);
+ALTER TABLE promos ADD COLUMN IF NOT EXISTS first_order_only BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE promos ADD COLUMN IF NOT EXISTS customer_tag TEXT;
+ALTER TABLE promos ADD COLUMN IF NOT EXISTS customer_segment TEXT
+  CHECK (customer_segment IS NULL OR customer_segment IN ('ordered_30d','inactive_60d','abandoned_cart'));
+ALTER TABLE promos ADD COLUMN IF NOT EXISTS product_id UUID REFERENCES products(id) ON DELETE SET NULL;
+ALTER TABLE promos ADD COLUMN IF NOT EXISTS category TEXT;
 
 -- =========================================================================
 -- broadcasts / broadcast_recipients: merchant-initiated re-engagement blasts.
@@ -378,6 +586,9 @@ CREATE TABLE IF NOT EXISTS broadcasts (
   completed_at  TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS idx_broadcasts_business ON broadcasts(business_id);
+-- What audience this broadcast targeted, for history/audit — 'All opted-in
+-- customers' when no segment/tag filter was applied (upgrade path).
+ALTER TABLE broadcasts ADD COLUMN IF NOT EXISTS audience_desc TEXT;
 
 CREATE TABLE IF NOT EXISTS broadcast_recipients (
   id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -436,6 +647,55 @@ CREATE TABLE IF NOT EXISTS device_tokens (
 );
 CREATE INDEX IF NOT EXISTS idx_device_tokens_business ON device_tokens(business_id);
 CREATE INDEX IF NOT EXISTS idx_device_tokens_scope ON device_tokens(scope);
+
+-- =========================================================================
+-- dashboard_notifications: in-app notification center feed (separate from
+-- FCM mobile push — this is what the web dashboard's bell icon reads).
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS dashboard_notifications (
+  id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  business_id  UUID NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  type         TEXT NOT NULL CHECK (type IN ('new_order','failed_payment','low_stock','support_request')),
+  title        TEXT NOT NULL,
+  body         TEXT,
+  data         JSONB NOT NULL DEFAULT '{}'::jsonb,
+  read_at      TIMESTAMPTZ,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_dash_notif_business_created ON dashboard_notifications(business_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_dash_notif_business_unread ON dashboard_notifications(business_id) WHERE read_at IS NULL;
+
+-- =========================================================================
+-- admin_alerts: history of platform-level ops alerts (alert.service.js) —
+-- the same events that fire a WhatsApp text + admin push to ops, persisted
+-- so the admin dashboard can show "what's fired recently" without digging
+-- through logs.
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS admin_alerts (
+  id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  title             TEXT NOT NULL,
+  detail            TEXT,
+  suppressed_count  INT NOT NULL DEFAULT 0,
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_admin_alerts_created ON admin_alerts(created_at DESC);
+
+-- =========================================================================
+-- audit_log: who did what — admin and merchant account/settings-level
+-- actions (order-level history already lives in order_status_history;
+-- this covers everything else: business settings, api keys, promos, ...).
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS audit_log (
+  id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  actor_type   TEXT NOT NULL CHECK (actor_type IN ('admin','merchant','system')),
+  actor_id     TEXT,
+  business_id  UUID REFERENCES businesses(id) ON DELETE SET NULL,
+  action       TEXT NOT NULL,
+  detail       JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_audit_log_business ON audit_log(business_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_log_created ON audit_log(created_at DESC);
 
 -- =========================================================================
 -- Upgrade path: databases created before the pawaPay gateway existed carry

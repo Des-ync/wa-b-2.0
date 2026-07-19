@@ -59,6 +59,29 @@
   .hour-bar { flex: 1; background: var(--accent-soft); border-radius: 3px 3px 0 0; min-height: 2px; }
   .hour-bar.active { background: var(--accent); }
 
+  /* Notifications */
+  .notif-badge { position: absolute; top: -4px; right: -4px; background: var(--danger, #c0392b); color: #fff; font-size: 10px; font-weight: 700; border-radius: 999px; min-width: 16px; height: 16px; display: flex; align-items: center; justify-content: center; padding: 0 3px; }
+  .notif-panel { position: absolute; right: 0; top: calc(100% + 8px); width: 340px; max-height: 420px; overflow-y: auto; background: var(--bg); border: 1px solid var(--line); border-radius: var(--r-sm, 8px); box-shadow: 0 8px 24px rgba(0,0,0,0.15); z-index: 90; }
+  .notif-panel .notif-head { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--line); font-size: 13px; }
+  .notif-item { padding: 10px 14px; border-bottom: 1px solid var(--line); font-size: 13px; cursor: default; }
+  .notif-item:last-child { border-bottom: none; }
+  .notif-item.unread { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+  .notif-item .notif-title { font-weight: 600; }
+  .notif-item .notif-time { color: var(--muted); font-size: 11px; margin-top: 2px; }
+  /* Search palette */
+  .search-result-row { padding: 8px 20px; font-size: 13px; cursor: pointer; }
+  .search-result-row:hover { background: var(--bg-2); }
+  .search-section-label { padding: 8px 20px 4px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+
+  /* Order detail modal */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 100; display: flex; align-items: flex-start; justify-content: center; overflow-y: auto; padding: 40px 16px; }
+  .modal-box { background: var(--bg); border-radius: var(--r-lg, 12px); max-width: 720px; width: 100%; padding: 24px; box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
+  .modal-box h3 { font-size: 14px; margin: 18px 0 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  .modal-box h3:first-child { margin-top: 0; }
+  .timeline-row { display: flex; gap: 10px; font-size: 13px; padding: 4px 0; }
+  .timeline-row .tdot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); margin-top: 5px; flex-shrink: 0; }
+  .timeline-row .ttime { color: var(--muted); font-size: 12px; white-space: nowrap; }
+
   /* Inbox */
   .conv-layout { display: grid; grid-template-columns: 260px 1fr; border: 1px solid var(--line); border-radius: var(--r-sm, 8px); overflow: hidden; height: 480px; }
   .conv-list { overflow-y: auto; border-right: 1px solid var(--line); }
@@ -69,6 +92,10 @@
   .conv-item .preview { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .conv-thread { display: flex; flex-direction: column; height: 100%; }
   .conv-thread-head { padding: 10px 14px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .conv-summary { padding: 10px 14px; border-bottom: 1px solid var(--line); background: var(--bg-2); font-size: 12px; }
+  .conv-summary.needs-attention { background: color-mix(in srgb, var(--warning) 12%, transparent); }
+  .conv-summary ul { margin: 4px 0 0 16px; padding: 0; }
+  .conv-summary li { margin: 2px 0; }
   .conv-messages { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 8px; }
   .msg { max-width: 75%; padding: 8px 12px; border-radius: 12px; font-size: 13px; word-break: break-word; }
   .msg-in { align-self: flex-start; background: var(--bg-2); }
@@ -104,17 +131,38 @@
     .side-nav button.active { border-bottom-color: var(--accent); }
     .side-nav .nav-count { display: none; }
   }
+  @media (max-width: 640px) {
+    .nav-cta { flex-wrap: wrap; justify-content: flex-end; gap: 8px !important; }
+    #searchBtn span { display: none; }
+    .modal-box { max-width: 100%; width: calc(100% - 24px); padding: 16px; max-height: 90vh; overflow-y: auto; }
+    .notif-panel { width: calc(100vw - 32px); right: -8px; }
+    .stat-grid { grid-template-columns: repeat(2, 1fr); }
+    .row-form { grid-template-columns: 1fr !important; }
+  }
 </style>
 </head>
 <body>
 <header class="nav"><div class="wrap nav-row">
   <a href="index.html" class="brand"><img class="brand-logo brand-logo-light" src="assets/logo-light.jpg" alt="WA-B Solutions" /><img class="brand-logo brand-logo-dark" src="assets/logo-dark.jpg" alt="WA-B Solutions" /></a>
   <nav><ul class="nav-links"><li><a href="features.html">Features</a></li><li><a href="pricing.html">Pricing</a></li><li><a href="docs.html">Docs</a></li></ul></nav>
-  <div class="nav-cta">
+  <div class="nav-cta" style="gap:10px">
+    <button class="btn btn-ghost btn-sm" style="display:none" id="searchBtn" onclick="openSearch()" title="Search (Ctrl/Cmd+K)">🔍<span> Search</span></button>
+    <div style="position:relative;display:none" id="bellWrap">
+      <button class="btn btn-ghost btn-sm" onclick="toggleNotifPanel()" title="Notifications">🔔<span id="notifBadge" class="notif-badge" style="display:none"></span></button>
+      <div id="notifPanel" class="notif-panel" style="display:none"></div>
+    </div>
     <span id="bizName" class="muted" style="font-size:14px"></span>
     <button id="signOutBtn" class="btn btn-ghost btn-sm" style="display:none" onclick="signOut()">Sign out</button>
   </div>
 </div></header>
+
+<div id="searchOverlay" class="modal-overlay" style="display:none" onclick="if(event.target===this) closeSearch()">
+  <div class="modal-box" style="max-width:560px;padding:0;overflow:hidden">
+    <input id="searchInput" placeholder="Search orders, customers, products…" autocomplete="off"
+      style="width:100%;padding:16px 20px;border:none;border-bottom:1px solid var(--line);font:inherit;font-size:16px;background:var(--bg);color:var(--ink);box-sizing:border-box" />
+    <div id="searchResults" style="max-height:420px;overflow-y:auto;padding:8px 0"></div>
+  </div>
+</div>
 
 <main class="dash">
   <h1>Merchant dashboard</h1>
@@ -160,6 +208,12 @@
 
     <!-- ============ OVERVIEW ============ -->
     <div class="dash-section" data-section="overview">
+    <!-- Onboarding -->
+    <div class="dash-card" id="onboardingCard" style="display:none">
+      <h2>Get set up <span class="muted" id="onboardingPercent" style="font-size:13px;font-weight:400"></span></h2>
+      <ul id="onboardingList" style="list-style:none;display:grid;gap:10px;margin-top:10px"></ul>
+    </div>
+
     <!-- Today -->
     <div class="dash-card">
       <h2>Today</h2>
@@ -183,7 +237,9 @@
         <div class="stat"><div class="stat-label">Repeat customers</div><div class="stat-val" id="anaRepeat">—</div></div>
         <div class="stat"><div class="stat-label">Cart abandonment</div><div class="stat-val" id="anaAbandon">—</div></div>
         <div class="stat"><div class="stat-label">Nudge recovery</div><div class="stat-val" id="anaNudge">—</div></div>
+        <div class="stat"><div class="stat-label">Nudge revenue recovered</div><div class="stat-val" id="anaNudgeRevenue">—</div></div>
       </div>
+      <div id="anaNudgeVariants" style="margin-bottom:22px"></div>
       <div class="ana-grid">
         <div>
           <h3 style="font-size:14px;margin-bottom:10px">Revenue trend</h3>
@@ -215,12 +271,27 @@
       </div>
     </div>
 
+    <!-- Segments -->
+    <div class="dash-card">
+      <h2>Segments</h2>
+      <div id="segmentSummary" class="stat-grid"><p class="muted">Loading…</p></div>
+    </div>
+
     <!-- Customers -->
     <div class="dash-card">
       <h2>Customers</h2>
+      <div style="margin-bottom:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <select id="custSegmentFilter" onchange="loadCustomers()" style="max-width:220px">
+          <option value="">All customers</option>
+          <option value="ordered_30d">Ordered in last 30 days</option>
+          <option value="inactive_60d">Inactive 60+ days</option>
+          <option value="abandoned_cart">Has an abandoned cart</option>
+        </select>
+        <input id="custTagFilter" placeholder="Filter by tag…" style="max-width:160px" onchange="loadCustomers()" />
+      </div>
       <div class="scroll-x">
         <table id="customerTable">
-          <thead><tr><th>Customer</th><th>Channel</th><th>Orders</th><th>Total spent</th><th>Last seen</th></tr></thead>
+          <thead><tr><th>Customer</th><th>Channel</th><th>Orders</th><th>Total spent</th><th>Tags</th><th>Last seen</th><th></th></tr></thead>
           <tbody></tbody>
         </table>
       </div>
@@ -229,17 +300,29 @@
     <!-- Broadcast -->
     <div class="dash-card">
       <h2>Broadcast</h2>
-      <p class="muted" style="margin-bottom:14px;font-size:13px">Message every opted-in customer at once — sent gradually and throttled to protect your WhatsApp number. Customers who reply STOP are skipped automatically.</p>
-      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:20px">
+      <p class="muted" style="margin-bottom:14px;font-size:13px">Message customers matching an audience at once — sent gradually and throttled to protect your WhatsApp number. Customers who reply STOP are skipped automatically.</p>
+      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px">
         <div style="flex:1;min-width:240px">
           <label style="font-size:12px;color:var(--muted)">Message</label>
           <textarea id="bcBody" rows="3" maxlength="1024" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-sm,6px);font:inherit;background:var(--bg);color:var(--ink)" placeholder="🎉 Fresh stock just arrived! Reply to order."></textarea>
         </div>
+      </div>
+      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:20px">
+        <div><label style="font-size:12px;color:var(--muted)">Audience</label>
+          <select id="bcSegment">
+            <option value="">All opted-in customers</option>
+            <option value="ordered_30d">Ordered in last 30 days</option>
+            <option value="inactive_60d">Inactive 60+ days</option>
+            <option value="abandoned_cart">Has an abandoned cart</option>
+          </select>
+        </div>
+        <div><label style="font-size:12px;color:var(--muted)">Tag (optional)</label><input id="bcTag" placeholder="vip" style="max-width:120px" /></div>
+        <div><label style="font-size:12px;color:var(--muted)">Min spend GH₵ (optional)</label><input id="bcMinSpend" type="number" min="0" step="0.01" style="max-width:140px" /></div>
         <button class="btn btn-primary btn-sm" onclick="sendBroadcast()">Send broadcast</button>
       </div>
       <div class="scroll-x">
         <table id="broadcastTable">
-          <thead><tr><th>Message</th><th>Status</th><th>Sent</th><th>Failed</th><th>Target</th><th>Created</th></tr></thead>
+          <thead><tr><th>Message</th><th>Audience</th><th>Status</th><th>Sent</th><th>Failed</th><th>Target</th><th>Created</th></tr></thead>
           <tbody></tbody>
         </table>
       </div>
@@ -250,10 +333,17 @@
     <div class="dash-section" data-section="stock">
     <!-- Products -->
     <div class="dash-card">
-      <h2>Products</h2>
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:16px">
+        <h2 style="margin-bottom:0">Products</h2>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-ghost btn-sm" onclick="exportProductsCsv()">Export CSV</button>
+          <input type="file" id="pImportFile" accept=".csv,text/csv" style="display:none" onchange="importProductsCsv(this.files[0])" />
+          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('pImportFile').click()">Import CSV</button>
+        </div>
+      </div>
       <div class="scroll-x">
         <table id="productTable">
-          <thead><tr><th>Image</th><th>Name</th><th>Description</th><th>Price (GH₵)</th><th>Category</th><th>Stock</th><th></th></tr></thead>
+          <thead><tr><th>Image</th><th>Name</th><th>Description</th><th>Price (GH₵)</th><th>Category</th><th>Stock</th><th>Flags</th><th></th></tr></thead>
           <tbody></tbody>
         </table>
       </div>
@@ -270,12 +360,24 @@
       </div>
     </div>
 
+    <!-- Categories -->
+    <div class="dash-card">
+      <h2>Categories</h2>
+      <p class="muted" style="margin-bottom:14px;font-size:13px">Order and visibility here control how the WhatsApp menu is grouped. Hidden categories never show to customers, even if items are in stock.</p>
+      <div class="scroll-x">
+        <table id="categoryTable">
+          <thead><tr><th>Category</th><th>Order</th><th>Visible</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
     <!-- Promo codes -->
     <div class="dash-card">
       <h2>Promo codes</h2>
       <div class="scroll-x">
         <table id="promoTable">
-          <thead><tr><th>Code</th><th>Discount</th><th>Uses</th><th>Expires</th><th>Status</th><th></th></tr></thead>
+          <thead><tr><th>Code</th><th>Discount</th><th>Targeting</th><th>Uses</th><th>Expires</th><th>Status</th><th></th></tr></thead>
           <tbody></tbody>
         </table>
       </div>
@@ -288,6 +390,25 @@
           <div><label>Expires (optional)</label><input id="promoExpires" type="date" /></div>
           <div><button class="btn btn-primary btn-sm" onclick="addPromo()">Add</button></div>
         </div>
+        <details style="margin-top:14px">
+          <summary style="cursor:pointer;font-size:13px;color:var(--muted)">Advanced targeting (optional)</summary>
+          <div class="row-form" style="grid-template-columns:1fr 1fr 1fr 1fr;margin-top:10px">
+            <div><label>Minimum order GH₵</label><input id="promoMinOrder" type="number" min="0" step="0.01" placeholder="" /></div>
+            <div><label style="display:flex;align-items:center;gap:6px;margin-top:18px"><input type="checkbox" id="promoFirstOrder" style="width:auto" /> First order only</label></div>
+            <div><label>Customer tag</label><input id="promoTag" placeholder="vip" /></div>
+            <div><label>Customer segment</label>
+              <select id="promoSegment">
+                <option value="">Any</option>
+                <option value="ordered_30d">Ordered in last 30 days</option>
+                <option value="inactive_60d">Inactive 60+ days</option>
+                <option value="abandoned_cart">Has an abandoned cart</option>
+              </select>
+            </div>
+          </div>
+          <div class="row-form" style="grid-template-columns:1fr 1fr;margin-top:10px">
+            <div><label>Category (product must be in cart)</label><input id="promoCategory" placeholder="drinks" /></div>
+          </div>
+        </details>
       </div>
     </div>
 
@@ -339,11 +460,68 @@
           <div><label>Opens (HH:MM)</label><input id="sOpen" placeholder="08:00" /></div>
           <div><label>Closes (HH:MM)</label><input id="sClose" placeholder="21:00" /></div>
         </div>
+        <div class="row-form" style="grid-template-columns:1fr 1fr 1fr">
+          <div><label>Owner name</label><input id="sOwnerName" placeholder="Ama Boateng" /></div>
+          <div><label>MoMo payout number</label><input id="sPayoutNumber" placeholder="0241234567" /></div>
+          <div><label>MoMo network</label><select id="sPayoutNetwork"><option value="">Select network</option><option value="mtn">MTN</option><option value="vodafone">Vodafone/Telecel</option><option value="airteltigo">AirtelTigo</option></select></div>
+        </div>
         <div>
           <label style="font-size:12px;color:var(--muted)">Delivery zones — one per line as <code>Zone name: fee</code> (overrides the flat fee; customers pick their zone at checkout)</label>
           <textarea id="sZones" rows="4" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-sm,6px);font:inherit;background:var(--bg);color:var(--ink)" placeholder="East Legon: 15&#10;Osu: 10&#10;Madina: 20"></textarea>
         </div>
         <div><button class="btn btn-primary btn-sm" onclick="saveSettings()">Save settings</button></div>
+      </div>
+    </div>
+
+    <!-- Cart recovery -->
+    <div class="dash-card">
+      <h2>Cart recovery</h2>
+      <p class="muted" style="margin-bottom:14px;font-size:13px">When a customer leaves items in their cart without checking out, send them a WhatsApp reminder automatically.</p>
+      <div style="display:grid;gap:14px;max-width:640px">
+        <div><label style="display:flex;align-items:center;gap:8px;font-size:13px"><input type="checkbox" id="cnEnabled" style="width:auto" /> Send abandoned-cart reminders</label></div>
+        <div class="row-form" style="grid-template-columns:1fr 1fr">
+          <div><label>Wait before first reminder (minutes)</label><input id="cnDelay" type="number" min="5" max="1440" placeholder="60" /></div>
+          <div><label>Max reminders per cart</label><input id="cnMaxPerCart" type="number" min="1" max="5" placeholder="1" /></div>
+        </div>
+        <div>
+          <label style="font-size:12px;color:var(--muted)">Custom message (optional — leave blank for the default copy). Use {shop} and {count} as placeholders.</label>
+          <textarea id="cnTemplate" rows="2" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-sm,6px);font:inherit;background:var(--bg);color:var(--ink)" placeholder="Still deciding? Your cart at {shop} with {count} items is waiting for you!"></textarea>
+        </div>
+        <div>
+          <label style="font-size:12px;color:var(--muted)">A/B test variant B (optional — when set, customers are split 50/50 between your message above and this one)</label>
+          <textarea id="cnTemplateB" rows="2" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-sm,6px);font:inherit;background:var(--bg);color:var(--ink)" placeholder="Don't miss out — your {count} items at {shop} are still saved!"></textarea>
+        </div>
+        <div class="row-form" style="grid-template-columns:1fr">
+          <div><label>Coupon code to mention (optional)</label><input id="cnCoupon" placeholder="COMEBACK10" /></div>
+        </div>
+        <div><button class="btn btn-primary btn-sm" onclick="saveCartNudgeSettings()">Save cart recovery settings</button></div>
+      </div>
+    </div>
+
+    <!-- Loyalty & rewards -->
+    <div class="dash-card">
+      <h2>Loyalty & rewards</h2>
+      <p class="muted" style="margin-bottom:14px;font-size:13px">Points, "buy N get 1 free" stamps, referral rewards, birthday coupons, and VIP tiers — all optional, all off by default.</p>
+      <div style="display:grid;gap:14px;max-width:640px">
+        <div><label style="display:flex;align-items:center;gap:8px;font-size:13px"><input type="checkbox" id="loyEnabled" style="width:auto" /> Enable loyalty & rewards</label></div>
+        <div class="row-form" style="grid-template-columns:1fr 1fr">
+          <div><label>Points earned per GH₵ spent</label><input id="loyPointsPerGhs" type="number" min="0" step="0.1" placeholder="1" /></div>
+          <div><label>GH₵ value per point redeemed</label><input id="loyRedemptionRate" type="number" min="0" step="0.001" placeholder="0.05" /></div>
+        </div>
+        <div class="row-form" style="grid-template-columns:1fr 1fr">
+          <div><label>"Buy N, get 1 free" — orders needed (0 = off)</label><input id="loyStampsTarget" type="number" min="0" max="100" placeholder="0" /></div>
+          <div><label>Free item value GH₵</label><input id="loyFreeItemValue" type="number" min="0" step="0.01" placeholder="0" /></div>
+        </div>
+        <div class="row-form" style="grid-template-columns:1fr 1fr 1fr">
+          <div><label>Referral reward GH₵</label><input id="loyReferralReward" type="number" min="0" step="0.01" placeholder="0" /></div>
+          <div><label>Birthday discount type</label><select id="loyBirthdayType"><option value="percent">Percent %</option><option value="fixed">Fixed GH₵</option></select></div>
+          <div><label>Birthday discount value</label><input id="loyBirthdayValue" type="number" min="0" step="0.01" placeholder="0" /></div>
+        </div>
+        <div>
+          <label style="font-size:12px;color:var(--muted)">VIP tiers — one per line as <code>Name: min spend</code>, lifetime GH₵ spend</label>
+          <textarea id="loyVipTiers" rows="3" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-sm,6px);font:inherit;background:var(--bg);color:var(--ink)" placeholder="Silver: 200&#10;Gold: 500&#10;Platinum: 1000"></textarea>
+        </div>
+        <div><button class="btn btn-primary btn-sm" onclick="saveLoyaltySettings()">Save loyalty settings</button></div>
       </div>
     </div>
     </div><!-- /account section -->
@@ -353,6 +531,13 @@
 </main>
 
 <div id="toast"></div>
+
+<div id="orderModalOverlay" class="modal-overlay" style="display:none" onclick="if(event.target===this) closeOrderModal()">
+  <div class="modal-box">
+    <button class="btn btn-ghost btn-xs" style="float:right" onclick="closeOrderModal()">✕ Close</button>
+    <div id="orderModalBody"><p class="muted">Loading…</p></div>
+  </div>
+</div>
 
 <script src="clerk-theme.js"></script>
 <script>
@@ -436,9 +621,11 @@ async function onAuthStateChange() {
     }
     BIZ = me.business;
     document.getElementById('bizName').textContent = BIZ.name + ' · ' + BIZ.status;
+    document.getElementById('searchBtn').style.display = '';
+    document.getElementById('bellWrap').style.display = '';
     showCard('app');
     await Promise.all([
-      loadProducts(), loadOrders(),
+      loadProducts(), loadOrders(), loadCategories().catch(() => {}), loadSegmentSummary().catch(() => {}),
       loadTodayStats().catch(() => {}),
       loadSubscription().catch(() => {}),
       loadCustomers().catch(() => {}),
@@ -446,8 +633,12 @@ async function onAuthStateChange() {
       loadAnalytics(7).catch(() => {}),
       loadConversations().catch(() => {}),
       loadPromos().catch(() => {}),
-      loadBroadcasts().catch(() => {})
+      loadBroadcasts().catch(() => {}),
+      loadOnboarding().catch(() => {}),
+      loadNotifications().catch(() => {}),
+      loadLoyaltySettings().catch(() => {})
     ]);
+    if (!notifPollTimer) notifPollTimer = setInterval(() => loadNotifications().catch(() => {}), 30000);
   } catch (err) {
     if (err.code === 'not_linked') {
       showCard('linkCard');
@@ -514,6 +705,143 @@ function esc(s) {
     ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 }
 
+/* ---------------- Notifications ---------------- */
+
+let notifPollTimer = null;
+let lastNotifications = [];
+
+async function loadNotifications() {
+  const { notifications, unread_count } = await api('/notifications?business_id=' + BIZ.id + '&limit=20');
+  lastNotifications = notifications;
+  const badge = document.getElementById('notifBadge');
+  if (unread_count > 0) { badge.textContent = unread_count > 99 ? '99+' : unread_count; badge.style.display = ''; }
+  else badge.style.display = 'none';
+  renderNotifPanel();
+}
+
+function renderNotifPanel() {
+  const panel = document.getElementById('notifPanel');
+  const items = lastNotifications.map(n => `
+    <div class="notif-item ${n.read_at ? '' : 'unread'}" onclick="handleNotifClick('${n.id}', '${n.type}', this.dataset.orderId, this.dataset.customerId)"
+         data-order-id="${esc(n.data?.order_id || '')}" data-customer-id="${esc(n.data?.customer_id || '')}">
+      <div class="notif-title">${esc(n.title)}</div>
+      ${n.body ? `<div>${esc(n.body)}</div>` : ''}
+      <div class="notif-time">${new Date(n.created_at).toLocaleString()}</div>
+    </div>`).join('') || '<div class="notif-item muted">No notifications yet.</div>';
+  panel.innerHTML = `
+    <div class="notif-head"><strong>Notifications</strong><button class="btn btn-ghost btn-xs" onclick="markAllNotifsRead()">Mark all read</button></div>
+    ${items}`;
+}
+
+function toggleNotifPanel() {
+  const panel = document.getElementById('notifPanel');
+  panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+}
+
+async function markAllNotifsRead() {
+  try {
+    await api('/notifications/mark-all-read', { method: 'POST', body: JSON.stringify({ business_id: BIZ.id }) });
+    await loadNotifications();
+  } catch (err) { toast(err.message); }
+}
+
+async function handleNotifClick(id, type, orderId, customerId) {
+  api('/notifications/' + id + '/read', { method: 'POST' }).then(loadNotifications).catch(() => {});
+  document.getElementById('notifPanel').style.display = 'none';
+  if ((type === 'new_order' || type === 'failed_payment') && orderId) {
+    showSection('orders');
+    openOrderDetail(orderId);
+  } else if (type === 'support_request' && customerId) {
+    showSection('customers');
+    openConversation(customerId);
+  } else if (type === 'low_stock') {
+    showSection('stock');
+  }
+}
+
+document.addEventListener('click', e => {
+  const wrap = document.getElementById('bellWrap');
+  if (wrap && !wrap.contains(e.target)) document.getElementById('notifPanel').style.display = 'none';
+});
+
+/* ---------------- Global search ---------------- */
+
+let searchDebounce = null;
+
+function openSearch() {
+  document.getElementById('searchOverlay').style.display = 'flex';
+  document.getElementById('searchInput').value = '';
+  document.getElementById('searchResults').innerHTML = '<div class="search-result-row muted">Type at least 2 characters…</div>';
+  setTimeout(() => document.getElementById('searchInput').focus(), 30);
+}
+
+function closeSearch() {
+  document.getElementById('searchOverlay').style.display = 'none';
+}
+
+async function runSearch(q) {
+  const box = document.getElementById('searchResults');
+  if (q.trim().length < 2) {
+    box.innerHTML = '<div class="search-result-row muted">Type at least 2 characters…</div>';
+    return;
+  }
+  try {
+    const r = await api('/search?business_id=' + BIZ.id + '&q=' + encodeURIComponent(q));
+    const sections = [
+      ['Orders', r.orders, o => `${esc(o.order_number)} — GH₵${Number(o.total_ghs).toFixed(2)} — ${esc(o.status)}`, o => `jumpToOrder('${o.id}')`],
+      ['Customers', r.customers, c => `${esc(c.display_name || c.whatsapp_number)} — ${esc(c.whatsapp_number)}`, c => `jumpToCustomer('${c.id}')`],
+      ['Products', r.products, p => `${esc(p.name)} — GH₵${Number(p.price_ghs).toFixed(2)}${p.in_stock ? '' : ' (out of stock)'}`, () => `jumpToStock()`]
+    ];
+    const html = sections.filter(([, rows]) => rows.length).map(([label, rows, render, onclick]) => `
+      <div class="search-section-label">${label}</div>
+      ${rows.map(row => `<div class="search-result-row" onclick="${onclick(row)}">${render(row)}</div>`).join('')}
+    `).join('');
+    box.innerHTML = html || '<div class="search-result-row muted">No matches.</div>';
+  } catch (err) {
+    box.innerHTML = '<div class="search-result-row muted">Search failed: ' + esc(err.message) + '</div>';
+  }
+}
+
+function jumpToOrder(id) { closeSearch(); showSection('orders'); openOrderDetail(id); }
+function jumpToCustomer(id) { closeSearch(); showSection('customers'); openCustomerProfile(id); }
+function jumpToStock() { closeSearch(); showSection('stock'); }
+
+document.addEventListener('DOMContentLoaded', () => {
+  const input = document.getElementById('searchInput');
+  if (input) {
+    input.addEventListener('input', () => {
+      clearTimeout(searchDebounce);
+      searchDebounce = setTimeout(() => runSearch(input.value), 200);
+    });
+  }
+});
+
+/* ---------------- Keyboard shortcuts ---------------- */
+
+document.addEventListener('keydown', e => {
+  const inField = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
+
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+    e.preventDefault();
+    openSearch();
+    return;
+  }
+  if (e.key === 'Escape') {
+    closeSearch();
+    closeOrderModal();
+    document.getElementById('notifPanel').style.display = 'none';
+    return;
+  }
+  if (inField) return;
+
+  if (e.key === '?') {
+    toast('Shortcuts: Ctrl/Cmd+K search · O overview · R orders · S stock · C customers · A account · Esc close');
+    return;
+  }
+  const shortcuts = { o: 'overview', r: 'orders', s: 'stock', c: 'customers', a: 'account' };
+  if (shortcuts[e.key]) showSection(shortcuts[e.key]);
+});
+
 /* ---------------- Products ---------------- */
 
 async function loadProducts() {
@@ -521,10 +849,16 @@ async function loadProducts() {
   const tbody = document.querySelector('#productTable tbody');
   tbody.innerHTML = products.map(p => {
     const tracked = p.stock_qty != null;
+    const threshold = p.low_stock_threshold != null ? p.low_stock_threshold : 3;
     const stockLabel = tracked ? p.stock_qty : (p.in_stock ? 'Unlimited' : 'Out');
     const stockPill = tracked
-      ? (p.stock_qty === 0 ? 'pill-off' : (p.stock_qty <= 3 ? 'pill-warn' : 'pill-ok'))
+      ? (p.stock_qty === 0 ? 'pill-off' : (p.stock_qty <= threshold ? 'pill-warn' : 'pill-ok'))
       : (p.in_stock ? 'pill-ok' : 'pill-off');
+    const flags = [
+      p.featured ? '<span class="pill pill-ok">Featured</span>' : '',
+      p.hidden ? '<span class="pill pill-off">Hidden</span>' : '',
+      (p.available_from || p.available_to) ? `<span class="pill pill-warn">${esc(p.available_from || '00:00')}-${esc(p.available_to || '24:00')}</span>` : ''
+    ].filter(Boolean).join(' ') || '<span class="muted" style="font-size:12px">—</span>';
     return `
     <tr data-id="${p.id}">
       <td>${p.image_url ? `<img src="${esc(p.image_url)}" class="thumb" onerror="this.style.display='none'" />` : '<span class="muted" style="font-size:12px">—</span>'}</td>
@@ -533,15 +867,187 @@ async function loadProducts() {
       <td>${Number(p.price_ghs).toFixed(2)}</td>
       <td class="muted">${esc(p.category)}</td>
       <td><span class="pill ${stockPill}">${esc(String(stockLabel))}</span></td>
+      <td>${flags}</td>
       <td style="white-space:nowrap">
         <button class="btn btn-ghost btn-xs" onclick="toggleStock('${p.id}', ${!p.in_stock})">${p.in_stock ? 'Mark out' : 'Restock'}</button>
         <button class="btn btn-ghost btn-xs" onclick="editPrice('${p.id}', ${Number(p.price_ghs)})">Price</button>
         <button class="btn btn-ghost btn-xs" onclick="editStockQty('${p.id}', ${p.stock_qty == null ? 'null' : p.stock_qty})">Qty</button>
+        <button class="btn btn-ghost btn-xs" onclick="editThreshold('${p.id}', ${threshold})">Low-stock at</button>
         <button class="btn btn-ghost btn-xs" data-image-url="${esc(p.image_url || '')}" onclick="editImage('${p.id}', this.dataset.imageUrl)">Image</button>
+        <button class="btn btn-ghost btn-xs" onclick="toggleFeatured('${p.id}', ${!p.featured})">${p.featured ? 'Unfeature' : 'Feature'}</button>
+        <button class="btn btn-ghost btn-xs" onclick="toggleHidden('${p.id}', ${!p.hidden})">${p.hidden ? 'Unhide' : 'Hide'}</button>
+        <button class="btn btn-ghost btn-xs" data-from="${esc(p.available_from || '')}" data-to="${esc(p.available_to || '')}" onclick="editAvailability('${p.id}', this.dataset.from, this.dataset.to)">Hours</button>
+        <button class="btn btn-ghost btn-xs" onclick="manageOptions('${p.id}', '${esc(p.name)}')">Options</button>
         <button class="btn btn-ghost btn-xs" onclick="removeProduct('${p.id}', '${esc(p.name)}')">Delete</button>
       </td>
     </tr>`;
-  }).join('') || '<tr><td colspan="7" class="muted">No products yet. Add your first below.</td></tr>';
+  }).join('') || '<tr><td colspan="8" class="muted">No products yet. Add your first below.</td></tr>';
+}
+
+async function toggleFeatured(id, featured) {
+  try {
+    await api('/products/' + id, { method: 'PATCH', body: JSON.stringify({ featured }) });
+    await loadProducts();
+  } catch (err) { toast(err.message); }
+}
+
+async function toggleHidden(id, hidden) {
+  try {
+    await api('/products/' + id, { method: 'PATCH', body: JSON.stringify({ hidden }) });
+    toast(hidden ? 'Hidden from the WhatsApp menu' : 'Visible on the WhatsApp menu');
+    await loadProducts();
+  } catch (err) { toast(err.message); }
+}
+
+async function editThreshold(id, current) {
+  const v = prompt('Warn me when stock drops to or below:', String(current));
+  if (v == null) return;
+  const n = parseInt(v, 10);
+  if (!Number.isInteger(n) || n < 0) return toast('Invalid threshold');
+  try {
+    await api('/products/' + id, { method: 'PATCH', body: JSON.stringify({ low_stock_threshold: n }) });
+    toast('Low-stock threshold updated');
+    await loadProducts();
+  } catch (err) { toast(err.message); }
+}
+
+async function editAvailability(id, from, to) {
+  const f = prompt('Available from (HH:MM, blank = always):', from || '');
+  if (f == null) return;
+  const tt = prompt('Available to (HH:MM, blank = always):', to || '');
+  if (tt == null) return;
+  try {
+    await api('/products/' + id, {
+      method: 'PATCH',
+      body: JSON.stringify({ available_from: f.trim() || null, available_to: tt.trim() || null })
+    });
+    toast('Availability window updated');
+    await loadProducts();
+  } catch (err) { toast(err.message); }
+}
+
+async function manageOptions(productId, productName) {
+  try {
+    const [{ variants }, { addons }, { suggestions }] = await Promise.all([
+      api('/products/' + productId + '/variants'),
+      api('/products/' + productId + '/addons'),
+      api('/products/' + productId + '/frequently-bought-with').catch(() => ({ suggestions: [] }))
+    ]);
+    const variantLines = variants.length
+      ? variants.map(v => `• ${v.name} (${v.price_delta_ghs >= 0 ? '+' : ''}GH₵${Number(v.price_delta_ghs).toFixed(2)})${v.stock_qty != null ? ' — ' + v.stock_qty + ' left' : ''}`).join('\n')
+      : '(none yet)';
+    const addonLines = addons.length
+      ? addons.map(a => `• ${a.name} (+GH₵${Number(a.price_ghs).toFixed(2)})`).join('\n')
+      : '(none yet)';
+    const frequentLines = suggestions.length
+      ? suggestions.map(s => `• ${s.name} (bought together ${s.co_count}×)`).join('\n')
+      : '(not enough order history yet)';
+    const choice = prompt(
+      `Options for ${productName}\n\nVariants:\n${variantLines}\n\nAdd-ons:\n${addonLines}\n\nFrequently bought together:\n${frequentLines}\n\n` +
+      `Type: "variant" to add a variant, "addon" to add an add-on, "rm variant <name>" or "rm addon <name>" to remove one. Leave blank to close.`
+    );
+    if (!choice) return;
+    const cmd = choice.trim().toLowerCase();
+    if (cmd === 'variant') {
+      const name = prompt('Variant name (e.g. Large):');
+      if (!name) return;
+      const delta = parseFloat(prompt('Price difference vs base price, GH₵ (can be negative, e.g. 5 or -2):', '0'));
+      if (!Number.isFinite(delta)) return toast('Invalid price difference');
+      await api('/products/' + productId + '/variants', { method: 'POST', body: JSON.stringify({ name, price_delta_ghs: delta }) });
+      toast('Variant added');
+      return manageOptions(productId, productName);
+    }
+    if (cmd === 'addon') {
+      const name = prompt('Add-on name (e.g. Extra chicken):');
+      if (!name) return;
+      const price = parseFloat(prompt('Price, GH₵:', '0'));
+      if (!Number.isFinite(price) || price < 0) return toast('Invalid price');
+      await api('/products/' + productId + '/addons', { method: 'POST', body: JSON.stringify({ name, price_ghs: price }) });
+      toast('Add-on added');
+      return manageOptions(productId, productName);
+    }
+    if (cmd.startsWith('rm variant ')) {
+      const name = choice.slice(choice.toLowerCase().indexOf('rm variant ') + 11).trim().toLowerCase();
+      const match = variants.find(v => v.name.toLowerCase() === name);
+      if (!match) return toast('Variant not found');
+      await api('/products/variants/' + match.id, { method: 'DELETE' });
+      toast('Variant removed');
+      return manageOptions(productId, productName);
+    }
+    if (cmd.startsWith('rm addon ')) {
+      const name = choice.slice(choice.toLowerCase().indexOf('rm addon ') + 9).trim().toLowerCase();
+      const match = addons.find(a => a.name.toLowerCase() === name);
+      if (!match) return toast('Add-on not found');
+      await api('/products/addons/' + match.id, { method: 'DELETE' });
+      toast('Add-on removed');
+      return manageOptions(productId, productName);
+    }
+  } catch (err) { toast(err.message); }
+}
+
+async function exportProductsCsv() {
+  try {
+    const token = await window.Clerk.session.getToken();
+    const res = await fetch('/api/products/export?business_id=' + BIZ.id, {
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const blob = await res.blob();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'products-' + new Date().toISOString().slice(0, 10) + '.csv';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  } catch (err) { toast('Export failed: ' + err.message); }
+}
+
+async function importProductsCsv(file) {
+  if (!file) return;
+  try {
+    const csv = await file.text();
+    const result = await api('/products/import', { method: 'POST', body: JSON.stringify({ business_id: BIZ.id, csv }) });
+    toast(`Imported: ${result.created} added, ${result.updated} updated` + (result.skipped_count ? `, ${result.skipped_count} skipped` : ''));
+    if (result.skipped_count) console.warn('Skipped rows:', result.skipped);
+    document.getElementById('pImportFile').value = '';
+    await loadProducts();
+  } catch (err) { toast('Import failed: ' + err.message); }
+}
+
+/* ---------------- Categories ---------------- */
+
+async function loadCategories() {
+  const { categories } = await api('/categories?business_id=' + BIZ.id);
+  const tbody = document.querySelector('#categoryTable tbody');
+  tbody.innerHTML = categories.map((c, i) => `
+    <tr>
+      <td><strong>${esc(c.name)}</strong></td>
+      <td>
+        <button class="btn btn-ghost btn-xs" ${i === 0 ? 'disabled' : ''} onclick="moveCategory(${JSON.stringify(categories.map(x => x.name)).replace(/"/g, '&quot;')}, ${i}, -1)">▲</button>
+        <button class="btn btn-ghost btn-xs" ${i === categories.length - 1 ? 'disabled' : ''} onclick="moveCategory(${JSON.stringify(categories.map(x => x.name)).replace(/"/g, '&quot;')}, ${i}, 1)">▼</button>
+      </td>
+      <td>${c.hidden ? '<span class="pill pill-off">Hidden</span>' : '<span class="pill pill-ok">Visible</span>'}</td>
+      <td><button class="btn btn-ghost btn-xs" onclick="toggleCategoryHidden('${esc(c.name)}', ${!c.hidden})">${c.hidden ? 'Show' : 'Hide'}</button></td>
+    </tr>
+  `).join('') || '<tr><td colspan="4" class="muted">No categories yet — add a product with a category to see it here.</td></tr>';
+}
+
+async function toggleCategoryHidden(name, hidden) {
+  try {
+    await api('/categories', { method: 'POST', body: JSON.stringify({ business_id: BIZ.id, name, hidden }) });
+    toast(hidden ? 'Category hidden from the WhatsApp menu' : 'Category visible on the WhatsApp menu');
+    await loadCategories();
+  } catch (err) { toast(err.message); }
+}
+
+async function moveCategory(names, index, dir) {
+  const target = index + dir;
+  if (target < 0 || target >= names.length) return;
+  const reordered = names.slice();
+  [reordered[index], reordered[target]] = [reordered[target], reordered[index]];
+  try {
+    await api('/categories/reorder', { method: 'POST', body: JSON.stringify({ business_id: BIZ.id, order: reordered }) });
+    await loadCategories();
+  } catch (err) { toast(err.message); }
 }
 
 async function addProduct() {
@@ -642,6 +1148,7 @@ async function loadOrders() {
         <select onchange="setOrderStatus('${o.id}', this.value); this.value='';" style="max-width:140px">
           <option value="">Move to…</option>${options}
         </select>
+        <button class="btn btn-ghost btn-xs" onclick="openOrderDetail('${o.id}')">Details</button>
       </td>
     </tr>`;
   }).join('') || '<tr><td colspan="6" class="muted">No orders yet.</td></tr>';
@@ -649,11 +1156,220 @@ async function loadOrders() {
 
 async function setOrderStatus(id, status) {
   if (!status) return;
+  let reason;
+  if (status === 'cancelled') {
+    reason = prompt('Reason for cancelling this order (optional):') || undefined;
+  }
   try {
-    await api('/orders/' + id + '/status', { method: 'PATCH', body: JSON.stringify({ status }) });
+    await api('/orders/' + id + '/status', { method: 'PATCH', body: JSON.stringify({ status, reason }) });
     toast('Order updated. Customer notified on WhatsApp');
     await loadOrders();
   } catch (err) { toast(err.message); }
+}
+
+/* ---------------- Order detail modal ---------------- */
+
+let currentOrderDetail = null;
+
+function closeOrderModal() {
+  document.getElementById('orderModalOverlay').style.display = 'none';
+  currentOrderDetail = null;
+}
+
+async function openOrderDetail(id) {
+  document.getElementById('orderModalOverlay').style.display = 'flex';
+  document.getElementById('orderModalBody').innerHTML = '<p class="muted">Loading…</p>';
+  try {
+    const detail = await api('/orders/' + id);
+    currentOrderDetail = detail;
+    renderOrderModal(detail);
+  } catch (err) {
+    document.getElementById('orderModalBody').innerHTML = '<p class="muted">Could not load order: ' + esc(err.message) + '</p>';
+  }
+}
+
+function renderOrderModal(detail) {
+  const o = detail.order;
+  const items = (o.items || []).map(i => `
+    <div style="display:flex;justify-content:space-between;font-size:13px;padding:3px 0">
+      <span>${i.quantity || 1}× ${esc(i.name)}</span>
+      <span>GH₵${((i.price_ghs || 0) * (i.quantity || 1)).toFixed(2)}</span>
+    </div>`).join('');
+
+  const timeline = (detail.history || []).map(ev => `
+    <div class="timeline-row">
+      <span class="tdot"></span>
+      <span style="flex:1">${esc(ev.event)}${ev.note ? ' — ' + esc(ev.note) : ''} <span class="muted">(${esc(ev.changed_by)})</span></span>
+      <span class="ttime">${new Date(ev.created_at).toLocaleString()}</span>
+    </div>`).join('') || '<p class="muted" style="font-size:13px">No history yet.</p>';
+
+  const attempts = (detail.payment_attempts || []).map(a => `
+    <div style="font-size:13px;padding:3px 0"><code>${esc(a.reference)}</code> — ${esc(a.method || 'unknown')} — ${new Date(a.created_at).toLocaleString()}</div>
+  `).join('') || '<p class="muted" style="font-size:13px">No payment attempts recorded.</p>';
+
+  const refunds = (detail.refunds || []).map(r => `
+    <div style="font-size:13px;padding:3px 0">GH₵${Number(r.amount_ghs).toFixed(2)} — <span class="pill ${r.status === 'processed' ? 'pill-ok' : (r.status === 'failed' ? 'pill-off' : 'pill-warn')}">${esc(r.status)}</span>${r.reason ? ' — ' + esc(r.reason) : ''}</div>
+  `).join('') || '';
+
+  const alreadyRefunded = (detail.refunds || []).filter(r => r.status === 'processed').reduce((s, r) => s + Number(r.amount_ghs), 0);
+  const refundEligible = o.payment_status === 'paid' || o.payment_status === 'refunded';
+
+  document.getElementById('orderModalBody').innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:start;flex-wrap:wrap;gap:10px">
+      <div>
+        <h2 style="margin-bottom:2px">${esc(o.order_number)}</h2>
+        <span class="muted" style="font-size:13px">${new Date(o.created_at).toLocaleString()}</span>
+      </div>
+      <div style="text-align:right">
+        <span class="pill ${o.payment_status === 'paid' ? 'pill-ok' : 'pill-warn'}">${esc(o.payment_status)}</span>
+        <span class="pill pill-off">${esc(o.status)}</span>
+      </div>
+    </div>
+
+    ${detail.customer ? `<p style="margin-top:10px;font-size:13px">
+      <strong>${esc(detail.customer.display_name || detail.customer.whatsapp_number)}</strong> · ${esc(detail.customer.whatsapp_number)}
+      <button class="btn btn-ghost btn-xs" onclick="jumpToCustomerThread('${detail.customer.id}')">Open conversation</button>
+    </p>` : ''}
+    ${o.cancellation_reason ? `<p class="muted" style="font-size:13px">Cancelled: ${esc(o.cancellation_reason)}</p>` : ''}
+
+    <h3>Items — GH₵${Number(o.total_ghs).toFixed(2)} total</h3>
+    ${items}
+
+    <h3>Timeline</h3>
+    ${timeline}
+
+    <h3>Payment attempts</h3>
+    ${attempts}
+
+    <h3>Delivery</h3>
+    <div class="row-form" style="grid-template-columns:1fr 1fr 1fr auto;align-items:end">
+      <div><label>Rider name</label><input id="omRiderName" value="${esc(o.rider_name || '')}" /></div>
+      <div><label>Rider phone</label><input id="omRiderPhone" value="${esc(o.rider_phone || '')}" /></div>
+      <div><label>Delivery status</label>
+        <select id="omDeliveryStatus">
+          ${['unassigned', 'assigned', 'picked_up', 'delivered'].map(s => `<option value="${s}" ${o.delivery_status === s ? 'selected' : ''}>${s}</option>`).join('')}
+        </select>
+      </div>
+      <div><button class="btn btn-primary btn-sm" onclick="saveOrderDelivery('${o.id}')">Save</button></div>
+    </div>
+    <div class="row-form" style="grid-template-columns:1fr 1fr;margin-top:10px">
+      <div><label>Estimated ready</label><input id="omReadyAt" type="datetime-local" value="${o.estimated_ready_at ? toLocalDatetimeValue(o.estimated_ready_at) : ''}" /></div>
+      <div><label>Estimated delivery</label><input id="omDeliveryAt" type="datetime-local" value="${o.estimated_delivery_at ? toLocalDatetimeValue(o.estimated_delivery_at) : ''}" /></div>
+    </div>
+    <div style="margin-top:8px"><button class="btn btn-ghost btn-sm" onclick="saveOrderEstimates('${o.id}')">Save ETAs</button></div>
+
+    <h3>Internal notes (not shown to customer)</h3>
+    <div style="white-space:pre-wrap;font-size:13px;background:var(--bg-2);border-radius:var(--r-sm,6px);padding:10px;margin-bottom:8px">${esc(o.internal_notes || '') || '<span class="muted">No notes yet.</span>'}</div>
+    <div style="display:flex;gap:8px">
+      <input id="omNewNote" placeholder="Add a note…" style="flex:1;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-sm,6px);font:inherit;background:var(--bg);color:var(--ink)" />
+      <button class="btn btn-ghost btn-sm" onclick="addOrderNoteFromModal('${o.id}')">Add</button>
+    </div>
+
+    ${refundEligible ? `
+      <h3>Refunds</h3>
+      ${refunds}
+      <p class="muted" style="font-size:12px;margin:6px 0">Refunded so far: GH₵${alreadyRefunded.toFixed(2)} of GH₵${Number(o.total_ghs).toFixed(2)}</p>
+      <div style="display:flex;gap:8px;align-items:end">
+        <div><label style="font-size:12px;color:var(--muted)">Amount GH₵</label><input id="omRefundAmount" type="number" min="0.01" step="0.01" style="width:120px" /></div>
+        <div style="flex:1"><label style="font-size:12px;color:var(--muted)">Reason</label><input id="omRefundReason" placeholder="Item unavailable" style="width:100%" /></div>
+        <button class="btn btn-primary btn-sm" onclick="submitRefund('${o.id}')">Refund</button>
+      </div>
+    ` : ''}
+
+    <div style="margin-top:20px;border-top:1px solid var(--line);padding-top:14px">
+      <button class="btn btn-ghost btn-sm" onclick="printKitchenTicket()">🖨️ Print kitchen ticket</button>
+    </div>
+  `;
+}
+
+function toLocalDatetimeValue(iso) {
+  const d = new Date(iso);
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function jumpToCustomerThread(customerId) {
+  closeOrderModal();
+  showSection('customers');
+  openConversation(customerId);
+}
+
+async function saveOrderDelivery(orderId) {
+  try {
+    const riderName = document.getElementById('omRiderName').value.trim();
+    const riderPhone = document.getElementById('omRiderPhone').value.trim();
+    const deliveryStatus = document.getElementById('omDeliveryStatus').value;
+    const body = { delivery_status: deliveryStatus };
+    if (riderName) { body.rider_name = riderName; body.rider_phone = riderPhone || null; }
+    await api('/orders/' + orderId + '/delivery', { method: 'PATCH', body: JSON.stringify(body) });
+    toast('Delivery info saved');
+    await openOrderDetail(orderId);
+  } catch (err) { toast(err.message); }
+}
+
+async function saveOrderEstimates(orderId) {
+  try {
+    const readyVal = document.getElementById('omReadyAt').value;
+    const deliveryVal = document.getElementById('omDeliveryAt').value;
+    await api('/orders/' + orderId + '/estimates', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        estimated_ready_at: readyVal ? new Date(readyVal).toISOString() : null,
+        estimated_delivery_at: deliveryVal ? new Date(deliveryVal).toISOString() : null
+      })
+    });
+    toast('ETAs saved');
+    await openOrderDetail(orderId);
+  } catch (err) { toast(err.message); }
+}
+
+async function addOrderNoteFromModal(orderId) {
+  const note = document.getElementById('omNewNote').value.trim();
+  if (!note) return;
+  try {
+    await api('/orders/' + orderId + '/notes', { method: 'PATCH', body: JSON.stringify({ note }) });
+    await openOrderDetail(orderId);
+  } catch (err) { toast(err.message); }
+}
+
+async function submitRefund(orderId) {
+  const amount = parseFloat(document.getElementById('omRefundAmount').value);
+  if (!(amount > 0)) return toast('Enter a valid refund amount');
+  const reason = document.getElementById('omRefundReason').value.trim();
+  if (!confirm(`Refund GH₵${amount.toFixed(2)}? This cannot be undone.`)) return;
+  try {
+    await api('/orders/' + orderId + '/refund', { method: 'POST', body: JSON.stringify({ amount_ghs: amount, reason: reason || undefined }) });
+    toast('Refund recorded');
+    await openOrderDetail(orderId);
+    await loadOrders();
+  } catch (err) { toast(err.message); }
+}
+
+function printKitchenTicket() {
+  if (!currentOrderDetail) return;
+  const o = currentOrderDetail.order;
+  const items = (o.items || []).map(i => `<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px dashed #999">
+    <span>${i.quantity || 1}× ${esc(i.name)}</span>
+  </div>`).join('');
+  const win = window.open('', '_blank', 'width=400,height=600');
+  win.document.write(`
+    <html><head><title>${esc(o.order_number)}</title>
+    <style>
+      body { font-family: monospace; padding: 16px; font-size: 14px; }
+      h2 { margin: 0 0 4px; }
+      .muted { color: #666; font-size: 12px; }
+    </style></head><body>
+      <h2>${esc(o.order_number)}</h2>
+      <div class="muted">${new Date(o.created_at).toLocaleString()}</div>
+      ${o.delivery_address ? `<div class="muted">Deliver to: ${esc(o.delivery_address)}</div>` : '<div class="muted">Pickup / dine-in</div>'}
+      <hr/>
+      ${items}
+      <hr/>
+      ${o.notes ? `<p><strong>Note:</strong> ${esc(o.notes)}</p>` : ''}
+      <script>window.print();<\/script>
+    </body></html>
+  `);
+  win.document.close();
 }
 
 /* ---------------- Today stats ---------------- */
@@ -705,17 +1421,128 @@ async function renewSubscription() {
 
 /* ---------------- Customers ---------------- */
 
+async function loadSegmentSummary() {
+  const box = document.getElementById('segmentSummary');
+  try {
+    const { segments, tags } = await api('/customers/segments/summary?business_id=' + BIZ.id);
+    const segHtml = segments.map(s => `<div class="stat"><div class="stat-label">${esc(s.label)}</div><div class="stat-val">${s.count}</div></div>`).join('');
+    const tagsHtml = tags.length
+      ? '<div style="grid-column:1/-1;margin-top:6px">' + tags.map(t => `<span class="pill pill-off" style="margin:2px 4px 2px 0">${esc(t.tag)} (${t.n})</span>`).join('') + '</div>'
+      : '';
+    box.innerHTML = segHtml + tagsHtml || '<p class="muted">No customers yet.</p>';
+  } catch (err) {
+    box.innerHTML = '<p class="muted">Could not load segments: ' + esc(err.message) + '</p>';
+  }
+}
+
 async function loadCustomers() {
-  const { customers } = await api('/customers?business_id=' + BIZ.id + '&limit=50');
+  const segment = document.getElementById('custSegmentFilter')?.value || '';
+  const tag = document.getElementById('custTagFilter')?.value.trim() || '';
+  let qs = '/customers?business_id=' + BIZ.id + '&limit=50';
+  if (segment) qs += '&segment=' + encodeURIComponent(segment);
+  if (tag) qs += '&tag=' + encodeURIComponent(tag);
+  const { customers } = await api(qs);
   const tbody = document.querySelector('#customerTable tbody');
   tbody.innerHTML = customers.map(c => `
     <tr>
-      <td><strong>${esc(c.display_name || c.whatsapp_number)}</strong><br><span class="muted" style="font-size:12px">${esc(c.whatsapp_number)}</span></td>
+      <td><a href="#" onclick="openCustomerProfile('${c.id}');return false;"><strong>${esc(c.display_name || c.whatsapp_number)}</strong></a><br><span class="muted" style="font-size:12px">${esc(c.whatsapp_number)}</span></td>
       <td class="muted">${esc(c.channel || 'whatsapp')}</td>
       <td>${c.total_orders}</td>
       <td>${ghs(c.total_spent_ghs)}</td>
+      <td>${(c.tags || []).map(t => `<span class="pill pill-off" style="margin:1px">${esc(t)}</span>`).join('') || '<span class="muted" style="font-size:12px">—</span>'}</td>
       <td class="muted">${new Date(c.last_seen_at).toLocaleDateString()}</td>
-    </tr>`).join('') || '<tr><td colspan="5" class="muted">No customers yet.</td></tr>';
+      <td><button class="btn btn-ghost btn-xs" data-tags="${esc((c.tags || []).join(','))}" onclick="editCustomerTags('${c.id}', this.dataset.tags)">Tags</button></td>
+    </tr>`).join('') || '<tr><td colspan="7" class="muted">No customers yet.</td></tr>';
+}
+
+async function editCustomerTags(id, currentCsv) {
+  const v = prompt('Tags, comma-separated (e.g. vip, wholesale):', currentCsv || '');
+  if (v == null) return;
+  const tags = v.split(',').map(t => t.trim()).filter(Boolean);
+  try {
+    await api('/customers/' + id + '/tags', { method: 'PATCH', body: JSON.stringify({ tags }) });
+    toast('Tags updated');
+    await Promise.all([loadCustomers(), loadSegmentSummary()]);
+  } catch (err) { toast(err.message); }
+}
+
+async function openCustomerProfile(id) {
+  document.getElementById('orderModalOverlay').style.display = 'flex';
+  document.getElementById('orderModalBody').innerHTML = '<p class="muted">Loading…</p>';
+  try {
+    const [p, loyaltyRes] = await Promise.all([
+      api('/customers/' + id + '/profile'),
+      api('/customers/' + id + '/loyalty').catch(() => null)
+    ]);
+    const c = p.customer;
+    const loy = loyaltyRes?.loyalty;
+    const lastProducts = (p.last_products_ordered || []).map(x => `<li>${esc(x.name)}</li>`).join('') || '<li class="muted">None yet</li>';
+    const orders = (p.recent_orders || []).map(o => `
+      <div style="font-size:13px;padding:3px 0">${esc(o.order_number)} — GH₵${Number(o.total_ghs).toFixed(2)} — <span class="pill pill-off">${esc(o.status)}</span> — ${new Date(o.created_at).toLocaleDateString()}</div>
+    `).join('') || '<p class="muted" style="font-size:13px">No orders yet.</p>';
+    const convo = (p.conversation_history || []).slice(0, 15).reverse().map(m => `
+      <div style="font-size:13px;padding:3px 0"><strong>${m.direction === 'inbound' ? 'Customer' : 'Shop'}:</strong> ${esc((m.content || '').slice(0, 140))} <span class="muted" style="font-size:11px">${new Date(m.created_at).toLocaleString()}</span></div>
+    `).join('') || '<p class="muted" style="font-size:13px">No messages yet.</p>';
+
+    const loyaltyHtml = loy ? `
+      <h3>Loyalty & rewards ${loy.vip_tier ? `<span class="pill pill-ok">${esc(loy.vip_tier)} VIP</span>` : ''}</h3>
+      <div class="stat-grid" style="margin-bottom:14px">
+        <div class="stat"><div class="stat-label">Points</div><div class="stat-val">${loy.points} <span class="muted" style="font-size:12px">(${ghs(loy.points_value_ghs)})</span></div></div>
+        ${loy.stamps_target > 0 ? `<div class="stat"><div class="stat-label">Stamps</div><div class="stat-val">${loy.stamps}/${loy.stamps_target}</div></div>` : ''}
+        <div class="stat"><div class="stat-label">Referral code</div><div class="stat-val" style="font-size:14px">${esc(loy.referral_code || '—')}</div></div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:end;margin-bottom:14px">
+        <div><label style="font-size:12px;color:var(--muted)">Redeem points</label><input id="redeemPointsInput" type="number" min="1" max="${loy.points}" style="width:100px" /></div>
+        <button class="btn btn-ghost btn-xs" onclick="redeemCustomerPoints('${c.id}')">Issue reward</button>
+        <div style="flex:1"></div>
+        <div><label style="font-size:12px;color:var(--muted)">Birthday</label><input id="birthdayInput" type="date" value="${loy.date_of_birth ? String(loy.date_of_birth).slice(0, 10) : ''}" /></div>
+        <button class="btn btn-ghost btn-xs" onclick="saveCustomerBirthday('${c.id}')">Save</button>
+      </div>
+    ` : '';
+
+    document.getElementById('orderModalBody').innerHTML = `
+      <h2 style="margin-bottom:2px">${esc(c.display_name || c.whatsapp_number)}</h2>
+      <span class="muted" style="font-size:13px">${esc(c.whatsapp_number)} · ${esc(c.channel || 'whatsapp')}</span>
+      <div class="stat-grid" style="margin:16px 0">
+        <div class="stat"><div class="stat-label">Lifetime spend</div><div class="stat-val">${ghs(p.lifetime_spend_ghs)}</div></div>
+        <div class="stat"><div class="stat-label">Total orders</div><div class="stat-val">${p.total_orders}</div></div>
+        <div class="stat"><div class="stat-label">Orders / month</div><div class="stat-val">${p.order_frequency_per_month}</div></div>
+        <div class="stat"><div class="stat-label">Preferred payment</div><div class="stat-val" style="font-size:16px">${esc(p.preferred_payment_method || '—')}</div></div>
+      </div>
+      ${loyaltyHtml}
+      <h3>Last products ordered</h3>
+      <ul style="margin:0 0 0 18px;font-size:13px">${lastProducts}</ul>
+      <h3>Recent orders</h3>
+      ${orders}
+      <h3>Conversation history</h3>
+      ${convo}
+      <div style="margin-top:20px;border-top:1px solid var(--line);padding-top:14px">
+        <button class="btn btn-ghost btn-sm" onclick="jumpToCustomerThread('${c.id}')">Open conversation</button>
+      </div>
+    `;
+  } catch (err) {
+    document.getElementById('orderModalBody').innerHTML = '<p class="muted">Could not load profile: ' + esc(err.message) + '</p>';
+  }
+}
+
+async function redeemCustomerPoints(customerId) {
+  const points = parseInt(document.getElementById('redeemPointsInput').value, 10);
+  if (!Number.isInteger(points) || points <= 0) return toast('Enter a valid number of points');
+  try {
+    const { reward } = await api('/customers/' + customerId + '/loyalty/redeem-points', {
+      method: 'POST', body: JSON.stringify({ points })
+    });
+    toast(`Reward code ${reward.code} issued and texted to the customer`);
+    await openCustomerProfile(customerId);
+  } catch (err) { toast(err.message); }
+}
+
+async function saveCustomerBirthday(customerId) {
+  const value = document.getElementById('birthdayInput').value;
+  try {
+    await api('/customers/' + customerId + '/birthday', { method: 'PATCH', body: JSON.stringify({ date_of_birth: value || null }) });
+    toast('Birthday saved');
+  } catch (err) { toast(err.message); }
 }
 
 /* ---------------- CSV export ---------------- */
@@ -758,6 +1585,26 @@ async function loadAnalytics(days) {
     document.getElementById('anaNudge').textContent = a.nudge_recovery.nudges_sent === 0
       ? '—'
       : a.nudge_recovery.recovery_rate_pct + '% (' + a.nudge_recovery.recovered + '/' + a.nudge_recovery.nudges_sent + ')';
+    document.getElementById('anaNudgeRevenue').textContent = a.nudge_recovery.nudges_sent === 0
+      ? '—' : ghs(a.nudge_recovery.recovered_revenue_ghs);
+
+    const variants = (a.nudge_recovery.by_variant || []).filter(v => v.nudges_sent > 0);
+    document.getElementById('anaNudgeVariants').innerHTML = variants.length < 2 ? '' : `
+      <h3 style="font-size:14px;margin-bottom:10px">Nudge A/B test</h3>
+      <div class="scroll-x">
+        <table>
+          <thead><tr><th>Variant</th><th>Sent</th><th>Recovered</th><th>Rate</th><th>Revenue</th></tr></thead>
+          <tbody>
+            ${variants.map(v => `<tr>
+              <td>${v.variant.toUpperCase()}</td>
+              <td>${v.nudges_sent}</td>
+              <td>${v.recovered}</td>
+              <td>${v.recovery_rate_pct == null ? '—' : v.recovery_rate_pct + '%'}</td>
+              <td>${ghs(v.recovered_revenue_ghs)}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`;
 
     const maxGmv = Math.max(1, ...a.revenue_trend.map(d => Number(d.gmv_ghs)));
     document.getElementById('anaRevenue').innerHTML = a.revenue_trend.map(d => {
@@ -819,12 +1666,22 @@ async function openConversation(id) {
   const thread = document.getElementById('convThread');
   thread.innerHTML = '<p class="muted" style="padding:20px;text-align:center">Loading…</p>';
   try {
-    const { customer, messages } = await api('/conversations/' + id + '/messages');
+    const [{ customer, messages }, summaryRes] = await Promise.all([
+      api('/conversations/' + id + '/messages'),
+      api('/conversations/' + id + '/summary').catch(() => null)
+    ]);
+    const summary = summaryRes?.summary;
+    const summaryHtml = summary ? `
+      <div class="conv-summary ${summary.needs_attention ? 'needs-attention' : ''}">
+        <strong>${esc(summary.headline)}</strong>
+        <ul>${summary.bullet_points.map(b => `<li>${esc(b)}</li>`).join('')}</ul>
+      </div>` : '';
     thread.innerHTML = `
       <div class="conv-thread-head">
         <div><strong>${esc(customer.display_name || customer.whatsapp_number)}</strong><br><span class="muted" style="font-size:12px">${esc(customer.whatsapp_number)}</span></div>
         <button class="btn btn-ghost btn-xs" onclick="togglePause('${customer.id}', ${!customer.bot_paused})">${customer.bot_paused ? 'Resume bot' : 'Pause bot'}</button>
       </div>
+      ${summaryHtml}
       <div class="conv-messages" id="convMessages">
         ${messages.map(m => `
           <div class="msg ${m.direction === 'inbound' ? 'msg-in' : 'msg-out'}">
@@ -869,15 +1726,28 @@ async function togglePause(customerId, pause) {
 async function loadPromos() {
   const { promos } = await api('/promos?business_id=' + BIZ.id);
   const tbody = document.querySelector('#promoTable tbody');
-  tbody.innerHTML = promos.map(p => `
+  tbody.innerHTML = promos.map(p => {
+    const targeting = [
+      p.min_order_ghs != null ? `min GH₵${Number(p.min_order_ghs).toFixed(2)}` : '',
+      p.first_order_only ? 'first order' : '',
+      p.customer_tag ? `tag: ${p.customer_tag}` : '',
+      p.customer_segment ? p.customer_segment.replace(/_/g, ' ') : '',
+      p.category ? `category: ${p.category}` : ''
+    ].filter(Boolean).join(', ') || '<span class="muted">Everyone</span>';
+    return `
     <tr>
       <td><strong>${esc(p.code)}</strong></td>
       <td>${p.type === 'percent' ? Number(p.value) + '%' : ghs(p.value)}</td>
+      <td class="muted" style="font-size:12px">${targeting}</td>
       <td>${p.used_count}${p.max_uses ? ' / ' + p.max_uses : ''}</td>
       <td class="muted">${p.expires_at ? new Date(p.expires_at).toLocaleDateString() : '—'}</td>
       <td><span class="pill ${p.active ? 'pill-ok' : 'pill-off'}">${p.active ? 'Active' : 'Off'}</span></td>
-      <td><button class="btn btn-ghost btn-xs" onclick="togglePromo('${p.id}', ${!p.active})">${p.active ? 'Disable' : 'Enable'}</button></td>
-    </tr>`).join('') || '<tr><td colspan="6" class="muted">No promo codes yet.</td></tr>';
+      <td style="white-space:nowrap">
+        <button class="btn btn-ghost btn-xs" onclick="togglePromo('${p.id}', ${!p.active})">${p.active ? 'Disable' : 'Enable'}</button>
+        <button class="btn btn-ghost btn-xs" onclick="showPromoPerformance('${p.id}')">Performance</button>
+      </td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="7" class="muted">No promo codes yet.</td></tr>';
 }
 
 async function addPromo() {
@@ -886,6 +1756,7 @@ async function addPromo() {
   const value = parseFloat(document.getElementById('promoValue').value);
   const maxUsesRaw = document.getElementById('promoMaxUses').value.trim();
   const expiresRaw = document.getElementById('promoExpires').value;
+  const minOrderRaw = document.getElementById('promoMinOrder').value.trim();
   if (!code || !(value > 0)) return toast('Code and a positive value are required');
   try {
     await api('/promos', {
@@ -893,13 +1764,41 @@ async function addPromo() {
       body: JSON.stringify({
         business_id: BIZ.id, code, type, value,
         max_uses: maxUsesRaw ? parseInt(maxUsesRaw, 10) : null,
-        expires_at: expiresRaw ? new Date(expiresRaw + 'T23:59:59').toISOString() : null
+        expires_at: expiresRaw ? new Date(expiresRaw + 'T23:59:59').toISOString() : null,
+        min_order_ghs: minOrderRaw ? parseFloat(minOrderRaw) : null,
+        first_order_only: document.getElementById('promoFirstOrder').checked,
+        customer_tag: document.getElementById('promoTag').value.trim() || null,
+        customer_segment: document.getElementById('promoSegment').value || null,
+        category: document.getElementById('promoCategory').value.trim() || null
       })
     });
-    ['promoCode','promoValue','promoMaxUses','promoExpires'].forEach(id => document.getElementById(id).value = '');
+    ['promoCode','promoValue','promoMaxUses','promoExpires','promoMinOrder','promoTag','promoCategory'].forEach(id => document.getElementById(id).value = '');
+    document.getElementById('promoFirstOrder').checked = false;
+    document.getElementById('promoSegment').value = '';
     toast('Promo created');
     await loadPromos();
   } catch (err) { toast(err.message); }
+}
+
+async function showPromoPerformance(id) {
+  document.getElementById('orderModalOverlay').style.display = 'flex';
+  document.getElementById('orderModalBody').innerHTML = '<p class="muted">Loading…</p>';
+  try {
+    const { performance: perf } = await api('/promos/' + id + '/performance?business_id=' + BIZ.id);
+    document.getElementById('orderModalBody').innerHTML = `
+      <h2 style="margin-bottom:2px">${esc(perf.promo.code)}</h2>
+      <span class="muted" style="font-size:13px">${perf.promo.type === 'percent' ? Number(perf.promo.value) + '% off' : ghs(perf.promo.value) + ' off'}</span>
+      <div class="stat-grid" style="margin-top:16px">
+        <div class="stat"><div class="stat-label">Orders using code</div><div class="stat-val">${perf.orders_count}</div></div>
+        <div class="stat"><div class="stat-label">Paid orders</div><div class="stat-val">${perf.paid_orders_count}</div></div>
+        <div class="stat"><div class="stat-label">Total discount given</div><div class="stat-val">${ghs(perf.total_discount_ghs)}</div></div>
+        <div class="stat"><div class="stat-label">Revenue from this code</div><div class="stat-val">${ghs(perf.total_revenue_ghs)}</div></div>
+        ${perf.redemption_rate_pct != null ? `<div class="stat"><div class="stat-label">Redemption rate</div><div class="stat-val">${perf.redemption_rate_pct}%</div></div>` : ''}
+      </div>
+    `;
+  } catch (err) {
+    document.getElementById('orderModalBody').innerHTML = '<p class="muted">Could not load performance: ' + esc(err.message) + '</p>';
+  }
 }
 
 async function togglePromo(id, active) {
@@ -918,20 +1817,28 @@ async function loadBroadcasts() {
   tbody.innerHTML = broadcasts.map(b => `
     <tr>
       <td style="max-width:280px">${esc(b.body)}</td>
+      <td class="muted" style="font-size:12px">${esc(b.audience_desc || 'All opted-in customers')}</td>
       <td><span class="pill ${b.status === 'done' ? 'pill-ok' : (b.status === 'failed' ? 'pill-off' : 'pill-warn')}">${esc(b.status)}</span></td>
       <td>${b.sent_count}</td>
       <td>${b.failed_count}</td>
       <td>${b.target_count}</td>
       <td class="muted">${new Date(b.created_at).toLocaleString()}</td>
-    </tr>`).join('') || '<tr><td colspan="6" class="muted">No broadcasts sent yet.</td></tr>';
+    </tr>`).join('') || '<tr><td colspan="7" class="muted">No broadcasts sent yet.</td></tr>';
 }
 
 async function sendBroadcast() {
   const body = document.getElementById('bcBody').value.trim();
   if (!body) return toast('Write a message first');
-  if (!confirm('Send this to every opted-in customer? This cannot be undone.')) return;
+  const audience = {};
+  const segment = document.getElementById('bcSegment').value;
+  const tag = document.getElementById('bcTag').value.trim();
+  const minSpend = document.getElementById('bcMinSpend').value.trim();
+  if (segment) audience.segment = segment;
+  if (tag) audience.tag = tag;
+  if (minSpend) audience.min_spend_ghs = parseFloat(minSpend);
+  if (!confirm('Send this broadcast? This cannot be undone.')) return;
   try {
-    const res = await api('/broadcasts', { method: 'POST', body: JSON.stringify({ business_id: BIZ.id, body }) });
+    const res = await api('/broadcasts', { method: 'POST', body: JSON.stringify({ business_id: BIZ.id, body, audience }) });
     document.getElementById('bcBody').value = '';
     toast('Broadcast queued for ' + res.target_count + ' customer(s)');
     await loadBroadcasts();
@@ -948,8 +1855,80 @@ async function loadSettings() {
   document.getElementById('sFee').value = settings.delivery_fee_ghs != null ? Number(settings.delivery_fee_ghs).toFixed(2) : '';
   document.getElementById('sOpen').value = settings.open_time || '';
   document.getElementById('sClose').value = settings.close_time || '';
+  document.getElementById('sOwnerName').value = settings.owner_name || '';
+  document.getElementById('sPayoutNumber').value = settings.payout_momo_number || '';
+  document.getElementById('sPayoutNetwork').value = settings.payout_momo_network || '';
   const zones = Array.isArray(settings.delivery_zones) ? settings.delivery_zones : [];
   document.getElementById('sZones').value = zones.map(z => z.name + ': ' + Number(z.fee_ghs).toFixed(2)).join('\n');
+
+  document.getElementById('cnEnabled').checked = settings.cart_nudge_enabled !== false;
+  document.getElementById('cnDelay').value = settings.cart_nudge_delay_minutes || 60;
+  document.getElementById('cnMaxPerCart').value = settings.cart_nudge_max_per_cart || 1;
+  document.getElementById('cnTemplate').value = settings.cart_nudge_message_template || '';
+  document.getElementById('cnTemplateB').value = settings.cart_nudge_template_b || '';
+  document.getElementById('cnCoupon').value = settings.cart_nudge_coupon_code || '';
+}
+
+async function saveCartNudgeSettings() {
+  const delay = parseInt(document.getElementById('cnDelay').value, 10);
+  const maxPerCart = parseInt(document.getElementById('cnMaxPerCart').value, 10);
+  if (!Number.isInteger(delay) || delay < 5 || delay > 1440) return toast('Delay must be between 5 and 1440 minutes');
+  if (!Number.isInteger(maxPerCart) || maxPerCart < 1 || maxPerCart > 5) return toast('Max reminders must be between 1 and 5');
+  try {
+    await api('/business/settings', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        cart_nudge_enabled: document.getElementById('cnEnabled').checked,
+        cart_nudge_delay_minutes: delay,
+        cart_nudge_max_per_cart: maxPerCart,
+        cart_nudge_message_template: document.getElementById('cnTemplate').value.trim() || null,
+        cart_nudge_template_b: document.getElementById('cnTemplateB').value.trim() || null,
+        cart_nudge_coupon_code: document.getElementById('cnCoupon').value.trim() || null
+      })
+    });
+    toast('Cart recovery settings saved');
+  } catch (err) { toast(err.message); }
+}
+
+async function loadLoyaltySettings() {
+  const { settings } = await api('/business/settings');
+  document.getElementById('loyEnabled').checked = !!settings.loyalty_enabled;
+  document.getElementById('loyPointsPerGhs').value = settings.loyalty_points_per_ghs ?? 1;
+  document.getElementById('loyRedemptionRate').value = settings.loyalty_points_redemption_rate_ghs ?? 0.05;
+  document.getElementById('loyStampsTarget').value = settings.loyalty_stamps_target ?? 0;
+  document.getElementById('loyFreeItemValue').value = settings.loyalty_free_item_value_ghs ?? 0;
+  document.getElementById('loyReferralReward').value = settings.loyalty_referral_reward_ghs ?? 0;
+  document.getElementById('loyBirthdayType').value = settings.loyalty_birthday_discount_type || 'percent';
+  document.getElementById('loyBirthdayValue').value = settings.loyalty_birthday_discount_value ?? 0;
+  const tiers = Array.isArray(settings.loyalty_vip_tiers) ? settings.loyalty_vip_tiers : [];
+  document.getElementById('loyVipTiers').value = tiers.map(t => `${t.name}: ${t.min_spend_ghs}`).join('\n');
+}
+
+async function saveLoyaltySettings() {
+  const tiersText = document.getElementById('loyVipTiers').value.trim();
+  const tiers = [];
+  for (const line of tiersText ? tiersText.split('\n') : []) {
+    const m = line.match(/^(.+?):\s*(\d+(?:\.\d{1,2})?)\s*$/);
+    if (!m) return toast('VIP tier line not understood: "' + line.trim() + '" — use "Name: amount"');
+    tiers.push({ name: m[1].trim(), min_spend_ghs: parseFloat(m[2]) });
+  }
+  try {
+    await api('/business/settings', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        loyalty_enabled: document.getElementById('loyEnabled').checked,
+        loyalty_points_per_ghs: parseFloat(document.getElementById('loyPointsPerGhs').value) || 0,
+        loyalty_points_redemption_rate_ghs: parseFloat(document.getElementById('loyRedemptionRate').value) || 0,
+        loyalty_stamps_target: parseInt(document.getElementById('loyStampsTarget').value, 10) || 0,
+        loyalty_free_item_value_ghs: parseFloat(document.getElementById('loyFreeItemValue').value) || 0,
+        loyalty_referral_reward_ghs: parseFloat(document.getElementById('loyReferralReward').value) || 0,
+        loyalty_birthday_discount_type: document.getElementById('loyBirthdayType').value,
+        loyalty_birthday_discount_value: parseFloat(document.getElementById('loyBirthdayValue').value) || 0,
+        loyalty_vip_tiers: tiers
+      })
+    });
+    toast('Loyalty settings saved');
+  } catch (err) { toast(err.message); }
 }
 
 async function saveSettings() {
@@ -967,12 +1946,45 @@ async function saveSettings() {
     support_phone: document.getElementById('sSupport').value.trim() || null,
     delivery_zones: zones,
     open_time: document.getElementById('sOpen').value.trim() || null,
-    close_time: document.getElementById('sClose').value.trim() || null
+    close_time: document.getElementById('sClose').value.trim() || null,
+    owner_name: document.getElementById('sOwnerName').value.trim() || null,
+    payout_momo_number: document.getElementById('sPayoutNumber').value.trim() || null,
+    payout_momo_network: document.getElementById('sPayoutNetwork').value || null
   };
   if (feeRaw !== '') body.delivery_fee_ghs = parseFloat(feeRaw);
   try {
     await api('/business/settings', { method: 'PATCH', body: JSON.stringify(body) });
     toast('Settings saved — live on your bot now');
+    loadOnboarding().catch(() => {});
+  } catch (err) { toast(err.message); }
+}
+
+/* ---------------- Onboarding checklist ---------------- */
+
+async function loadOnboarding() {
+  const checklist = await api('/onboarding/status');
+  const card = document.getElementById('onboardingCard');
+  if (checklist.all_complete) { card.style.display = 'none'; return; }
+  card.style.display = '';
+  document.getElementById('onboardingPercent').textContent = checklist.percent + '% complete';
+  const list = document.getElementById('onboardingList');
+  list.innerHTML = checklist.steps.map(s => `
+    <li style="display:flex;align-items:flex-start;gap:10px">
+      <span style="flex-shrink:0;margin-top:2px">${s.complete ? '✅' : '⬜️'}</span>
+      <span>
+        <strong>${s.label}</strong>
+        <div class="muted" style="font-size:13px">${s.description}</div>
+        ${s.key === 'test_message' && !s.complete ? '<button class="btn btn-ghost btn-xs" style="margin-top:6px" onclick="sendTestMessage()">Send test message</button>' : ''}
+      </span>
+    </li>
+  `).join('');
+}
+
+async function sendTestMessage() {
+  try {
+    await api('/onboarding/test-message', { method: 'POST' });
+    toast('Test message sent — check WhatsApp');
+    loadOnboarding().catch(() => {});
   } catch (err) { toast(err.message); }
 }
 

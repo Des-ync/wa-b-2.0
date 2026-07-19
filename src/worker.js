@@ -19,6 +19,7 @@ const notification = require('./services/notification.service');
 const webhookProcessor = require('./services/webhook.processor');
 const paymentSweeper = require('./services/payment.sweeper');
 const cartNudge = require('./services/cart.nudge');
+const loyaltyJobs = require('./services/loyalty.jobs');
 
 logger.info('🛠  Starting WhatsApp SaaS worker (env=%s)', process.env.NODE_ENV || 'development');
 
@@ -61,6 +62,12 @@ cron.schedule('30 2 * * 0', () => {
 cron.schedule('*/15 * * * *', () => {
   cartNudge.runCartNudgeJob().catch(err =>
     logger.error('cartNudgeJob crashed: %s', err.message, { stack: err.stack })
+  );
+}, { timezone: 'Africa/Accra' });
+
+cron.schedule('0 7 * * *', () => {
+  loyaltyJobs.runBirthdayCouponJob().catch(err =>
+    logger.error('birthdayCouponJob crashed: %s', err.message, { stack: err.stack })
   );
 }, { timezone: 'Africa/Accra' });
 

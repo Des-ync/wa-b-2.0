@@ -6,6 +6,10 @@ const { query } = require('../config/database');
 const { requireAuth, issueKey } = require('../middleware/auth');
 const { normalizeGhanaPhone } = require('../utils/helpers');
 const wa = require('../services/whatsapp.service');
+const { computeOnboardingSteps } = require('./onboarding.routes');
+const { getLatencyStats } = require('../middleware/latency');
+const { getMetricsSnapshot } = require('../utils/metrics');
+const { recordAudit } = require('../utils/auditLog');
 
 const router = express.Router();
 
@@ -66,6 +70,41 @@ router.get('/businesses', async (req, res) => {
     res.json({ success: true, businesses: result.rows });
   } catch (err) {
     logger.error('GET /admin/businesses failed: %s', err.message);
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+/**
+ * GET /api/admin/businesses/incomplete-setup — merchants who haven't finished
+ * onboarding, with the specific steps still missing. Lets support proactively
+ * chase setup instead of waiting for a "why isn't my bot working" ticket.
+ */
+router.get('/businesses/incomplete-setup', async (_req, res) => {
+  try {
+    const result = await query(`
+      SELECT b.id, b.name, b.owner_name, b.whatsapp_number, b.wa_phone_number_id,
+             b.payout_momo_number, b.payout_momo_network, b.onboarding_test_message_sent_at,
+             b.status, b.created_at,
+             (SELECT COUNT(*)::int FROM products p WHERE p.business_id = b.id) AS product_count
+        FROM businesses b
+       ORDER BY b.created_at DESC
+    `);
+    const incomplete = result.rows
+      .map(b => ({ business: b, checklist: computeOnboardingSteps(b, b.product_count) }))
+      .filter(r => !r.checklist.all_complete)
+      .map(r => ({
+        id: r.business.id,
+        name: r.business.name,
+        owner_name: r.business.owner_name,
+        whatsapp_number: r.business.whatsapp_number,
+        status: r.business.status,
+        created_at: r.business.created_at,
+        missing_steps: r.checklist.steps.filter(s => !s.complete).map(s => s.key),
+        percent: r.checklist.percent
+      }));
+    res.json({ success: true, businesses: incomplete });
+  } catch (err) {
+    logger.error('GET /admin/businesses/incomplete-setup failed: %s', err.message);
     res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });
@@ -270,9 +309,11 @@ router.get('/businesses/:id', async (req, res) => {
 const EDITABLE_BUSINESS_FIELDS = [
   'name', 'owner_name', 'industry', 'status', 'whatsapp_number',
   'wa_phone_number_id', 'welcome_message', 'support_phone', 'bot_language',
-  'delivery_fee_ghs', 'open_time', 'close_time', 'trial_ends_at'
+  'delivery_fee_ghs', 'open_time', 'close_time', 'trial_ends_at',
+  'payout_momo_number', 'payout_momo_network'
 ];
 const BUSINESS_STATUSES = ['trial', 'active', 'grace', 'suspended', 'cancelled'];
+const MOMO_NETWORKS = ['mtn', 'vodafone', 'airteltigo'];
 
 /**
  * PATCH /api/admin/businesses/:id — edit a client profile.
@@ -287,9 +328,17 @@ router.patch('/businesses/:id', async (req, res) => {
       if (field === 'status' && !BUSINESS_STATUSES.includes(value)) {
         return res.status(400).json({ success: false, error: `status must be one of ${BUSINESS_STATUSES.join(', ')}` });
       }
-      if (field === 'whatsapp_number') {
-        value = normalizeGhanaPhone(value);
-        if (!value) return res.status(400).json({ success: false, error: 'Invalid WhatsApp number' });
+      if (field === 'whatsapp_number' || field === 'payout_momo_number') {
+        value = value ? normalizeGhanaPhone(value) : null;
+        if (req.body[field] && !value) {
+          return res.status(400).json({ success: false, error: `Invalid ${field}` });
+        }
+      }
+      if (field === 'payout_momo_network' && value) {
+        value = String(value).trim().toLowerCase();
+        if (!MOMO_NETWORKS.includes(value)) {
+          return res.status(400).json({ success: false, error: `payout_momo_network must be one of ${MOMO_NETWORKS.join(', ')}` });
+        }
       }
       if (field === 'delivery_fee_ghs') {
         value = Number(value);
@@ -313,8 +362,12 @@ router.patch('/businesses/:id', async (req, res) => {
     if (!business) return res.status(404).json({ success: false, error: 'Business not found' });
     delete business.wa_access_token;
     delete business.ig_page_access_token;
-    logger.info('admin: updated business %s fields [%s]', business.id,
-      sets.map(s => s.split(' ')[0]).join(', '));
+    const changedFields = sets.map(s => s.split(' ')[0]);
+    logger.info('admin: updated business %s fields [%s]', business.id, changedFields.join(', '));
+    recordAudit({
+      actorType: 'admin', actorId: req.auth?.keyId, businessId: business.id,
+      action: 'business.update', detail: { fields: changedFields }
+    });
     res.json({ success: true, business });
   } catch (err) {
     logger.error('PATCH /admin/businesses/:id failed: %s', err.message);
@@ -359,6 +412,10 @@ router.post('/businesses/:id/api-key', async (req, res) => {
       name: String(req.body?.name || `${bizRes.rows[0].name} (admin-issued)`).slice(0, 120),
       businessId: req.params.id,
       scope: 'tenant'
+    });
+    recordAudit({
+      actorType: 'admin', actorId: req.auth?.keyId, businessId: req.params.id,
+      action: 'api_key.issue', detail: { key_id: key.id, name: key.name }
     });
     res.status(201).json({ success: true, key });
   } catch (err) {
@@ -501,6 +558,91 @@ router.get('/health', async (_req, res) => {
     });
   } catch (err) {
     logger.error('GET /admin/health failed: %s', err.message);
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+/**
+ * GET /api/admin/ops — everything the admin operational dashboard needs
+ * beyond /health and /issues: p95 response times, retry counts, per-provider
+ * webhook error rates, stuck orders/payments, and recent alert history.
+ */
+router.get('/ops', async (_req, res) => {
+  try {
+    const [byProvider, stuckOrders, alerts] = await Promise.all([
+      query(
+        `SELECT source,
+                COUNT(*)::int AS total,
+                COUNT(*) FILTER (WHERE status = 'failed')::int AS failed,
+                COUNT(*) FILTER (WHERE status = 'pending')::int AS pending,
+                COALESCE(SUM(attempts), 0)::int AS total_attempts,
+                COALESCE(MAX(attempts), 0)::int AS max_attempts
+           FROM webhook_events
+          WHERE received_at >= NOW() - INTERVAL '7 days'
+          GROUP BY source
+          ORDER BY source`
+      ),
+      query(
+        `SELECT id, order_number, business_id, total_ghs, payment_status, updated_at
+           FROM orders
+          WHERE payment_status = 'pending'
+            AND updated_at < NOW() - INTERVAL '15 minutes'
+          ORDER BY updated_at ASC
+          LIMIT 50`
+      ),
+      query(
+        `SELECT id, title, detail, suppressed_count, created_at
+           FROM admin_alerts
+          ORDER BY created_at DESC
+          LIMIT 50`
+      )
+    ]);
+
+    const providerErrorRates = byProvider.rows.map(r => ({
+      ...r,
+      error_rate_pct: r.total > 0 ? Math.round((r.failed / r.total) * 100) : 0
+    }));
+
+    res.json({
+      success: true,
+      ops: {
+        latency: getLatencyStats({ withinMinutes: 60 }),
+        provider_error_rates: providerErrorRates,
+        stuck_payments: stuckOrders.rows,
+        stuck_payments_count: stuckOrders.rowCount,
+        alerts: alerts.rows,
+        metrics: getMetricsSnapshot()
+      }
+    });
+  } catch (err) {
+    logger.error('GET /admin/ops failed: %s', err.message);
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+/**
+ * GET /api/admin/audit-log?business_id=&limit= — who did what: business
+ * settings changes, API key issuance, promo edits, and anything else
+ * wired to recordAudit(). Order-level history lives on the order itself
+ * (order_status_history) instead of here.
+ */
+router.get('/audit-log', async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
+    const params = [];
+    let where = '';
+    if (req.query.business_id) {
+      params.push(req.query.business_id);
+      where = 'WHERE business_id = $1';
+    }
+    params.push(limit);
+    const result = await query(
+      `SELECT * FROM audit_log ${where} ORDER BY created_at DESC LIMIT $${params.length}`,
+      params
+    );
+    res.json({ success: true, audit_log: result.rows });
+  } catch (err) {
+    logger.error('GET /admin/audit-log failed: %s', err.message);
     res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });

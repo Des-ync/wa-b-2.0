@@ -3,6 +3,7 @@ const axios = require('axios');
 const crypto = require('crypto');
 const logger = require('../utils/logger');
 const { paystackMomoProvider, detectNetwork, normalizeGhanaPhone } = require('../utils/helpers');
+const metrics = require('../utils/metrics');
 
 const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY;
 const BASE_URL = 'https://api.paystack.co';
@@ -114,10 +115,12 @@ async function createPaymentLink({ email, amountGhs, reference, callbackUrl, met
  */
 async function verifyTransaction(reference) {
   ensureConfigured();
+  const start = Date.now();
   try {
     const res = await http.get(`/transaction/verify/${encodeURIComponent(reference)}`, {
       headers: authHeaders()
     });
+    metrics.recordTiming('payment_verification_ms', Date.now() - start);
     const data = res.data?.data || {};
     return {
       success: true,
@@ -128,10 +131,38 @@ async function verifyTransaction(reference) {
       raw: res.data
     };
   } catch (err) {
+    metrics.recordTiming('payment_verification_ms', Date.now() - start);
     logger.error('Paystack verify failed: %s | %j', err.message, err.response?.data);
     return {
       success: false,
       error: err.response?.data?.message || err.message
+    };
+  }
+}
+
+/**
+ * Refund a transaction (fully or partially) by its reference.
+ * amountGhs omitted = full refund of whatever Paystack recorded as paid.
+ */
+async function refundTransaction(reference, amountGhs) {
+  ensureConfigured();
+  try {
+    const body = { transaction: reference };
+    if (amountGhs != null) body.amount = toPesewas(amountGhs);
+    const res = await http.post('/refund', body, { headers: authHeaders() });
+    const data = res.data?.data || {};
+    return {
+      success: true,
+      status: data.status || 'pending',
+      gateway_ref: data.id ? String(data.id) : null,
+      raw: res.data
+    };
+  } catch (err) {
+    logger.error('Paystack refund failed: %s | %j', err.message, err.response?.data);
+    return {
+      success: false,
+      error: err.response?.data?.message || err.message,
+      raw: err.response?.data
     };
   }
 }
@@ -173,5 +204,6 @@ module.exports = {
   initializeMoMoCharge,
   createPaymentLink,
   verifyTransaction,
+  refundTransaction,
   verifyPaystackWebhook
 };

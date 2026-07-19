@@ -27,9 +27,10 @@ router.get('/:id', async (req, res) => {
       return res.status(404).json({ success: false, error: 'Receipt not found' });
     }
     const r = await query(
-      `SELECT o.order_number, o.created_at, o.status, o.payment_status, o.payment_method,
+      `SELECT o.id, o.order_number, o.created_at, o.status, o.payment_status, o.payment_method,
               o.items, o.subtotal_ghs, o.delivery_fee, o.discount_ghs, o.promo_code, o.total_ghs,
-              o.delivery_address,
+              o.delivery_address, o.estimated_ready_at, o.estimated_delivery_at,
+              o.rider_name, o.rider_phone, o.delivery_status, o.delivery_proof_url,
               b.name AS business_name, b.support_phone, b.whatsapp_number AS business_whatsapp,
               c.display_name AS customer_name, c.whatsapp_number AS customer_phone
          FROM orders o
@@ -43,6 +44,15 @@ router.get('/:id', async (req, res) => {
 
     const phone = row.customer_phone || '';
     const maskedPhone = phone.length > 4 ? `${'•'.repeat(phone.length - 4)}${phone.slice(-4)}` : phone;
+
+    // Customer-safe timeline: status/delivery changes only — merchant notes
+    // and refund reasons stay internal, never exposed on a bearer-token link.
+    const historyRes = await query(
+      `SELECT event, created_at FROM order_status_history
+        WHERE order_id = $1 AND (event LIKE 'status:%' OR event LIKE 'delivery:%')
+        ORDER BY created_at ASC`,
+      [row.id]
+    );
 
     res.json({
       success: true,
@@ -59,6 +69,12 @@ router.get('/:id', async (req, res) => {
         promo_code: row.promo_code,
         total_ghs: row.total_ghs,
         delivery_address: row.delivery_address,
+        estimated_ready_at: row.estimated_ready_at,
+        estimated_delivery_at: row.estimated_delivery_at,
+        rider_name: row.rider_name,
+        delivery_status: row.delivery_status,
+        delivery_proof_url: row.delivery_proof_url,
+        timeline: historyRes.rows,
         business_name: row.business_name,
         business_support_phone: row.support_phone || row.business_whatsapp,
         customer_name: row.customer_name,

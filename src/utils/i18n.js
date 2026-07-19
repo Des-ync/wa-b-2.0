@@ -58,6 +58,10 @@ const STRINGS = {
     en: () => `Tap *Order Now* to browse and pay with MoMo or card.`,
     tw: () => `Mia *Order Now* na hwɛ menu no, na fa MoMo anaa kaad tua ka.`
   },
+  human_handoff: {
+    en: p => `💬 Got it — a person from *${p.shop}* will reply to you here shortly. Reply *MENU* anytime if you'd like to keep browsing while you wait.`,
+    tw: p => `💬 Yɛate — obi fi *${p.shop}* bɛba abua wo wɔ ha nnansa yi. Kyerɛw *MENU* bere biara sɛ wopɛ sɛ wohwɛ nneɛma bere a woretwɛn.`
+  },
   support_direct: {
     en: p => p.link
       ? `💬 You can reach *${p.shop}* directly on WhatsApp: ${p.link}\n\nOr reply *MENU* anytime to keep shopping.`
@@ -153,6 +157,14 @@ const STRINGS = {
     en: p => `Sorry, ${p.shop} has no products available right now. Please check back soon!`,
     tw: p => `Yɛsrɛ wo, ${p.shop} nni nneɛma biara seesei. Yɛsrɛ wo san bra akyiri yi!`
   },
+  product_query_results: {
+    en: p => `Here's what we found:\n\n${p.list}\n\nReply with an item name to add it, or *MENU* to see everything.`,
+    tw: p => `Nea yɛahu ni:\n\n${p.list}\n\nKyerɛw adeɛ no din na fa hyɛ kɛntɛn mu, anaa *MENU* na hwɛ biribiara.`
+  },
+  product_query_none: {
+    en: p => `We don't have that right now. Reply *MENU* to see what ${p.shop} has available.`,
+    tw: p => `Yɛnni saa adeɛ no seesei. Kyerɛw *MENU* na hwɛ nea ${p.shop} wɔ.`
+  },
   menu_title: {
     en: p => `${p.shop} Menu`,
     tw: p => `${p.shop} Menu`
@@ -194,6 +206,88 @@ const STRINGS = {
     tw: p => `🛒 Wo Kɛntɛn\n\n${p.lines}\n\nNe boɔ: *${p.subtotal}*\n\nToa adetɔ so anaa kɔ akatua so? Wowɔ promo code? Kyerɛw (te sɛ PROMO SAVE10).`
   },
 
+  /* ---------- variants & add-ons ---------- */
+  variant_header: {
+    en: p => `Choose an option for ${p.name}`,
+    tw: p => `Paw ɔkwan bi ma ${p.name}`
+  },
+  variant_body: {
+    en: () => `Tap the option you'd like.`,
+    tw: () => `Mia ɔkwan a wopɛ.`
+  },
+  btn_choose_option: {
+    en: () => 'Choose option',
+    tw: () => 'Paw ɔkwan'
+  },
+  variant_out_of_stock: {
+    en: p => `Sorry, "${p.name}" is out of stock right now.`,
+    tw: p => `Yɛsrɛ wo, "${p.name}" asa mprempren.`
+  },
+  addon_prompt: {
+    en: p => `Want to add any extras to *${p.name}*?\n\n${p.lines}\n\nReply with the numbers you want, separated by commas (e.g. 1,3) — or *0* for none.`,
+    tw: p => `Wopɛ sɛ wode nneɛma foforo ka *${p.name}* ho?\n\n${p.lines}\n\nKyerɛw nɔma a wopɛ, fa comma (,) tetew mu (te sɛ 1,3) — anaa *0* sɛ wompɛ biara.`
+  },
+  addon_invalid: {
+    en: () => `Reply with the extra numbers separated by commas (e.g. 1,3), or 0 for none.`,
+    tw: () => `Kyerɛw nɔma a wopɛ, fa comma (,) tetew mu (te sɛ 1,3), anaa 0 sɛ wompɛ biara.`
+  },
+
+  /* ---------- upsells ---------- */
+  upsell_variant: {
+    en: p => `✨ Want to upgrade to *${p.name}* for just +${p.delta} more? Just ask!`,
+    tw: p => `✨ Wopɛ sɛ wo kɔ *${p.name}* mu, fa ka ${p.delta} bio? Kyerɛw yɛn!`
+  },
+  upsell_frequently_bought: {
+    en: p => `🍹 Customers often add *${p.name}* too — just type it to add it.`,
+    tw: p => `🍹 Adetɔfoɔ taa fa *${p.name}* ka ho — kyerɛw ne din na fa ka ho.`
+  },
+  usual_hint: {
+    en: p => `\n\nYour usual: *${p.name}* — just type it to add it.`,
+    tw: p => `\n\nDeɛ wotaa tɔ: *${p.name}* — kyerɛw ne din na fa ka ho.`
+  },
+
+  /* ---------- loyalty ---------- */
+  loyalty_points_earned: {
+    en: p => `⭐ You earned ${p.points} point${p.points === 1 ? '' : 's'} on this order!`,
+    tw: p => `⭐ Wonyaa ${p.points} point${p.points === 1 ? '' : 's'} wɔ saa nhyehyɛe yi so!`
+  },
+  loyalty_free_item_earned: {
+    en: p => `🎉 You've earned a free item! Use code *${p.code}* (worth ${p.value}) on your next order.`,
+    tw: p => `🎉 Wonyaa adeɛ kwa! Fa code *${p.code}* (ɛsom bo ${p.value}) di dwuma wɔ wo nhyehyɛe a ɛtoso so.`
+  },
+  loyalty_referral_earned: {
+    en: p => `🎁 Someone you referred to *${p.shop}* just made their first order! Here's your thank-you: code *${p.code}* worth ${p.value} on your next order.`,
+    tw: p => `🎁 Obi a wode no baa *${p.shop}* atɔ n'ade a edi kan! Wo akyɛde ni: code *${p.code}* a ɛsom bo ${p.value} wɔ wo nhyehyɛe a ɛtoso so.`
+  },
+  my_referral_code: {
+    en: p => `🎁 Your referral code is *${p.code}*. Share it — when a friend's first order at *${p.shop}* pays, you get a reward!`,
+    tw: p => `🎁 Wo referral code ne *${p.code}*. Kyɛ ma obi — sɛ w'adamfo tɔ n'ade a edi kan wɔ *${p.shop}* na otua ka a, wobɛnya akyɛde!`
+  },
+  referral_applied: {
+    en: p => `✅ Got it — you're linked as referred. Make your first order at *${p.shop}* and your friend gets a thank-you reward!`,
+    tw: p => `✅ Yɛate — yɛde wo ahyɛ sɛ obi de wo baa ha. Tɔ w'ade a edi kan wɔ *${p.shop}* na w'adamfo nya akyɛde!`
+  },
+  referral_already_linked: {
+    en: () => `You're already linked to a referral — that only needs to happen once.`,
+    tw: () => `Yɛde wo ahyɛ dedaw sɛ obi de wo baa ha — ɛho hia sɛ wɔyɛ no prɛko pɛ.`
+  },
+  referral_not_new: {
+    en: () => `Referral codes only work before your first paid order — thanks for already being a customer!`,
+    tw: () => `Referral code no yɛ adwuma ansa wo tua wo nhyehyɛe a edi kan ka — meda wo ase sɛ woyɛ yɛn adetɔfoɔ dedaw!`
+  },
+  referral_invalid: {
+    en: () => `We couldn't find that referral code. Double-check it and try again.`,
+    tw: () => `Yɛanhu saa referral code no. Hwɛ yiye na san sɔ hwɛ.`
+  },
+  referral_self: {
+    en: () => `You can't refer yourself! Share your code with a friend instead.`,
+    tw: () => `Wontumi mfa wo ho referral code! Kyɛ wo code no ma w'adamfo mmom.`
+  },
+  birthday_coupon: {
+    en: p => `🎂 Happy birthday from *${p.shop}*! Here's a treat: code *${p.code}* for ${p.value} off your next order (valid 14 days).`,
+    tw: p => `🎂 Afenhyia pa fi *${p.shop}*! Akyɛde ni: code *${p.code}* a ɛma wonya ${p.value} tiaa wo nhyehyɛe a ɛtoso so (ɛyɛ adwuma nnafua 14).`
+  },
+
   /* ---------- promo codes ---------- */
   promo_applied: {
     en: p => `✅ Promo *${p.code}* applied — you saved ${p.discount}.\n\nNew total: *${p.total}*`,
@@ -202,6 +296,26 @@ const STRINGS = {
   promo_invalid: {
     en: () => `That promo code isn't valid. Check the code and try again, or continue without one.`,
     tw: () => `Saa promo code no nyɛ. Hwɛ code no yiye na san sɔ hwɛ, anaasɛ toa so a wɔmfa promo code biara.`
+  },
+  promo_min_order_not_met: {
+    en: () => `That code needs a bigger order to unlock. Add a bit more to your cart and try again.`,
+    tw: () => `Saa code no hia sɛ wo nhyehyɛe so kɛse. Fa biribi ka wo kɛntɛn ho na san sɔ hwɛ.`
+  },
+  promo_first_order_only: {
+    en: () => `That code is only for a customer's very first order — thanks for shopping with us before!`,
+    tw: () => `Saa code no yɛ ma ɔdetɔfoɔ n'ade a edi kan pɛ — meda wo ase sɛ woatɔ yɛn nkyɛn dedaw!`
+  },
+  promo_not_eligible: {
+    en: () => `That code isn't available for your account.`,
+    tw: () => `Saa code no nni hɔ ma wo account.`
+  },
+  promo_wrong_items: {
+    en: () => `That code only applies to specific items — add one of those to your cart to use it.`,
+    tw: () => `Saa code no fa nneɛma pɔtee bi nko ho — fa emu bi ka wo kɛntɛn ho na fa di dwuma.`
+  },
+  promo_auto_applied: {
+    en: p => `🎁 We automatically applied your best available discount: code *${p.code}* saves you ${p.discount}!`,
+    tw: p => `🎁 Yɛde wo discount a ɛyɛ papa paa adi dwuma ama wo: code *${p.code}* ma wonya ${p.discount}!`
   },
   promo_expired: {
     en: () => `That promo code has expired.`,
@@ -294,8 +408,8 @@ const STRINGS = {
     tw: p => `⚠️ Nhyehyɛe *${p.n}* ho akatua no ansi yiye.\n\nWo nhyehyɛe no da so wɔ hɔ — wubetumi asan atua bio.`
   },
   payment_received: {
-    en: p => `✅ Payment received!\n\nOrder: ${p.n}\nTotal: ${p.total}\nBusiness: ${p.shop}\n\nWe'll notify you the moment your order is on its way. Thank you for shopping with us! 🛍️${p.receiptUrl ? `\n\nReceipt: ${p.receiptUrl}` : ''}`,
-    tw: p => `✅ Yɛagye wo akatua no!\n\nNhyehyɛe: ${p.n}\nNe nyinaa: ${p.total}\nAdwuma: ${p.shop}\n\nSɛ wo nhyehyɛe no si kwan so a, yɛbɛbɔ wo amanneɛ. Yɛda wo ase sɛ wotɔɔ yɛn nkyɛn! 🛍️${p.receiptUrl ? `\n\nReceipt: ${p.receiptUrl}` : ''}`
+    en: p => `✅ Payment received!\n\nOrder: ${p.n}\nTotal: ${p.total}\nBusiness: ${p.shop}\n\nWe'll notify you the moment your order is on its way. Thank you for shopping with us! 🛍️${p.receiptUrl ? `\n\nReceipt: ${p.receiptUrl}` : ''}\n\nWant the same again next time? Just reply *REPEAT*.`,
+    tw: p => `✅ Yɛagye wo akatua no!\n\nNhyehyɛe: ${p.n}\nNe nyinaa: ${p.total}\nAdwuma: ${p.shop}\n\nSɛ wo nhyehyɛe no si kwan so a, yɛbɛbɔ wo amanneɛ. Yɛda wo ase sɛ wotɔɔ yɛn nkyɛn! 🛍️${p.receiptUrl ? `\n\nReceipt: ${p.receiptUrl}` : ''}\n\nWopɛ sɛ wonya bio a, kyerɛw *REPEAT*.`
   },
 
   /* ---------- fulfilment status notifications ---------- */
@@ -324,14 +438,52 @@ const STRINGS = {
   cart_nudge: {
     en: p => `🛒 Still thinking it over? Your cart at *${p.shop}* with ${p.count} item${p.count === 1 ? '' : 's'} is saved and waiting.`,
     tw: p => `🛒 Woda so redwen ho? Wo kɛntɛn a ɛwɔ *${p.shop}* a nneɛma ${p.count} wom no da so retwɛn wo.`
+  },
+  cart_nudge_coupon: {
+    en: p => `\n\n🎁 Use code *${p.code}* at checkout for a discount!`,
+    tw: p => `\n\n🎁 Fa code *${p.code}* di dwuma wɔ akatua so na nya discount!`
   }
 };
 
 /**
  * Resolve a business row to a supported language code.
  */
-function langOf(business) {
+/**
+ * customer.language_override (set from detectLikelyLanguage, below) wins
+ * over the shop's own default — a Twi-typing customer gets Twi replies even
+ * on a shop whose bot_language is 'en', and vice versa. Optional second arg
+ * keeps every existing single-arg call site working unchanged.
+ */
+function langOf(business, customer) {
+  if (customer && (customer.language_override === 'en' || customer.language_override === 'tw')) {
+    return customer.language_override;
+  }
   return business && business.bot_language === 'tw' ? 'tw' : 'en';
+}
+
+// Conservative signals only — presence flips the detected language, absence
+// means "no confident signal" (null), never "must be English". A customer
+// typing plain English words that happen to also be common elsewhere isn't
+// enough; only the Twi-specific vowels and a set of unambiguous Twi words
+// count. NEEDS_NATIVE_REVIEW — extend as real customer phrasing surfaces.
+const TWI_SIGNAL_WORDS = [
+  'mepɛ', 'me pɛ', 'wo ho te sɛn', 'ɛte sɛn', 'medaase', 'aane', 'daabi',
+  'ɛyɛ', 'wope', 'mepe', 'maakye', 'maaha', 'maadwo', 'bɛyɛ dɛn', 'yɛbɛhyɛ',
+  'kɔsɛ', 'meda wo ase'
+];
+
+/**
+ * Best-effort per-message language hint from what the customer actually
+ * typed. Returns 'tw', or null when there's no confident signal (caller
+ * should then keep whatever language preference was already on file).
+ */
+function detectLikelyLanguage(text) {
+  const raw = String(text || '');
+  if (!raw.trim()) return null;
+  if (/[ɔɛƆƐ]/.test(raw)) return 'tw';
+  const lower = raw.toLowerCase();
+  if (TWI_SIGNAL_WORDS.some(w => lower.includes(w))) return 'tw';
+  return null;
 }
 
 /**
@@ -345,4 +497,4 @@ function t(lang, key, params = {}) {
   return render(params);
 }
 
-module.exports = { t, langOf, STRINGS };
+module.exports = { t, langOf, STRINGS, detectLikelyLanguage };

@@ -7,6 +7,7 @@ const { query } = require('../config/database');
 const { formatGhs } = require('../utils/helpers');
 const { t, langOf } = require('../utils/i18n');
 const push = require('./push.service');
+const { notifyDashboard } = require('./dashboard.notify');
 
 const WEBHOOK_RETENTION_DAYS = parseInt(process.env.WEBHOOK_RETENTION_DAYS || '30', 10);
 const MESSAGE_LOG_RETENTION_DAYS = parseInt(process.env.MESSAGE_LOG_RETENTION_DAYS || '90', 10);
@@ -202,11 +203,62 @@ function notifyOrderReceived({ order, business, customer }) {
   const items = Array.isArray(order.items) ? order.items : [];
   const count = items.reduce((n, i) => n + (Number(i.quantity) || 1), 0);
   const who = customer?.display_name || customer?.whatsapp_number || 'A customer';
+  const paymentNote = order.payment_status === 'paid' ? '' : ' • awaiting payment';
+  const body = `${who} placed order #${order.order_number} — ${count} item${count === 1 ? '' : 's'}, ${formatGhs(order.total_ghs)}${paymentNote}`;
   push.pushToBusiness(business.id, {
     title: '🛒 New order received',
-    body: `${who} placed order #${order.order_number} — ${count} item${count === 1 ? '' : 's'}, ${formatGhs(order.total_ghs)}`,
+    body,
     data: { type: 'order', order_id: order.id }
   });
+  notifyDashboard(business.id, {
+    type: 'new_order', title: '🛒 New order received', body,
+    data: { order_id: order.id, order_number: order.order_number }
+  });
+}
+
+/**
+ * Push to the business when a customer cancels an order they were already
+ * notified about — otherwise the merchant preps an order that's gone.
+ */
+function notifyOrderCancelled({ order, business, customer }) {
+  if (!business?.id || !order) return;
+  const who = customer?.display_name || customer?.whatsapp_number || 'The customer';
+  push.pushToBusiness(business.id, {
+    title: '❌ Order cancelled',
+    body: `${who} cancelled order #${order.order_number} (${formatGhs(order.total_ghs)})`,
+    data: { type: 'order', order_id: order.id }
+  });
+}
+
+/**
+ * A customer asked to talk to a human (typed "human"/"agent", or tapped
+ * Talk to us). The bot is already paused for them by the caller; this just
+ * makes sure the merchant actually notices — a push AND a WhatsApp text,
+ * since not every merchant has push notifications set up yet.
+ */
+async function notifyHumanHandoffRequested({ business, customer, lastMessage }) {
+  if (!business?.id || !customer) return;
+  const who = customer.display_name || customer.whatsapp_number || 'A customer';
+  const snippet = String(lastMessage || '').slice(0, 200);
+  push.pushToBusiness(business.id, {
+    title: `🙋 ${who} wants to talk to a human`,
+    body: snippet || 'Open the dashboard inbox to reply.',
+    data: { type: 'handoff', customer_id: customer.id }
+  });
+  notifyDashboard(business.id, {
+    type: 'support_request', title: `🙋 ${who} wants to talk to a human`,
+    body: snippet || 'Open the dashboard inbox to reply.',
+    data: { customer_id: customer.id }
+  });
+  try {
+    await wa.sendText(
+      business.whatsapp_number,
+      `🙋 ${who} asked to speak to a person${snippet ? `: "${snippet}"` : ''}.\n\nReply from your dashboard inbox — the bot has paused for this customer until you resume it.`,
+      { businessId: business.id }
+    );
+  } catch (err) {
+    logger.warn('notifyHumanHandoffRequested WA send failed for business %s: %s', business.id, err.message);
+  }
 }
 
 /**
@@ -272,8 +324,13 @@ async function runPruneJob() {
       const o = await query(
         `DELETE FROM business_link_otps WHERE expires_at < NOW() - INTERVAL '1 day'`
       );
-      logger.info('[cron] runPruneJob done: %d webhook event(s), %d message log row(s), %d link OTP(s) pruned',
-        w.rowCount, m.rowCount, o.rowCount);
+      const n = await query(
+        `DELETE FROM dashboard_notifications
+          WHERE (read_at IS NOT NULL AND created_at < NOW() - INTERVAL '30 days')
+             OR created_at < NOW() - INTERVAL '90 days'`
+      );
+      logger.info('[cron] runPruneJob done: %d webhook event(s), %d message log row(s), %d link OTP(s), %d notification(s) pruned',
+        w.rowCount, m.rowCount, o.rowCount, n.rowCount);
     } catch (err) {
       logger.error('[cron] runPruneJob failed: %s', err.message);
     }
@@ -332,7 +389,9 @@ module.exports = {
   runPruneJob,
   notifyOrderPaid,
   notifyOrderReceived,
+  notifyOrderCancelled,
   notifyOrderStatusChange,
+  notifyHumanHandoffRequested,
   notifySubscriptionRenewed,
   notifySubscriptionFailed
 };

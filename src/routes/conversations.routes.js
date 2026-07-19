@@ -3,6 +3,7 @@ const logger = require('../utils/logger');
 const { query } = require('../config/database');
 const { requireAuth } = require('../middleware/auth');
 const { getAdapter, destOf } = require('../services/channel.adapter');
+const { summarizeConversation } = require('../utils/conversationSummary');
 
 const router = express.Router();
 
@@ -109,6 +110,45 @@ router.post('/:customerId/reply', async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     logger.error('POST /conversations/:id/reply failed: %s', err.message);
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+/**
+ * GET /api/conversations/:customerId/summary — a deterministic digest of
+ * this customer's conversation: cart state, last order, message volume, and
+ * whether anything they said looks like it needs a human reply.
+ */
+router.get('/:customerId/summary', async (req, res) => {
+  try {
+    const customer = await loadCustomer(req.params.customerId);
+    if (!customer) return res.status(404).json({ success: false, error: 'Customer not found' });
+    if (tenantBlocksBusinessId(req, customer.business_id)) {
+      return res.status(403).json({ success: false, error: 'Key does not match business' });
+    }
+    const [messagesRes, stateRes, orderRes] = await Promise.all([
+      query(
+        `SELECT direction, content, created_at FROM message_log
+          WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 30`,
+        [customer.id]
+      ),
+      query('SELECT flow_data FROM conversation_state WHERE customer_id = $1', [customer.id]),
+      query(
+        `SELECT order_number, status, payment_status, total_ghs FROM orders
+          WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 1`,
+        [customer.id]
+      )
+    ]);
+    const cart = Array.isArray(stateRes.rows[0]?.flow_data?.cart) ? stateRes.rows[0].flow_data.cart : [];
+    const summary = summarizeConversation({
+      customer,
+      messages: messagesRes.rows.reverse(),
+      cart,
+      lastOrder: orderRes.rows[0] || null
+    });
+    res.json({ success: true, summary });
+  } catch (err) {
+    logger.error('GET /conversations/:id/summary failed: %s', err.message);
     res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });

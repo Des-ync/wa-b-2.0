@@ -3,13 +3,22 @@ const logger = require('../utils/logger');
 const { query } = require('../config/database');
 const { requireAuth } = require('../middleware/auth');
 const { normalizeGhanaPhone } = require('../utils/helpers');
+const { recordAudit } = require('../utils/auditLog');
 
 const router = express.Router();
 
 router.use(requireAuth('any'));
 
 const SETTINGS_COLUMNS =
-  'id, name, welcome_message, support_phone, delivery_fee_ghs, delivery_zones, open_time, close_time, bot_language';
+  'id, name, owner_name, welcome_message, support_phone, delivery_fee_ghs, delivery_zones, open_time, close_time, ' +
+  'bot_language, payout_momo_number, payout_momo_network, ' +
+  'cart_nudge_enabled, cart_nudge_delay_minutes, cart_nudge_max_per_cart, ' +
+  'cart_nudge_message_template, cart_nudge_template_b, cart_nudge_coupon_code, ' +
+  'loyalty_enabled, loyalty_points_per_ghs, loyalty_points_redemption_rate_ghs, ' +
+  'loyalty_stamps_target, loyalty_free_item_value_ghs, loyalty_referral_reward_ghs, ' +
+  'loyalty_birthday_discount_type, loyalty_birthday_discount_value, loyalty_vip_tiers';
+
+const MOMO_NETWORKS = ['mtn', 'vodafone', 'airteltigo'];
 
 function resolveBusinessId(req) {
   if (req.auth?.scope === 'admin') return req.query.business_id || req.body?.business_id || null;
@@ -97,6 +106,36 @@ router.patch('/settings', async (req, res) => {
       }
       set('bot_language', v);
     }
+    if ('name' in body) {
+      const v = String(body.name || '').trim();
+      if (!v || v.length > 200) return res.status(400).json({ success: false, error: 'name is required (max 200 chars)' });
+      set('name', v);
+    }
+    if ('owner_name' in body) {
+      const v = String(body.owner_name || '').trim();
+      if (v.length > 200) return res.status(400).json({ success: false, error: 'owner_name too long (max 200 chars)' });
+      set('owner_name', v || null);
+    }
+    if ('payout_momo_number' in body) {
+      const raw = String(body.payout_momo_number || '').trim();
+      if (!raw) {
+        set('payout_momo_number', null);
+      } else {
+        const normalized = normalizeGhanaPhone(raw);
+        if (!normalized) return res.status(400).json({ success: false, error: 'payout_momo_number is not a valid Ghana number' });
+        set('payout_momo_number', normalized);
+      }
+    }
+    if ('payout_momo_network' in body) {
+      const v = String(body.payout_momo_network || '').trim().toLowerCase();
+      if (!v) {
+        set('payout_momo_network', null);
+      } else if (!MOMO_NETWORKS.includes(v)) {
+        return res.status(400).json({ success: false, error: `payout_momo_network must be one of ${MOMO_NETWORKS.join(', ')}` });
+      } else {
+        set('payout_momo_network', v);
+      }
+    }
     for (const col of ['open_time', 'close_time']) {
       if (col in body) {
         const v = String(body[col] || '').trim();
@@ -105,6 +144,79 @@ router.patch('/settings', async (req, res) => {
         }
         set(col, v || null);
       }
+    }
+    if ('cart_nudge_enabled' in body) {
+      set('cart_nudge_enabled', !!body.cart_nudge_enabled);
+    }
+    if ('cart_nudge_delay_minutes' in body) {
+      const n = Number(body.cart_nudge_delay_minutes);
+      if (!Number.isInteger(n) || n < 5 || n > 1440) {
+        return res.status(400).json({ success: false, error: 'cart_nudge_delay_minutes must be an integer between 5 and 1440' });
+      }
+      set('cart_nudge_delay_minutes', n);
+    }
+    if ('cart_nudge_max_per_cart' in body) {
+      const n = Number(body.cart_nudge_max_per_cart);
+      if (!Number.isInteger(n) || n < 1 || n > 5) {
+        return res.status(400).json({ success: false, error: 'cart_nudge_max_per_cart must be an integer between 1 and 5' });
+      }
+      set('cart_nudge_max_per_cart', n);
+    }
+    for (const col of ['cart_nudge_message_template', 'cart_nudge_template_b']) {
+      if (col in body) {
+        const v = body[col] == null ? null : String(body[col]).trim().slice(0, 900);
+        set(col, v || null);
+      }
+    }
+    if ('cart_nudge_coupon_code' in body) {
+      const v = body.cart_nudge_coupon_code == null ? null : String(body.cart_nudge_coupon_code).trim().toUpperCase().slice(0, 40);
+      set('cart_nudge_coupon_code', v || null);
+    }
+    if ('loyalty_enabled' in body) set('loyalty_enabled', !!body.loyalty_enabled);
+    for (const [col, min, max] of [
+      ['loyalty_points_per_ghs', 0, 100],
+      ['loyalty_points_redemption_rate_ghs', 0, 10],
+      ['loyalty_free_item_value_ghs', 0, 10000],
+      ['loyalty_referral_reward_ghs', 0, 10000],
+      ['loyalty_birthday_discount_value', 0, 10000]
+    ]) {
+      if (col in body) {
+        const n = Number(body[col]);
+        if (!Number.isFinite(n) || n < min || n > max) {
+          return res.status(400).json({ success: false, error: `${col} must be a number between ${min} and ${max}` });
+        }
+        set(col, n);
+      }
+    }
+    if ('loyalty_stamps_target' in body) {
+      const n = Number(body.loyalty_stamps_target);
+      if (!Number.isInteger(n) || n < 0 || n > 100) {
+        return res.status(400).json({ success: false, error: 'loyalty_stamps_target must be an integer between 0 and 100 (0 disables it)' });
+      }
+      set('loyalty_stamps_target', n);
+    }
+    if ('loyalty_birthday_discount_type' in body) {
+      const v = String(body.loyalty_birthday_discount_type || '');
+      if (!['percent', 'fixed'].includes(v)) {
+        return res.status(400).json({ success: false, error: "loyalty_birthday_discount_type must be 'percent' or 'fixed'" });
+      }
+      set('loyalty_birthday_discount_type', v);
+    }
+    if ('loyalty_vip_tiers' in body) {
+      const tiers = body.loyalty_vip_tiers;
+      if (!Array.isArray(tiers) || tiers.length > 10) {
+        return res.status(400).json({ success: false, error: 'loyalty_vip_tiers must be an array of at most 10 tiers' });
+      }
+      const clean = [];
+      for (const tier of tiers) {
+        const name = String(tier?.name || '').trim().slice(0, 40);
+        const minSpend = Number(tier?.min_spend_ghs);
+        if (!name || !Number.isFinite(minSpend) || minSpend < 0) {
+          return res.status(400).json({ success: false, error: 'Each VIP tier needs a name and a non-negative min_spend_ghs' });
+        }
+        clean.push({ name, min_spend_ghs: minSpend });
+      }
+      set('loyalty_vip_tiers', JSON.stringify(clean));
     }
 
     if (!sets.length) return res.status(400).json({ success: false, error: 'No recognized settings in body' });
@@ -115,6 +227,12 @@ router.patch('/settings', async (req, res) => {
       params
     );
     if (!r.rows[0]) return res.status(404).json({ success: false, error: 'Business not found' });
+    recordAudit({
+      actorType: req.auth?.scope === 'admin' ? 'admin' : 'merchant',
+      actorId: req.auth?.clerkUserId || req.auth?.keyId,
+      businessId, action: 'settings.update',
+      detail: { fields: sets.map(s => s.split(' ')[0]) }
+    });
     res.json({ success: true, settings: r.rows[0] });
   } catch (err) {
     logger.error('PATCH /business/settings failed: %s', err.message);

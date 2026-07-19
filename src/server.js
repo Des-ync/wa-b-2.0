@@ -14,6 +14,8 @@ const broadcastSender = require('./services/broadcast.sender');
 const { alertOps } = require('./services/alert.service');
 const dbBackup = require('./jobs/db.backup');
 const { requireAuth } = require('./middleware/auth');
+const { latencyMiddleware } = require('./middleware/latency');
+const { requestIdMiddleware } = require('./middleware/requestId');
 
 const webhookRoutes = require('./routes/webhook.routes');
 const paymentRoutes = require('./routes/payment.routes');
@@ -30,6 +32,10 @@ const broadcastRoutes = require('./routes/broadcast.routes');
 const promoRoutes = require('./routes/promo.routes');
 const receiptRoutes = require('./routes/receipt.routes');
 const deviceRoutes = require('./routes/device.routes');
+const onboardingRoutes = require('./routes/onboarding.routes');
+const categoryRoutes = require('./routes/category.routes');
+const notificationRoutes = require('./routes/notification.routes');
+const searchRoutes = require('./routes/search.routes');
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
@@ -37,6 +43,10 @@ const PORT = parseInt(process.env.PORT || '3000', 10);
 // Behind Nginx: trust the first proxy hop so req.ip (used by the rate
 // limiter) reflects the real client, not 127.0.0.1.
 app.set('trust proxy', 1);
+
+// First middleware, always — every log line for the rest of this request
+// (sync or async) needs the AsyncLocalStorage context this opens.
+app.use(requestIdMiddleware);
 
 // Security headers. The marketing site and dashboard rely on inline scripts
 // and Clerk's hosted JS, so the CSP below is deliberately permissive
@@ -96,6 +106,7 @@ app.use(
 
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
+app.use(latencyMiddleware);
 
 // Marketing site (public/) — mounted at /wa-b so this app can live alongside
 // other projects on the same domain instead of owning the domain root.
@@ -151,6 +162,10 @@ app.use('/api/conversations', apiLimiter, conversationsRoutes);
 app.use('/api/broadcasts', apiLimiter, broadcastRoutes);
 app.use('/api/promos', apiLimiter, promoRoutes);
 app.use('/api/devices', apiLimiter, deviceRoutes);
+app.use('/api/onboarding', apiLimiter, onboardingRoutes);
+app.use('/api/categories', apiLimiter, categoryRoutes);
+app.use('/api/notifications', apiLimiter, notificationRoutes);
+app.use('/api/search', apiLimiter, searchRoutes);
 // Public, unauthenticated — the order id itself is the shareable capability.
 app.use('/api/receipts', apiLimiter, receiptRoutes);
 

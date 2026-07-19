@@ -1,6 +1,7 @@
 const logger = require('../utils/logger');
 const wa = require('./whatsapp.service');
 const push = require('./push.service');
+const { query } = require('../config/database');
 
 // How rarely we're willing to text ops. A crash loop that throws every
 // request must not turn into hundreds of WhatsApp messages — one alert
@@ -12,17 +13,14 @@ let suppressedSinceLastSend = 0;
 
 /**
  * Fire-and-forget: text the platform's own ops phone when something
- * unhandled blows up. No-op if OPS_ALERT_PHONE isn't configured, so
- * this is safe to call from every deployment without extra setup.
+ * unhandled blows up, and always records it to admin_alerts so the ops
+ * dashboard has a history even when OPS_ALERT_PHONE isn't configured.
  *
  * Uses the platform's own WhatsApp Cloud API credentials (no businessId
  * passed to sendText → falls back to WA_PHONE_NUMBER_ID/WA_ACCESS_TOKEN),
  * not any tenant's number.
  */
 function alertOps(title, detail) {
-  const to = process.env.OPS_ALERT_PHONE;
-  if (!to) return;
-
   const now = Date.now();
   if (now - lastSentAt < MIN_GAP_MS) {
     suppressedSinceLastSend++;
@@ -32,8 +30,17 @@ function alertOps(title, detail) {
   const suppressedNote = suppressedSinceLastSend > 0
     ? `\n(${suppressedSinceLastSend} more error(s) suppressed since the last alert)`
     : '';
+  const suppressedCount = suppressedSinceLastSend;
   lastSentAt = now;
   suppressedSinceLastSend = 0;
+
+  query(
+    `INSERT INTO admin_alerts (title, detail, suppressed_count) VALUES ($1,$2,$3)`,
+    [String(title || '').slice(0, 300), String(detail || '').slice(0, 2000), suppressedCount]
+  ).catch(err => logger.warn('alertOps: failed to persist alert history: %s', err.message));
+
+  const to = process.env.OPS_ALERT_PHONE;
+  if (!to) return;
 
   const body = `🚨 WA-B error: ${title}\n\n${String(detail || '').slice(0, 800)}${suppressedNote}`;
   wa.sendText(to, body).catch(err => {

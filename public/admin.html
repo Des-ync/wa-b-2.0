@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Admin · WA-B Solutions</title>
+<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png" />
+<link rel="stylesheet" href="styles.css" />
+<style>
+  .dash { max-width: var(--max, 1100px); margin: 0 auto; padding: 40px 20px 80px; }
+  .dash h1 { margin-bottom: 4px; }
+  .dash .sub { color: var(--muted); margin-bottom: 32px; }
+  .dash-card { border: 1px solid var(--line); border-radius: var(--r-lg, 12px); padding: 24px; margin-bottom: 24px; background: var(--bg); }
+  .dash-card h2 { font-size: 18px; margin-bottom: 16px; }
+  .dash table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .dash th { text-align: left; color: var(--muted); font-weight: 600; padding: 8px 10px; border-bottom: 1px solid var(--line); font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .dash td { padding: 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  .dash tr:last-child td { border-bottom: none; }
+  .dash input { padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--r-sm, 6px); font: inherit; background: var(--bg); color: var(--ink); }
+  .dash .pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; margin: 2px 4px 2px 0; }
+  .pill-warn { background: color-mix(in srgb, var(--warning) 18%, transparent); color: var(--warning); }
+  .pill-ok { background: color-mix(in srgb, var(--success, #2e7d32) 15%, transparent); color: var(--success, #2e7d32); }
+  .pill-off { background: var(--bg-2); color: var(--muted); }
+  .muted { color: var(--muted); }
+  .btn-xs { padding: 5px 10px; font-size: 12px; }
+</style>
+</head>
+<body>
+<main class="dash">
+  <h1>Admin</h1>
+  <p class="sub">Operational view for the WA-B Solutions team — not a merchant-facing page.</p>
+
+  <div class="dash-card" id="keyCard">
+    <h2>Admin API key</h2>
+    <p class="muted" style="margin-bottom:12px;font-size:13px">Stored only in this browser's local storage, sent as a Bearer token.</p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <input id="adminKey" type="password" placeholder="sk_admin_..." style="flex:1;min-width:280px" />
+      <button class="btn btn-primary btn-sm" onclick="saveKeyAndLoad()">Connect</button>
+    </div>
+    <p id="keyError" class="muted" style="color:var(--danger,#c0392b);margin-top:8px;display:none"></p>
+  </div>
+
+  <div id="app" style="display:none">
+    <div class="dash-card">
+      <h2>Platform stats</h2>
+      <div id="statsBox" class="muted">Loading…</div>
+    </div>
+
+    <div class="dash-card">
+      <h2>Incomplete onboarding <span class="muted" id="incompleteCount" style="font-size:13px;font-weight:400"></span></h2>
+      <p class="muted" style="margin-bottom:14px;font-size:13px">Merchants who haven't finished setup, newest first. Click a business for full detail.</p>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr><th>Business</th><th>WhatsApp</th><th>Status</th><th>Progress</th><th>Missing steps</th><th>Signed up</th></tr></thead>
+          <tbody id="incompleteTable"><tr><td colspan="6" class="muted">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="dash-card">
+      <h2>Operational health</h2>
+      <div id="opsBox" class="muted">Loading…</div>
+    </div>
+
+    <div class="dash-card">
+      <h2>Webhook queue <span class="muted" id="webhookFilterLabel" style="font-size:13px;font-weight:400"></span></h2>
+      <div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <select id="webhookStatusFilter" onchange="loadWebhooks()">
+          <option value="failed">Failed (dead-letter)</option>
+          <option value="pending">Pending</option>
+          <option value="processing">Processing</option>
+          <option value="done">Done</option>
+          <option value="">All</option>
+        </select>
+        <button class="btn btn-ghost btn-xs" onclick="retryAllFailed()">Retry all failed</button>
+        <button class="btn btn-ghost btn-xs" onclick="loadWebhooks()">Refresh</button>
+      </div>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr><th>Source</th><th>Status</th><th>Attempts</th><th>Last error</th><th>Received</th><th></th></tr></thead>
+          <tbody id="webhookTable"><tr><td colspan="6" class="muted">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="dash-card">
+      <h2>Alert history</h2>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr><th>Title</th><th>Detail</th><th>Suppressed</th><th>When</th></tr></thead>
+          <tbody id="alertsTable"><tr><td colspan="4" class="muted">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="dash-card">
+      <h2>Send metrics</h2>
+      <div id="metricsBox" class="muted">Loading…</div>
+    </div>
+
+    <div class="dash-card">
+      <h2>Audit log <span class="muted" style="font-size:13px;font-weight:400">business settings, API keys, promos</span></h2>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr><th>Actor</th><th>Action</th><th>Business</th><th>Detail</th><th>When</th></tr></thead>
+          <tbody id="auditTable"><tr><td colspan="5" class="muted">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+const STEP_LABELS = {
+  business_profile: 'Business profile',
+  whatsapp_number: 'WhatsApp number',
+  payment_provider: 'Payment settings',
+  first_products: 'First products',
+  test_message: 'Test message'
+};
+
+function getKey() { return localStorage.getItem('wab_admin_key') || ''; }
+
+async function api(path, opts = {}) {
+  const res = await fetch('/api' + path, {
+    ...opts,
+    headers: { Authorization: 'Bearer ' + getKey(), 'Content-Type': 'application/json', ...(opts.headers || {}) }
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok || body.success === false) throw new Error(body.error || ('HTTP ' + res.status));
+  return body;
+}
+
+function fmtDate(d) { return d ? new Date(d).toLocaleDateString() : '—'; }
+function fmtDateTime(d) { return d ? new Date(d).toLocaleString() : '—'; }
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+
+async function loadStats() {
+  const { stats } = await api('/admin/stats');
+  document.getElementById('statsBox').innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px">
+      ${Object.entries(stats).map(([k, v]) => `
+        <div style="border:1px solid var(--line);border-radius:8px;padding:12px 14px">
+          <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">${k.replace(/_/g, ' ')}</div>
+          <div style="font-size:20px;font-weight:700;margin-top:4px">${v}</div>
+        </div>
+      `).join('')}
+    </div>`;
+}
+
+async function loadIncomplete() {
+  const { businesses } = await api('/admin/businesses/incomplete-setup');
+  document.getElementById('incompleteCount').textContent = businesses.length + (businesses.length === 1 ? ' business' : ' businesses');
+  const tbody = document.getElementById('incompleteTable');
+  if (!businesses.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="muted">Everyone is fully set up 🎉</td></tr>';
+    return;
+  }
+  tbody.innerHTML = businesses.map(b => `
+    <tr>
+      <td><strong>${b.name}</strong>${b.owner_name ? `<div class="muted" style="font-size:12px">${b.owner_name}</div>` : ''}</td>
+      <td>${b.whatsapp_number || '—'}</td>
+      <td>${b.status}</td>
+      <td>${b.percent}%</td>
+      <td>${b.missing_steps.map(k => `<span class="pill pill-warn">${STEP_LABELS[k] || k}</span>`).join('')}</td>
+      <td>${fmtDate(b.created_at)}</td>
+    </tr>
+  `).join('');
+}
+
+async function loadOps() {
+  const box = document.getElementById('opsBox');
+  try {
+    const { ops } = await api('/admin/ops');
+    const lat = ops.latency;
+    const providerRows = ops.provider_error_rates.map(p => `
+      <tr>
+        <td><strong>${esc(p.source)}</strong></td>
+        <td>${p.total}</td>
+        <td>${p.failed}</td>
+        <td>${p.pending}</td>
+        <td><span class="pill ${p.error_rate_pct > 10 ? 'pill-warn' : 'pill-ok'}">${p.error_rate_pct}%</span></td>
+        <td>${p.total_attempts} (max ${p.max_attempts})</td>
+      </tr>`).join('') || '<tr><td colspan="6" class="muted">No webhook activity in the last 7 days.</td></tr>';
+
+    box.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px;margin-bottom:20px">
+        <div style="border:1px solid var(--line);border-radius:8px;padding:12px 14px">
+          <div style="font-size:11px;color:var(--muted);text-transform:uppercase">p50 latency</div>
+          <div style="font-size:20px;font-weight:700;margin-top:4px">${lat.p50_ms != null ? lat.p50_ms + 'ms' : '—'}</div>
+        </div>
+        <div style="border:1px solid var(--line);border-radius:8px;padding:12px 14px">
+          <div style="font-size:11px;color:var(--muted);text-transform:uppercase">p95 latency</div>
+          <div style="font-size:20px;font-weight:700;margin-top:4px">${lat.p95_ms != null ? lat.p95_ms + 'ms' : '—'}</div>
+        </div>
+        <div style="border:1px solid var(--line);border-radius:8px;padding:12px 14px">
+          <div style="font-size:11px;color:var(--muted);text-transform:uppercase">p99 latency</div>
+          <div style="font-size:20px;font-weight:700;margin-top:4px">${lat.p99_ms != null ? lat.p99_ms + 'ms' : '—'}</div>
+        </div>
+        <div style="border:1px solid var(--line);border-radius:8px;padding:12px 14px">
+          <div style="font-size:11px;color:var(--muted);text-transform:uppercase">Stuck payments</div>
+          <div style="font-size:20px;font-weight:700;margin-top:4px">${ops.stuck_payments_count}</div>
+        </div>
+      </div>
+      <h3 style="font-size:14px;margin-bottom:10px">Provider error rates (7 days)</h3>
+      <div style="overflow-x:auto;margin-bottom:20px">
+        <table>
+          <thead><tr><th>Source</th><th>Total</th><th>Failed</th><th>Pending</th><th>Error rate</th><th>Retries</th></tr></thead>
+          <tbody>${providerRows}</tbody>
+        </table>
+      </div>
+      ${ops.stuck_payments.length ? `
+        <h3 style="font-size:14px;margin-bottom:10px">Stuck payments (pending 15+ min)</h3>
+        <div style="overflow-x:auto">
+          <table>
+            <thead><tr><th>Order</th><th>Amount</th><th>Since</th></tr></thead>
+            <tbody>${ops.stuck_payments.map(o => `
+              <tr><td>${esc(o.order_number)}</td><td>GH₵${Number(o.total_ghs).toFixed(2)}</td><td>${fmtDateTime(o.updated_at)}</td></tr>
+            `).join('')}</tbody>
+          </table>
+        </div>` : ''}
+    `;
+
+    document.getElementById('alertsTable').innerHTML = ops.alerts.map(a => `
+      <tr>
+        <td><strong>${esc(a.title)}</strong></td>
+        <td class="muted" style="font-size:12px;max-width:320px">${esc((a.detail || '').slice(0, 200))}</td>
+        <td>${a.suppressed_count}</td>
+        <td class="muted">${fmtDateTime(a.created_at)}</td>
+      </tr>`).join('') || '<tr><td colspan="4" class="muted">No alerts recorded yet.</td></tr>';
+
+    const m = ops.metrics;
+    const counterCards = Object.entries(m.counters).map(([k, v]) => `
+      <div style="border:1px solid var(--line);border-radius:8px;padding:10px 12px">
+        <div style="font-size:11px;color:var(--muted)">${esc(k.replace(/_/g, ' '))}</div>
+        <div style="font-size:18px;font-weight:700;margin-top:2px">${v}</div>
+      </div>`).join('');
+    const timingRows = Object.entries(m.timings).map(([k, t]) => `
+      <tr><td>${esc(k.replace(/_/g, ' '))}</td><td>${t.count}</td><td>${t.avg_ms ?? '—'}ms</td><td>${t.p95_ms ?? '—'}ms</td><td>${t.max_ms ?? '—'}ms</td></tr>
+    `).join('');
+    document.getElementById('metricsBox').innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:16px">${counterCards || '<p class="muted">No counters yet.</p>'}</div>
+      ${timingRows ? `<div style="overflow-x:auto"><table>
+        <thead><tr><th>Timing</th><th>Count</th><th>Avg</th><th>p95</th><th>Max</th></tr></thead>
+        <tbody>${timingRows}</tbody>
+      </table></div>` : ''}
+    `;
+  } catch (err) {
+    box.innerHTML = '<p class="muted">Could not load ops data: ' + esc(err.message) + '</p>';
+  }
+}
+
+async function loadAuditLog() {
+  const tbody = document.getElementById('auditTable');
+  try {
+    const { audit_log: rows } = await api('/admin/audit-log?limit=100');
+    tbody.innerHTML = rows.map(r => `
+      <tr>
+        <td>${esc(r.actor_type)}${r.actor_id ? ' <span class="muted" style="font-size:11px">(' + esc(r.actor_id) + ')</span>' : ''}</td>
+        <td><strong>${esc(r.action)}</strong></td>
+        <td class="muted" style="font-size:12px">${esc(r.business_id || '—')}</td>
+        <td class="muted" style="font-size:12px;max-width:280px">${esc(JSON.stringify(r.detail || {}))}</td>
+        <td class="muted">${fmtDateTime(r.created_at)}</td>
+      </tr>`).join('') || '<tr><td colspan="5" class="muted">No audit events yet.</td></tr>';
+  } catch (err) {
+    tbody.innerHTML = '<tr><td colspan="5" class="muted">Could not load: ' + esc(err.message) + '</td></tr>';
+  }
+}
+
+async function loadWebhooks() {
+  const status = document.getElementById('webhookStatusFilter').value;
+  document.getElementById('webhookFilterLabel').textContent = status ? '(' + status + ')' : '(all)';
+  const tbody = document.getElementById('webhookTable');
+  tbody.innerHTML = '<tr><td colspan="6" class="muted">Loading…</td></tr>';
+  try {
+    const qs = status ? '?status=' + encodeURIComponent(status) + '&limit=100' : '?limit=100';
+    const { webhooks } = await api('/admin/webhooks' + qs);
+    tbody.innerHTML = webhooks.map(w => `
+      <tr>
+        <td>${esc(w.source)}</td>
+        <td><span class="pill ${w.status === 'failed' ? 'pill-warn' : (w.status === 'done' ? 'pill-ok' : 'pill-off')}">${esc(w.status)}</span></td>
+        <td>${w.attempts}</td>
+        <td class="muted" style="font-size:12px;max-width:280px">${esc((w.last_error || '').slice(0, 160))}</td>
+        <td class="muted">${fmtDateTime(w.received_at)}</td>
+        <td>${w.status === 'failed' ? `<button class="btn btn-ghost btn-xs" onclick="retryWebhook('${w.id}')">Retry</button>` : ''}</td>
+      </tr>`).join('') || '<tr><td colspan="6" class="muted">Nothing here.</td></tr>';
+  } catch (err) {
+    tbody.innerHTML = '<tr><td colspan="6" class="muted">Could not load: ' + esc(err.message) + '</td></tr>';
+  }
+}
+
+async function retryWebhook(id) {
+  try {
+    await api('/admin/webhooks/' + id + '/retry', { method: 'POST' });
+    await loadWebhooks();
+  } catch (err) { alert(err.message); }
+}
+
+async function retryAllFailed() {
+  if (!confirm('Retry every failed webhook event now?')) return;
+  try {
+    const { requeued } = await api('/admin/webhooks/retry-failed', { method: 'POST' });
+    alert(requeued + ' webhook(s) requeued.');
+    await loadWebhooks();
+  } catch (err) { alert(err.message); }
+}
+
+async function boot() {
+  const errEl = document.getElementById('keyError');
+  errEl.style.display = 'none';
+  try {
+    await Promise.all([loadStats(), loadIncomplete(), loadOps(), loadWebhooks(), loadAuditLog()]);
+    document.getElementById('keyCard').style.display = 'none';
+    document.getElementById('app').style.display = '';
+  } catch (err) {
+    errEl.textContent = 'Could not authenticate: ' + err.message;
+    errEl.style.display = '';
+  }
+}
+
+function saveKeyAndLoad() {
+  const key = document.getElementById('adminKey').value.trim();
+  if (!key) return;
+  localStorage.setItem('wab_admin_key', key);
+  boot();
+}
+
+if (getKey()) boot();
+</script>
+</body>
+</html>
