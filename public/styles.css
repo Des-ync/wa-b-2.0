@@ -270,15 +270,20 @@ h1, h2, h3, h4 {
   border: 2px solid var(--bg);
 }
 .brand-logo {
-  height: 26px;
+  height: 36px;
   width: auto;
   display: block;
 }
-.brand-logo-dark { display: none; }
+/* The source art is a flat white/black rectangle around the wordmark.
+   multiply/screen dissolve that rectangle into whatever's actually behind
+   the logo (the nav's translucent, blurred background included) instead of
+   sitting on top of it as a visible mismatched card. */
+.brand-logo-light { mix-blend-mode: multiply; }
+.brand-logo-dark { mix-blend-mode: screen; display: none; }
 [data-theme="dark"] .brand-logo-light { display: none; }
 [data-theme="dark"] .brand-logo-dark { display: block; }
-.brand-logo-lg { height: 44px; }
-.brand-logo-xl { height: 72px; }
+.brand-logo-lg { height: 52px; }
+.brand-logo-xl { height: 84px; }
 .nav-links {
   display: flex;
   gap: 28px;
