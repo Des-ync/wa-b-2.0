@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../api/client.dart';
 import '../state/session.dart';
 import '../theme.dart';
+import '../widgets/common.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -144,16 +145,21 @@ class _LoginScreenState extends State<LoginScreen> {
                 width: 64,
                 height: 64,
                 decoration: BoxDecoration(
-                  color: WabColors.accent,
+                  color: WabColors.ink,
                   borderRadius: BorderRadius.circular(18),
                 ),
                 child: const Center(
                   child: Text('W',
                       style: TextStyle(
-                          color: Colors.white, fontSize: 34, fontWeight: FontWeight.w900)),
+                          color: WabColors.gold, fontSize: 34, fontWeight: FontWeight.w900)),
                 ),
               ),
-              const SizedBox(height: 28),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: 64,
+                child: KenteStrip(height: 4, borderRadius: BorderRadius.circular(2)),
+              ),
+              const SizedBox(height: 24),
               Text(
                 _codeSent ? 'Check WhatsApp' : 'Welcome back',
                 style: const TextStyle(

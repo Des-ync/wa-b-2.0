@@ -103,6 +103,53 @@ class _AsyncListBodyState<T> extends State<_AsyncListBody<T>> {
   }
 }
 
+/// The brand's one signature motif: a thin woven kente band
+/// (gold / market green / forest ink / brick). Mirrors the web's --kente token.
+class KenteStrip extends StatelessWidget {
+  final double height;
+  final BorderRadius? borderRadius;
+  const KenteStrip({super.key, this.height = 4, this.borderRadius});
+
+  @override
+  Widget build(BuildContext context) {
+    final strip = SizedBox(
+      height: height,
+      width: double.infinity,
+      child: CustomPaint(painter: _KentePainter()),
+    );
+    if (borderRadius == null) return strip;
+    return ClipRRect(borderRadius: borderRadius!, child: strip);
+  }
+}
+
+class _KentePainter extends CustomPainter {
+  static const _threads = <(Color, double)>[
+    (WabColors.gold, 28),
+    (WabColors.accent, 16),
+    (WabColors.ink, 8),
+    (WabColors.brick, 8),
+    (WabColors.ink, 8),
+    (WabColors.accent, 16),
+  ];
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint();
+    double x = 0;
+    int i = 0;
+    while (x < size.width) {
+      final (color, w) = _threads[i % _threads.length];
+      paint.color = color;
+      canvas.drawRect(Rect.fromLTWH(x, 0, w, size.height), paint);
+      x += w;
+      i++;
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
 class EmptyState extends StatelessWidget {
   final IconData icon;
   final String title;

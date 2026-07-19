@@ -6,15 +6,15 @@
 
   window.WAB_CLERK_APPEARANCE = {
     variables: {
-      colorPrimary: '#10a37f',
-      colorDanger: '#d14545',
-      colorSuccess: '#10a37f',
+      colorPrimary: '#12704e',
+      colorDanger: '#c24234',
+      colorSuccess: '#12704e',
       colorWarning: '#c97a1d',
-      colorText: dark ? '#f4f5f1' : '#0a0d0c',
-      colorTextSecondary: dark ? '#909892' : '#5b6864',
-      colorBackground: dark ? '#14171a' : '#ffffff',
-      colorInputBackground: dark ? '#14171a' : '#ffffff',
-      colorInputText: dark ? '#f4f5f1' : '#0a0d0c',
+      colorText: dark ? '#f2f1ea' : '#10231c',
+      colorTextSecondary: dark ? '#93998d' : '#5d6b62',
+      colorBackground: dark ? '#131914' : '#fffdf8',
+      colorInputBackground: dark ? '#131914' : '#fffdf8',
+      colorInputText: dark ? '#f2f1ea' : '#10231c',
       fontFamily: "'Geist', ui-sans-serif, system-ui, sans-serif",
       fontSize: '15px',
       borderRadius: '10px',
@@ -22,8 +22,8 @@
     },
     elements: {
       card: {
-        border: dark ? '1px solid #25272a' : '1px solid #ebede9',
-        boxShadow: '0 30px 60px -40px rgba(20, 30, 40, 0.18)'
+        border: dark ? '1px solid #23281f' : '1px solid #eae5d8',
+        boxShadow: '0 30px 60px -40px rgba(16, 35, 28, 0.18)'
       },
       formButtonPrimary: {
         fontSize: '15px',
@@ -32,7 +32,7 @@
         borderRadius: '999px'
       },
       socialButtonsBlockButton: { borderRadius: '999px' },
-      footerActionLink: { color: '#0a8b6a' }
+      footerActionLink: { color: '#0c543a' }
     }
   };
 

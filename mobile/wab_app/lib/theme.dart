@@ -1,19 +1,24 @@
 import 'package:flutter/material.dart';
 
 /// WA-B brand tokens — mirrors public/styles.css on the web dashboard.
+/// "Kente Ledger" system: forest ink, market green, one kente-gold highlight.
 class WabColors {
-  static const accent = Color(0xFF10A37F);
-  static const accentInk = Color(0xFF0A8B6A);
-  static const accentSoft = Color(0xFFE8F7F1);
-  static const ink = Color(0xFF0A0D0C);
-  static const muted = Color(0xFF5B6864);
-  static const muted2 = Color(0xFF8A9591);
-  static const line = Color(0xFFEBEDE9);
-  static const bg = Color(0xFFFCFCFA);
-  static const bg2 = Color(0xFFF5F5F0);
-  static const paper = Color(0xFFFFFFFF);
+  static const accent = Color(0xFF12704E); // deep market green — actions
+  static const accentInk = Color(0xFF0C543A);
+  static const accentSoft = Color(0xFFE4EFE6);
+  static const gold = Color(0xFFD9A02B); // kente gold — highlight only
+  static const goldInk = Color(0xFF96690F);
+  static const brick = Color(0xFFB0492F); // kente strip thread
+  static const ink = Color(0xFF10231C); // forest ink
+  static const ink2 = Color(0xFF1E2F28);
+  static const muted = Color(0xFF5D6B62);
+  static const muted2 = Color(0xFF8B968C);
+  static const line = Color(0xFFEAE5D8);
+  static const bg = Color(0xFFFAF6ED); // warm market paper
+  static const bg2 = Color(0xFFF3EEE0);
+  static const paper = Color(0xFFFFFDF8);
   static const warning = Color(0xFFC97A1D);
-  static const danger = Color(0xFFD14545);
+  static const danger = Color(0xFFC24234);
 }
 
 ThemeData wabTheme() {
@@ -54,8 +59,8 @@ ThemeData wabTheme() {
       style: FilledButton.styleFrom(
         backgroundColor: WabColors.accent,
         foregroundColor: Colors.white,
-        minimumSize: const Size.fromHeight(52),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        minimumSize: const Size.fromHeight(54),
+        shape: const StadiumBorder(),
         textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
       ),
     ),
@@ -63,8 +68,8 @@ ThemeData wabTheme() {
       style: OutlinedButton.styleFrom(
         foregroundColor: WabColors.ink,
         side: const BorderSide(color: WabColors.line),
-        minimumSize: const Size.fromHeight(52),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        minimumSize: const Size.fromHeight(54),
+        shape: const StadiumBorder(),
         textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
       ),
     ),

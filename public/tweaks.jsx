@@ -2,7 +2,7 @@
 const { useEffect } = React;
 
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
-  "accent": "#10a37f",
+  "accent": "#12704e",
   "theme": "light",
   "heroVariant": "chat",
   "density": "comfortable",
@@ -10,16 +10,16 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
 }/*EDITMODE-END*/;
 
 const ACCENTS = {
-  '#10a37f': { ink: '#0a8b6a', soft: '#e8f7f1', glow: 'rgba(16,163,127,0.18)' },
+  '#12704e': { ink: '#0c543a', soft: '#e4efe6', glow: 'rgba(18,112,78,0.16)' },
   '#2a6fdb': { ink: '#1f5ab8', soft: '#e8f0fc', glow: 'rgba(42,111,219,0.18)' },
   '#d97757': { ink: '#b85f3d', soft: '#fbeee5', glow: 'rgba(217,119,87,0.18)' },
-  '#7c5cff': { ink: '#6648e0', soft: '#efebff', glow: 'rgba(124,92,255,0.18)' },
+  '#96690f': { ink: '#7a540b', soft: '#f6edd7', glow: 'rgba(217,160,43,0.2)' },
   '#1f1f1f': { ink: '#000', soft: '#ececec', glow: 'rgba(0,0,0,0.12)' }
 };
 
 function applyTweaks(t) {
   const root = document.documentElement;
-  const a = ACCENTS[t.accent] || ACCENTS['#10a37f'];
+  const a = ACCENTS[t.accent] || ACCENTS['#12704e'];
   root.style.setProperty('--accent', t.accent);
   root.style.setProperty('--accent-ink', a.ink);
   root.style.setProperty('--accent-soft', a.soft);
@@ -104,7 +104,7 @@ function WabTweaks() {
         <window.TweakColor
           label="Accent"
           value={t.accent}
-          options={['#10a37f', '#2a6fdb', '#d97757', '#7c5cff', '#1f1f1f']}
+          options={['#12704e', '#2a6fdb', '#d97757', '#96690f', '#1f1f1f']}
           onChange={(v) => setTweak('accent', v)}
         />
         <window.TweakRadio

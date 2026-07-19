@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:smooth_page_indicator/smooth_page_indicator.dart';
 
 import '../theme.dart';
+import '../widgets/common.dart';
 
 class _Slide {
   final IconData icon;
@@ -85,10 +86,23 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                           width: 148,
                           height: 148,
                           decoration: BoxDecoration(
-                            color: WabColors.accentSoft,
+                            color: WabColors.ink,
                             borderRadius: BorderRadius.circular(44),
                           ),
-                          child: Icon(s.icon, size: 72, color: WabColors.accentInk),
+                          child: Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              Icon(s.icon, size: 68, color: WabColors.gold),
+                              Positioned(
+                                left: 24,
+                                right: 24,
+                                bottom: 22,
+                                child: KenteStrip(
+                                    height: 4,
+                                    borderRadius: BorderRadius.circular(2)),
+                              ),
+                            ],
+                          ),
                         ),
                         const SizedBox(height: 44),
                         Text(
@@ -122,7 +136,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               controller: _controller,
               count: _slides.length,
               effect: const ExpandingDotsEffect(
-                activeDotColor: WabColors.accent,
+                activeDotColor: WabColors.gold,
                 dotColor: WabColors.line,
                 dotHeight: 8,
                 dotWidth: 8,

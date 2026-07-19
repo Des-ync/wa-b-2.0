@@ -116,40 +116,84 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  /// Hero metric card (sales today, forest ink + gold) over a compact strip
+  /// of the three counts that explain it.
   Widget _statGrid() {
     final s = _stats ?? {};
-    final tiles = [
-      ('Sales today', ghs(s['gmv_ghs'] ?? 0), WabColors.accentInk),
-      ('Paid orders', '${s['paid_count'] ?? 0}', WabColors.ink),
-      ('Awaiting payment', '${s['awaiting_payment'] ?? 0}', WabColors.warning),
-      ('Open orders', '${s['open_orders'] ?? 0}', WabColors.ink),
-    ];
-    return GridView.count(
-      crossAxisCount: 2,
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      mainAxisSpacing: 10,
-      crossAxisSpacing: 10,
-      childAspectRatio: 1.55,
-      children: tiles
-          .map((t) => Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(t.$2,
-                          style: TextStyle(
-                              fontSize: 24, fontWeight: FontWeight.w800, color: t.$3)),
-                      const SizedBox(height: 4),
-                      Text(t.$1,
-                          style: const TextStyle(fontSize: 13, color: WabColors.muted)),
-                    ],
-                  ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Container(
+          decoration: BoxDecoration(
+            color: WabColors.ink,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 18),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Sales today',
+                        style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 0.4,
+                            color: Color(0xB3FFFFFF))),
+                    const SizedBox(height: 6),
+                    Text(ghs(s['gmv_ghs'] ?? 0),
+                        style: const TextStyle(
+                            fontSize: 36,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.8,
+                            color: WabColors.gold)),
+                  ],
                 ),
-              ))
-          .toList(),
+              ),
+              const KenteStrip(height: 5),
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
+        Container(
+          decoration: BoxDecoration(
+            color: WabColors.paper,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: WabColors.line),
+          ),
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          child: Row(
+            children: [
+              _statCell('Paid', '${s['paid_count'] ?? 0}', WabColors.accentInk),
+              _divider(),
+              _statCell('Awaiting', '${s['awaiting_payment'] ?? 0}', WabColors.warning),
+              _divider(),
+              _statCell('Open', '${s['open_orders'] ?? 0}', WabColors.ink),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _divider() =>
+      Container(width: 1, height: 34, color: WabColors.line);
+
+  Widget _statCell(String label, String value, Color color) {
+    return Expanded(
+      child: Column(
+        children: [
+          Text(value,
+              style: TextStyle(
+                  fontSize: 20, fontWeight: FontWeight.w800, color: color)),
+          const SizedBox(height: 2),
+          Text(label,
+              style: const TextStyle(fontSize: 12.5, color: WabColors.muted)),
+        ],
+      ),
     );
   }
 
