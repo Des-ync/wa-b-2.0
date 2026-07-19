@@ -93,6 +93,31 @@ function chOf(customer) {
   return getAdapter(customer?.channel);
 }
 
+/**
+ * Fold typed text for intent matching: uppercase, collapse whitespace, strip
+ * punctuation/emoji, and fold the Twi vowels Ɔ/Ɛ to O/E so "To Seesei" typed
+ * on a plain keyboard still matches "Tɔ Seesei". Instagram needs this most:
+ * quick-reply chips vanish once the conversation moves on (and never render
+ * on desktop), so customers type the button label they saw instead of tapping.
+ */
+function normalizeIntent(text) {
+  return String(text || '')
+    .toUpperCase()
+    .replace(/Ɔ/g, 'O')
+    .replace(/Ɛ/g, 'E')
+    .replace(/[^A-Z0-9&\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Does the typed text equal any of these i18n button labels (en or tw)? */
+function titleMatches(text, ...keys) {
+  const norm = normalizeIntent(text);
+  if (!norm) return false;
+  return keys.some(k =>
+    ['en', 'tw'].some(lang => normalizeIntent(t(lang, k)) === norm));
+}
+
 /* =================================================================
    Inbound message normalizer
    ================================================================= */
@@ -844,7 +869,9 @@ async function handleCommerce({ business, inbound }) {
   }
 
   // "Talk to us" — hand the customer the business's direct contact.
-  if (inbound.interactiveId === 'support_request') {
+  // Accept the tap payload OR the typed button label (see normalizeIntent).
+  if (inbound.interactiveId === 'support_request'
+      || titleMatches(inbound.text, 'btn_talk_to_us')) {
     return sendSupportContact({ business, customer });
   }
 
@@ -866,8 +893,10 @@ async function handleCommerce({ business, inbound }) {
     return continuePaymentFlow({ business, customer, state, inbound });
   }
 
-  // Triggers from idle
-  if (['ORDER', 'BUY', 'SHOP'].includes(upper) || inbound.interactiveId === 'start_order') {
+  // Triggers from idle — tap payload, keyword, or typed button label.
+  if (['ORDER', 'BUY', 'SHOP', 'ORDER NOW'].includes(upper)
+      || inbound.interactiveId === 'start_order'
+      || titleMatches(inbound.text, 'btn_order_now')) {
     return startOrderingFlow({ business, customer });
   }
 
@@ -878,7 +907,8 @@ async function handleCommerce({ business, inbound }) {
   }
 
   // Reorder: rebuild the cart from the customer's last order.
-  if (['REPEAT', 'REORDER'].includes(upper) || inbound.interactiveId === 'repeat_order') {
+  if (['REPEAT', 'REORDER'].includes(upper) || inbound.interactiveId === 'repeat_order'
+      || titleMatches(inbound.text, 'btn_repeat')) {
     return reorderLastOrder({ business, customer });
   }
 
@@ -1147,29 +1177,40 @@ async function continueOrderingFlow({ business, customer, state, inbound }) {
 
   // After adding, ask "Add more or checkout?"
   if (state.current_step === 'await_more') {
-    if (inbound.interactiveId === 'add_more' || upper === 'ADD MORE' || upper === 'MORE') {
+    if (inbound.interactiveId === 'add_more' || upper === 'ADD MORE' || upper === 'MORE'
+        || titleMatches(inbound.text, 'btn_add_more')) {
       return startOrderingFlow({ business, customer });
     }
-    if (inbound.interactiveId === 'checkout' || upper === 'CHECKOUT') {
+    if (inbound.interactiveId === 'checkout' || upper === 'CHECKOUT'
+        || titleMatches(inbound.text, 'btn_checkout')) {
       return showCartReview({ business, customer, cart, promoCode });
     }
-    if (inbound.interactiveId === 'cancel_order' || upper === 'CANCEL') {
+    if (inbound.interactiveId === 'cancel_order' || upper === 'CANCEL'
+        || titleMatches(inbound.text, 'btn_cancel')) {
       await resetState(customer.id);
       await chOf(customer).sendText(destOf(customer), t(lang, 'order_cancelled_menu'),
         { businessId: business.id, customerId: customer.id });
+      return;
+    }
+    // Typing another item ("2x Jollof" or just "Jollof") keeps ordering.
+    if (!inbound.interactiveId
+        && await tryTypedProductAdd({ business, customer, cart, inbound, page: data.menu_page || 0 })) {
       return;
     }
     return promptAddMoreOrCheckout({ business, customer });
   }
 
   if (state.current_step === 'cart_review') {
-    if (inbound.interactiveId === 'continue_shop' || upper === 'CONTINUE SHOPPING') {
+    if (inbound.interactiveId === 'continue_shop' || upper === 'CONTINUE SHOPPING'
+        || titleMatches(inbound.text, 'btn_add_more', 'btn_continue')) {
       return startOrderingFlow({ business, customer });
     }
-    if (inbound.interactiveId === 'checkout' || upper === 'CHECKOUT') {
+    if (inbound.interactiveId === 'checkout' || upper === 'CHECKOUT'
+        || titleMatches(inbound.text, 'btn_checkout')) {
       return askForAddress({ business, customer, promoCode });
     }
-    if (inbound.interactiveId === 'cancel_order' || upper === 'CANCEL') {
+    if (inbound.interactiveId === 'cancel_order' || upper === 'CANCEL'
+        || titleMatches(inbound.text, 'btn_cancel')) {
       await resetState(customer.id);
       await chOf(customer).sendText(destOf(customer), t(lang, 'order_cancelled_menu'),
         { businessId: business.id, customerId: customer.id });
@@ -1182,28 +1223,37 @@ async function continueOrderingFlow({ business, customer, state, inbound }) {
   }
 
   if (state.current_step === 'choose_zone') {
+    const zones = deliveryZonesOf(business);
+    let zone = null;
     if (inbound.interactiveId && inbound.interactiveId.startsWith('zone_')) {
-      const idx = parseInt(inbound.interactiveId.slice('zone_'.length), 10);
-      const zones = deliveryZonesOf(business);
-      const zone = zones[idx];
-      if (zone) {
-        return showOrderConfirm({
-          business, customer, cart,
-          address: data.delivery_address,
-          fee: zone.fee_ghs,
-          zoneName: zone.name,
-          promoCode
-        });
-      }
+      zone = zones[parseInt(inbound.interactiveId.slice('zone_'.length), 10)] || null;
+    } else if (inbound.text) {
+      // Typed fallback (Instagram chips are gone once anything else is sent):
+      // a bare number picks the Nth zone, otherwise match the zone name.
+      const n = /^\d{1,2}$/.test(upper) ? parseInt(upper, 10) : NaN;
+      zone = (n >= 1 && n <= zones.length)
+        ? zones[n - 1]
+        : zones.find(z => normalizeIntent(z.name) === normalizeIntent(inbound.text)) || null;
+    }
+    if (zone) {
+      return showOrderConfirm({
+        business, customer, cart,
+        address: data.delivery_address,
+        fee: zone.fee_ghs,
+        zoneName: zone.name,
+        promoCode
+      });
     }
     return askForDeliveryZone({ business, customer, cart, address: data.delivery_address, promoCode });
   }
 
   if (state.current_step === 'confirm_order') {
-    if (inbound.interactiveId === 'confirm_pay' || upper === 'CONFIRM & PAY' || upper === 'CONFIRM') {
+    if (inbound.interactiveId === 'confirm_pay' || upper === 'CONFIRM & PAY' || upper === 'CONFIRM'
+        || titleMatches(inbound.text, 'btn_confirm_pay')) {
       return finalizeOrderAndStartPayment({ business, customer, state });
     }
-    if (inbound.interactiveId === 'cancel_order' || upper === 'CANCEL') {
+    if (inbound.interactiveId === 'cancel_order' || upper === 'CANCEL'
+        || titleMatches(inbound.text, 'btn_cancel')) {
       await resetState(customer.id);
       await chOf(customer).sendText(destOf(customer), t(lang, 'order_cancelled_menu'),
         { businessId: business.id, customerId: customer.id });
@@ -1211,31 +1261,55 @@ async function continueOrderingFlow({ business, customer, state, inbound }) {
     }
   }
 
-  // "2x Jollof" style quantity messages while browsing / adding.
-  if (!inbound.interactiveId && ['browse', 'await_more'].includes(state.current_step)) {
-    const qty = parseQuantityExpression(inbound.text);
-    if (qty) {
-      const match = await query(
-        `SELECT id FROM products
-          WHERE business_id = $1 AND in_stock = TRUE AND name ILIKE '%' || $2 || '%'
-          ORDER BY LENGTH(name) ASC LIMIT 1`,
-        // Escape ILIKE metacharacters so customer text can't wildcard-match.
-        [business.id, qty.name.replace(/[\\%_]/g, '\\$&')]
-      );
-      if (match.rows[0]) {
-        return addProductToCart({
-          business, customer, productId: match.rows[0].id, cart, quantity: qty.quantity
-        });
-      }
-      await chOf(customer).sendText(destOf(customer),
-        t(lang, 'product_not_found', { name: qty.name }),
-        { businessId: business.id, customerId: customer.id });
-      return startOrderingFlow({ business, customer, page: data.menu_page || 0 });
-    }
+  // Typed product picks while browsing: "2x Jollof" or just "Jollof".
+  if (!inbound.interactiveId && state.current_step === 'browse'
+      && await tryTypedProductAdd({ business, customer, cart, inbound, page: data.menu_page || 0 })) {
+    return;
   }
 
   // Fallback while in flow
   return showCartReview({ business, customer, cart, promoCode });
+}
+
+/**
+ * Typed product selection: "2x Jollof" (explicit quantity) or a bare product
+ * name ("Jollof"). Returns true when the message was handled. This is the
+ * only path back into the menu on Instagram once the flattened quick-reply
+ * chips are gone — IG has no list messages, chips vanish after the next
+ * message, and they never render on desktop.
+ *
+ * A bare name that matches nothing returns false so the caller's own
+ * re-prompt runs; an explicit "2x ..." that matches nothing gets a
+ * product-not-found reply plus the menu (the customer clearly meant to order).
+ */
+async function tryTypedProductAdd({ business, customer, cart, inbound, page = 0 }) {
+  const explicit = parseQuantityExpression(inbound.text);
+  const name = explicit ? explicit.name : String(inbound.text || '').trim();
+  if (!name || name.length < 3) return false;
+
+  const match = await query(
+    `SELECT id FROM products
+      WHERE business_id = $1 AND in_stock = TRUE AND name ILIKE '%' || $2 || '%'
+      ORDER BY LENGTH(name) ASC LIMIT 1`,
+    // Escape ILIKE metacharacters so customer text can't wildcard-match.
+    [business.id, name.replace(/[\\%_]/g, '\\$&')]
+  );
+  if (match.rows[0]) {
+    await addProductToCart({
+      business, customer, productId: match.rows[0].id, cart,
+      quantity: explicit ? explicit.quantity : 1
+    });
+    return true;
+  }
+  if (explicit) {
+    const lang = langOf(business);
+    await chOf(customer).sendText(destOf(customer),
+      t(lang, 'product_not_found', { name }),
+      { businessId: business.id, customerId: customer.id });
+    await startOrderingFlow({ business, customer, page });
+    return true;
+  }
+  return false;
 }
 
 async function addProductToCart({ business, customer, productId, cart, quantity = 1 }) {
@@ -1545,7 +1619,8 @@ async function continuePaymentFlow({ business, customer, state, inbound }) {
         { businessId: business.id, customerId: customer.id });
       return;
     }
-    if (inbound.interactiveId === 'pay_card' || upper === 'CARD' || upper === 'LINK') {
+    if (inbound.interactiveId === 'pay_card' || upper === 'CARD' || upper === 'LINK'
+        || titleMatches(inbound.text, 'btn_card')) {
       return startCardPayment({ business, customer, orderId });
     }
     if (inbound.interactiveId === 'cancel_order' || upper === 'CANCEL') {
@@ -1773,5 +1848,8 @@ module.exports = {
   handleInbound,
   handleStatuses,
   handlePaymentSuccess,
-  handlePaymentFailure
+  handlePaymentFailure,
+  // exported for tests
+  normalizeIntent,
+  titleMatches
 };
