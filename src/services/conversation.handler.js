@@ -2,6 +2,7 @@ const { query, transaction } = require('../config/database');
 const logger = require('../utils/logger');
 const wa = require('./whatsapp.service');
 const { getAdapter, destOf } = require('./channel.adapter');
+const { detectIntent, normalizeIntent } = require('./nl.intent');
 const paystack = require('./paystack.service');
 const orderService = require('./order.service');
 const subService = require('./subscription.service');
@@ -93,24 +94,8 @@ function chOf(customer) {
   return getAdapter(customer?.channel);
 }
 
-/**
- * Fold typed text for intent matching: uppercase, collapse whitespace, strip
- * punctuation/emoji, and fold the Twi vowels Ɔ/Ɛ to O/E so "To Seesei" typed
- * on a plain keyboard still matches "Tɔ Seesei". Instagram needs this most:
- * quick-reply chips vanish once the conversation moves on (and never render
- * on desktop), so customers type the button label they saw instead of tapping.
- */
-function normalizeIntent(text) {
-  return String(text || '')
-    .toUpperCase()
-    .replace(/Ɔ/g, 'O')
-    .replace(/Ɛ/g, 'E')
-    .replace(/[^A-Z0-9&\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-/** Does the typed text equal any of these i18n button labels (en or tw)? */
+/** Does the typed text equal any of these i18n button labels (en or tw)?
+ * (normalizeIntent lives in nl.intent.js — uppercase, Twi vowels folded.) */
 function titleMatches(text, ...keys) {
   const norm = normalizeIntent(text);
   if (!norm) return false;
@@ -839,6 +824,67 @@ async function handleCommerce({ business, inbound }) {
   }
 
   const state = await loadOrCreateState(customer.id);
+
+  // Instagram text mode: the IG adapter sends numbered text menus instead of
+  // buttons (chips vanish mid-conversation and never render on desktop), so
+  // typed replies are translated here — BEFORE any routing looks at the
+  // message — onto the same interactive ids the button UI produces.
+  //   "2"            → the 2nd option of the last menu we sent (ig_options)
+  //   simple phrases → fixed en/tw vocabulary (nl.intent.js), business
+  //                    context only; anything unknown falls through untouched.
+  if (customer.channel === 'instagram' && !inbound.interactiveId && inbound.text) {
+    const step = state.current_step;
+    // Steps where free text IS the answer — never reinterpret those.
+    const freeTextSteps = ['get_address', 'momo_get_phone'];
+    const typed = inbound.text.trim();
+
+    const opts = Array.isArray(state.flow_data?.ig_options) ? state.flow_data.ig_options : [];
+    if (!freeTextSteps.includes(step) && /^\d{1,2}$/.test(typed)) {
+      const pick = opts[parseInt(typed, 10) - 1];
+      if (pick) {
+        inbound.interactiveId = String(pick.id);
+        inbound.interactiveTitle = pick.title || null;
+        inbound.type = 'interactive';
+      }
+    }
+
+    if (!inbound.interactiveId && !freeTextSteps.includes(step)) {
+      const allowProduct = state.current_flow === 'idle'
+        || ['browse', 'await_more'].includes(step);
+      const nl = detectIntent(inbound.text, { allowProduct });
+      if (nl) {
+        switch (nl.intent) {
+          case 'GREET':
+            await resetState(customer.id);
+            return sendWelcome({ business, customer });
+          case 'MENU': inbound.interactiveId = 'start_order'; break;
+          case 'HELP': inbound.interactiveId = 'support_request'; break;
+          case 'REPEAT': inbound.interactiveId = 'repeat_order'; break;
+          case 'CHECKOUT': inbound.interactiveId = 'checkout'; break;
+          case 'CANCEL': inbound.text = 'CANCEL'; break;
+          case 'YES':
+            if (step === 'confirm_order') inbound.interactiveId = 'confirm_pay';
+            break;
+          case 'NO':
+            if (['confirm_order', 'cart_review', 'await_more'].includes(step)) {
+              inbound.text = 'CANCEL';
+            }
+            break;
+          case 'PRODUCT': {
+            // Rewrite to the canonical "Nx name" the product matcher parses.
+            inbound.text = nl.quantity > 1 ? `${nl.quantity}x ${nl.name}` : nl.name;
+            // From idle, "I want jollof" starts an order with that item.
+            if (state.current_flow === 'idle'
+                && await tryTypedProductAdd({ business, customer, cart: [], inbound, page: 0 })) {
+              return;
+            }
+            break;
+          }
+        }
+      }
+    }
+  }
+
   const upper = (inbound.text || '').toUpperCase().trim();
 
   // Global commands
