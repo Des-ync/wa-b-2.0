@@ -81,6 +81,29 @@
     .conv-list { max-height: 180px; border-right: none; border-bottom: 1px solid var(--line); }
     .conv-messages { max-height: 300px; }
   }
+
+  /* Sectioned layout: content on the left, category nav on the right */
+  #app { display: grid; grid-template-columns: 1fr 190px; gap: 28px; align-items: start; }
+  .side-nav { position: sticky; top: 84px; display: flex; flex-direction: column; gap: 4px; order: 2; }
+  .side-nav button {
+    text-align: left; padding: 9px 14px; border: none; background: none; font: inherit;
+    font-size: 14px; color: var(--muted); border-radius: var(--r-sm, 8px); cursor: pointer;
+    border-left: 2px solid transparent; border-radius: 0 var(--r-sm, 8px) var(--r-sm, 8px) 0;
+  }
+  .side-nav button:hover { background: var(--bg-2); color: var(--ink); }
+  .side-nav button.active { color: var(--accent); font-weight: 600; border-left-color: var(--accent); background: var(--accent-soft); }
+  .side-nav .nav-count { float: right; font-size: 11px; background: var(--bg-2); border-radius: 999px; padding: 1px 8px; color: var(--muted); }
+  .dash-sections { min-width: 0; }
+  .dash-section { display: none; }
+  .dash-section.active { display: block; }
+  @media (max-width: 860px) {
+    #app { grid-template-columns: 1fr; }
+    .side-nav { position: sticky; top: 0; order: 0; flex-direction: row; overflow-x: auto; gap: 2px;
+      background: var(--bg); padding: 8px 0; margin-bottom: 8px; z-index: 10; border-bottom: 1px solid var(--line); }
+    .side-nav button { white-space: nowrap; border-left: none; border-bottom: 2px solid transparent; border-radius: var(--r-sm, 8px) var(--r-sm, 8px) 0 0; }
+    .side-nav button.active { border-bottom-color: var(--accent); }
+    .side-nav .nav-count { display: none; }
+  }
 </style>
 </head>
 <body>
@@ -125,6 +148,18 @@
   </div>
 
   <div id="app" style="display:none">
+    <nav class="side-nav" id="sideNav" aria-label="Dashboard sections">
+      <button data-target="overview" onclick="showSection('overview')">Overview</button>
+      <button data-target="orders" onclick="showSection('orders')">Orders <span class="nav-count" id="navOpenCount" style="display:none"></span></button>
+      <button data-target="stock" onclick="showSection('stock')">Stock</button>
+      <button data-target="customers" onclick="showSection('customers')">Customers</button>
+      <button data-target="account" onclick="showSection('account')">Account</button>
+    </nav>
+
+    <div class="dash-sections">
+
+    <!-- ============ OVERVIEW ============ -->
+    <div class="dash-section" data-section="overview">
     <!-- Today -->
     <div class="dash-card">
       <h2>Today</h2>
@@ -164,13 +199,10 @@
         <div id="anaHours" class="hour-chart"></div>
       </div>
     </div>
-
-    <!-- Subscription -->
-    <div class="dash-card">
-      <h2>Subscription</h2>
-      <div id="subBox" class="muted">Loading…</div>
     </div>
 
+    <!-- ============ CUSTOMERS ============ -->
+    <div class="dash-section" data-section="customers">
     <!-- Inbox -->
     <div class="dash-card">
       <h2>Inbox</h2>
@@ -183,6 +215,39 @@
       </div>
     </div>
 
+    <!-- Customers -->
+    <div class="dash-card">
+      <h2>Customers</h2>
+      <div class="scroll-x">
+        <table id="customerTable">
+          <thead><tr><th>Customer</th><th>Channel</th><th>Orders</th><th>Total spent</th><th>Last seen</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Broadcast -->
+    <div class="dash-card">
+      <h2>Broadcast</h2>
+      <p class="muted" style="margin-bottom:14px;font-size:13px">Message every opted-in customer at once — sent gradually and throttled to protect your WhatsApp number. Customers who reply STOP are skipped automatically.</p>
+      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:20px">
+        <div style="flex:1;min-width:240px">
+          <label style="font-size:12px;color:var(--muted)">Message</label>
+          <textarea id="bcBody" rows="3" maxlength="1024" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-sm,6px);font:inherit;background:var(--bg);color:var(--ink)" placeholder="🎉 Fresh stock just arrived! Reply to order."></textarea>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="sendBroadcast()">Send broadcast</button>
+      </div>
+      <div class="scroll-x">
+        <table id="broadcastTable">
+          <thead><tr><th>Message</th><th>Status</th><th>Sent</th><th>Failed</th><th>Target</th><th>Created</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+    </div>
+
+    <!-- ============ STOCK ============ -->
+    <div class="dash-section" data-section="stock">
     <!-- Products -->
     <div class="dash-card">
       <h2>Products</h2>
@@ -226,6 +291,10 @@
       </div>
     </div>
 
+    </div>
+
+    <!-- ============ ORDERS ============ -->
+    <div class="dash-section" data-section="orders">
     <!-- Orders -->
     <div class="dash-card">
       <h2>Orders</h2>
@@ -245,34 +314,14 @@
       </div>
     </div>
 
-    <!-- Broadcast -->
-    <div class="dash-card">
-      <h2>Broadcast</h2>
-      <p class="muted" style="margin-bottom:14px;font-size:13px">Message every opted-in customer at once — sent gradually and throttled to protect your WhatsApp number. Customers who reply STOP are skipped automatically.</p>
-      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:20px">
-        <div style="flex:1;min-width:240px">
-          <label style="font-size:12px;color:var(--muted)">Message</label>
-          <textarea id="bcBody" rows="3" maxlength="1024" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-sm,6px);font:inherit;background:var(--bg);color:var(--ink)" placeholder="🎉 Fresh stock just arrived! Reply to order."></textarea>
-        </div>
-        <button class="btn btn-primary btn-sm" onclick="sendBroadcast()">Send broadcast</button>
-      </div>
-      <div class="scroll-x">
-        <table id="broadcastTable">
-          <thead><tr><th>Message</th><th>Status</th><th>Sent</th><th>Failed</th><th>Target</th><th>Created</th></tr></thead>
-          <tbody></tbody>
-        </table>
-      </div>
     </div>
 
-    <!-- Customers -->
+    <!-- ============ ACCOUNT ============ -->
+    <div class="dash-section" data-section="account">
+    <!-- Subscription -->
     <div class="dash-card">
-      <h2>Customers</h2>
-      <div class="scroll-x">
-        <table id="customerTable">
-          <thead><tr><th>Customer</th><th>Channel</th><th>Orders</th><th>Total spent</th><th>Last seen</th></tr></thead>
-          <tbody></tbody>
-        </table>
-      </div>
+      <h2>Subscription</h2>
+      <div id="subBox" class="muted">Loading…</div>
     </div>
 
     <!-- Bot settings -->
@@ -297,6 +346,9 @@
         <div><button class="btn btn-primary btn-sm" onclick="saveSettings()">Save settings</button></div>
       </div>
     </div>
+    </div><!-- /account section -->
+
+    </div><!-- /dash-sections -->
   </div>
 </main>
 
@@ -342,6 +394,22 @@ function showCard(id) {
     document.getElementById(cardId).style.display = cardId === id ? '' : 'none';
   });
 }
+
+/* ---------------- Section navigation ---------------- */
+
+const SECTIONS = ['overview', 'orders', 'stock', 'customers', 'account'];
+
+function showSection(name) {
+  if (!SECTIONS.includes(name)) name = 'overview';
+  document.querySelectorAll('.dash-section').forEach(el =>
+    el.classList.toggle('active', el.dataset.section === name));
+  document.querySelectorAll('#sideNav button').forEach(btn =>
+    btn.classList.toggle('active', btn.dataset.target === name));
+  history.replaceState(null, '', '#' + name);
+}
+
+// Restore the last-viewed section from the URL hash (e.g. dashboard.html#stock)
+showSection(location.hash.replace('#', ''));
 
 async function signOut() {
   await window.Clerk.signOut();
@@ -599,6 +667,9 @@ async function loadTodayStats() {
   document.getElementById('stPaid').textContent = stats.paid_count;
   document.getElementById('stRate').textContent = stats.payment_success_rate == null ? '—' : stats.payment_success_rate + '%';
   document.getElementById('stOpen').textContent = stats.open_orders;
+  const badge = document.getElementById('navOpenCount');
+  badge.textContent = stats.open_orders;
+  badge.style.display = stats.open_orders > 0 ? '' : 'none';
 }
 
 /* ---------------- Subscription ---------------- */
