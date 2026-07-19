@@ -38,6 +38,46 @@
   #toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 10px 18px; border-radius: 999px; font-size: 14px; opacity: 0; transition: opacity 200ms; pointer-events: none; z-index: 50; }
   #toast.show { opacity: 1; }
   @media (max-width: 720px) { .dash .row-form { grid-template-columns: 1fr 1fr; } .dash .scroll-x { overflow-x: auto; } }
+
+  /* Products: image thumbnail + wider form */
+  .thumb { width: 36px; height: 36px; object-fit: cover; border-radius: var(--r-sm, 6px); border: 1px solid var(--line); }
+  .dash .row-form.product-form { grid-template-columns: 1.4fr 1.4fr 0.9fr 0.9fr 1.2fr 1fr auto; }
+  @media (max-width: 960px) { .dash .row-form.product-form { grid-template-columns: 1fr 1fr; } }
+
+  /* Analytics */
+  .ana-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  @media (max-width: 720px) { .ana-grid { grid-template-columns: 1fr; } }
+  .bar-row { display: flex; align-items: center; gap: 8px; font-size: 12px; margin-bottom: 7px; }
+  .bar-row .bar-label { width: 74px; flex-shrink: 0; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bar-track { flex: 1; background: var(--bg-2); border-radius: 4px; height: 10px; overflow: hidden; }
+  .bar-fill { background: var(--accent); height: 100%; border-radius: 4px; }
+  .bar-row .bar-val { width: 74px; text-align: right; flex-shrink: 0; font-family: var(--font-mono); font-size: 11px; }
+  .hour-chart { display: flex; gap: 3px; align-items: flex-end; height: 60px; }
+  .hour-bar { flex: 1; background: var(--accent-soft); border-radius: 3px 3px 0 0; min-height: 2px; }
+  .hour-bar.active { background: var(--accent); }
+
+  /* Inbox */
+  .conv-layout { display: grid; grid-template-columns: 260px 1fr; border: 1px solid var(--line); border-radius: var(--r-sm, 8px); overflow: hidden; height: 480px; }
+  .conv-list { overflow-y: auto; border-right: 1px solid var(--line); }
+  .conv-item { padding: 10px 12px; border-bottom: 1px solid var(--line); cursor: pointer; }
+  .conv-item:hover { background: var(--bg-2); }
+  .conv-item.active { background: var(--accent-soft); }
+  .conv-item .name { font-weight: 600; font-size: 13px; }
+  .conv-item .preview { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .conv-thread { display: flex; flex-direction: column; height: 100%; }
+  .conv-thread-head { padding: 10px 14px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .conv-messages { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 8px; }
+  .msg { max-width: 75%; padding: 8px 12px; border-radius: 12px; font-size: 13px; word-break: break-word; }
+  .msg-in { align-self: flex-start; background: var(--bg-2); }
+  .msg-out { align-self: flex-end; background: var(--accent-soft); }
+  .msg-meta { font-size: 10px; color: var(--muted-2); margin-top: 3px; }
+  .conv-reply { display: flex; gap: 8px; padding: 10px; border-top: 1px solid var(--line); }
+  .conv-reply input { flex: 1; }
+  @media (max-width: 720px) {
+    .conv-layout { grid-template-columns: 1fr; height: auto; }
+    .conv-list { max-height: 180px; border-right: none; border-bottom: 1px solid var(--line); }
+    .conv-messages { max-height: 300px; }
+  }
 </style>
 </head>
 <body>
@@ -94,10 +134,50 @@
       </div>
     </div>
 
+    <!-- Analytics -->
+    <div class="dash-card">
+      <h2>Analytics</h2>
+      <div style="display:flex;gap:8px;margin-bottom:16px">
+        <button class="btn btn-primary btn-xs" id="anaBtn7" onclick="loadAnalytics(7)">7 days</button>
+        <button class="btn btn-ghost btn-xs" id="anaBtn30" onclick="loadAnalytics(30)">30 days</button>
+      </div>
+      <div class="stat-grid" style="margin-bottom:22px">
+        <div class="stat"><div class="stat-label">Repeat customers</div><div class="stat-val" id="anaRepeat">—</div></div>
+        <div class="stat"><div class="stat-label">Cart abandonment</div><div class="stat-val" id="anaAbandon">—</div></div>
+        <div class="stat"><div class="stat-label">Nudge recovery</div><div class="stat-val" id="anaNudge">—</div></div>
+      </div>
+      <div class="ana-grid">
+        <div>
+          <h3 style="font-size:14px;margin-bottom:10px">Revenue trend</h3>
+          <div id="anaRevenue"></div>
+        </div>
+        <div>
+          <h3 style="font-size:14px;margin-bottom:10px">Top products</h3>
+          <div id="anaTopProducts"></div>
+        </div>
+      </div>
+      <div style="margin-top:22px">
+        <h3 style="font-size:14px;margin-bottom:10px">Busiest hours</h3>
+        <div id="anaHours" class="hour-chart"></div>
+      </div>
+    </div>
+
     <!-- Subscription -->
     <div class="dash-card">
       <h2>Subscription</h2>
       <div id="subBox" class="muted">Loading…</div>
+    </div>
+
+    <!-- Inbox -->
+    <div class="dash-card">
+      <h2>Inbox</h2>
+      <p class="muted" style="margin-bottom:14px;font-size:13px">Reply to a customer directly — this pauses the bot for them until you resume it.</p>
+      <div class="conv-layout">
+        <div class="conv-list" id="convList"><p class="muted" style="padding:12px;font-size:13px">Loading…</p></div>
+        <div class="conv-thread" id="convThread">
+          <p class="muted" style="padding:20px;text-align:center">Select a conversation</p>
+        </div>
+      </div>
     </div>
 
     <!-- Products -->
@@ -105,17 +185,40 @@
       <h2>Products</h2>
       <div class="scroll-x">
         <table id="productTable">
-          <thead><tr><th>Name</th><th>Description</th><th>Price (GH₵)</th><th>Category</th><th>Stock</th><th></th></tr></thead>
+          <thead><tr><th>Image</th><th>Name</th><th>Description</th><th>Price (GH₵)</th><th>Category</th><th>Stock</th><th></th></tr></thead>
           <tbody></tbody>
         </table>
       </div>
       <div style="margin-top:20px;border-top:1px solid var(--line);padding-top:16px">
-        <div class="row-form">
+        <div class="row-form product-form">
           <div><label>Name</label><input id="pName" placeholder="Jollof Rice (Large)" /></div>
           <div><label>Description</label><input id="pDesc" placeholder="Spicy jollof with chicken" /></div>
           <div><label>Price GH₵</label><input id="pPrice" type="number" min="0" step="0.01" placeholder="45.00" /></div>
           <div><label>Category</label><input id="pCat" placeholder="meals" /></div>
+          <div><label>Image URL</label><input id="pImage" placeholder="https://…" /></div>
+          <div><label>Stock (optional)</label><input id="pStock" type="number" min="0" placeholder="Unlimited" /></div>
           <div><button class="btn btn-primary btn-sm" onclick="addProduct()">Add product</button></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Promo codes -->
+    <div class="dash-card">
+      <h2>Promo codes</h2>
+      <div class="scroll-x">
+        <table id="promoTable">
+          <thead><tr><th>Code</th><th>Discount</th><th>Uses</th><th>Expires</th><th>Status</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div style="margin-top:20px;border-top:1px solid var(--line);padding-top:16px">
+        <div class="row-form" style="grid-template-columns:1fr 1fr 1fr 1fr 1fr auto">
+          <div><label>Code</label><input id="promoCode" placeholder="FRIDAY10" /></div>
+          <div><label>Type</label><select id="promoType"><option value="percent">Percent %</option><option value="fixed">Fixed GH₵</option></select></div>
+          <div><label>Value</label><input id="promoValue" type="number" min="0" step="0.01" placeholder="10" /></div>
+          <div><label>Max uses (optional)</label><input id="promoMaxUses" type="number" min="1" placeholder="" /></div>
+          <div><label>Expires (optional)</label><input id="promoExpires" type="date" /></div>
+          <div><button class="btn btn-primary btn-sm" onclick="addPromo()">Add</button></div>
         </div>
       </div>
     </div>
@@ -134,6 +237,25 @@
       <div class="scroll-x">
         <table id="orderTable">
           <thead><tr><th>Order</th><th>Items</th><th>Total</th><th>Payment</th><th>Status</th><th>Update</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Broadcast -->
+    <div class="dash-card">
+      <h2>Broadcast</h2>
+      <p class="muted" style="margin-bottom:14px;font-size:13px">Message every opted-in customer at once — sent gradually and throttled to protect your WhatsApp number. Customers who reply STOP are skipped automatically.</p>
+      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:20px">
+        <div style="flex:1;min-width:240px">
+          <label style="font-size:12px;color:var(--muted)">Message</label>
+          <textarea id="bcBody" rows="3" maxlength="1024" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-sm,6px);font:inherit;background:var(--bg);color:var(--ink)" placeholder="🎉 Fresh stock just arrived! Reply to order."></textarea>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="sendBroadcast()">Send broadcast</button>
+      </div>
+      <div class="scroll-x">
+        <table id="broadcastTable">
+          <thead><tr><th>Message</th><th>Status</th><th>Sent</th><th>Failed</th><th>Target</th><th>Created</th></tr></thead>
           <tbody></tbody>
         </table>
       </div>
@@ -249,7 +371,11 @@ async function onAuthStateChange() {
       loadTodayStats().catch(() => {}),
       loadSubscription().catch(() => {}),
       loadCustomers().catch(() => {}),
-      loadSettings().catch(() => {})
+      loadSettings().catch(() => {}),
+      loadAnalytics(7).catch(() => {}),
+      loadConversations().catch(() => {}),
+      loadPromos().catch(() => {}),
+      loadBroadcasts().catch(() => {})
     ]);
   } catch (err) {
     if (err.code === 'not_linked') {
@@ -322,25 +448,36 @@ function esc(s) {
 async function loadProducts() {
   const { products } = await api('/products?business_id=' + BIZ.id);
   const tbody = document.querySelector('#productTable tbody');
-  tbody.innerHTML = products.map(p => `
+  tbody.innerHTML = products.map(p => {
+    const tracked = p.stock_qty != null;
+    const stockLabel = tracked ? p.stock_qty : (p.in_stock ? 'Unlimited' : 'Out');
+    const stockPill = tracked
+      ? (p.stock_qty === 0 ? 'pill-off' : (p.stock_qty <= 3 ? 'pill-warn' : 'pill-ok'))
+      : (p.in_stock ? 'pill-ok' : 'pill-off');
+    return `
     <tr data-id="${p.id}">
+      <td>${p.image_url ? `<img src="${esc(p.image_url)}" class="thumb" onerror="this.style.display='none'" />` : '<span class="muted" style="font-size:12px">—</span>'}</td>
       <td><strong>${esc(p.name)}</strong></td>
       <td class="muted">${esc(p.description || '')}</td>
       <td>${Number(p.price_ghs).toFixed(2)}</td>
       <td class="muted">${esc(p.category)}</td>
-      <td><span class="pill ${p.in_stock ? 'pill-ok' : 'pill-off'}">${p.in_stock ? 'In stock' : 'Out'}</span></td>
+      <td><span class="pill ${stockPill}">${esc(String(stockLabel))}</span></td>
       <td style="white-space:nowrap">
         <button class="btn btn-ghost btn-xs" onclick="toggleStock('${p.id}', ${!p.in_stock})">${p.in_stock ? 'Mark out' : 'Restock'}</button>
         <button class="btn btn-ghost btn-xs" onclick="editPrice('${p.id}', ${Number(p.price_ghs)})">Price</button>
+        <button class="btn btn-ghost btn-xs" onclick="editStockQty('${p.id}', ${p.stock_qty == null ? 'null' : p.stock_qty})">Qty</button>
+        <button class="btn btn-ghost btn-xs" onclick='editImage(${JSON.stringify(p.id)}, ${JSON.stringify(p.image_url || "")})'>Image</button>
         <button class="btn btn-ghost btn-xs" onclick="removeProduct('${p.id}', '${esc(p.name)}')">Delete</button>
       </td>
-    </tr>`).join('') || '<tr><td colspan="6" class="muted">No products yet. Add your first below.</td></tr>';
+    </tr>`;
+  }).join('') || '<tr><td colspan="7" class="muted">No products yet. Add your first below.</td></tr>';
 }
 
 async function addProduct() {
   const name = document.getElementById('pName').value.trim();
   const price = parseFloat(document.getElementById('pPrice').value);
   if (!name || !(price >= 0)) return toast('Name and a valid price are required');
+  const stockRaw = document.getElementById('pStock').value.trim();
   try {
     await api('/products', {
       method: 'POST',
@@ -349,10 +486,12 @@ async function addProduct() {
         name,
         description: document.getElementById('pDesc').value.trim() || null,
         price_ghs: price,
-        category: document.getElementById('pCat').value.trim() || 'general'
+        category: document.getElementById('pCat').value.trim() || 'general',
+        image_url: document.getElementById('pImage').value.trim() || null,
+        stock_qty: stockRaw ? parseInt(stockRaw, 10) : null
       })
     });
-    ['pName','pDesc','pPrice','pCat'].forEach(id => document.getElementById(id).value = '');
+    ['pName','pDesc','pPrice','pCat','pImage','pStock'].forEach(id => document.getElementById(id).value = '');
     toast('Product added');
     await loadProducts();
   } catch (err) { toast(err.message); }
@@ -373,6 +512,29 @@ async function editPrice(id, current) {
   try {
     await api('/products/' + id, { method: 'PATCH', body: JSON.stringify({ price_ghs: price }) });
     toast('Price updated');
+    await loadProducts();
+  } catch (err) { toast(err.message); }
+}
+
+async function editStockQty(id, current) {
+  const v = prompt('Stock quantity (leave blank for unlimited/untracked):', current == null ? '' : String(current));
+  if (v == null) return;
+  const trimmed = v.trim();
+  const stock_qty = trimmed === '' ? null : parseInt(trimmed, 10);
+  if (trimmed !== '' && (!Number.isInteger(stock_qty) || stock_qty < 0)) return toast('Invalid quantity');
+  try {
+    await api('/products/' + id, { method: 'PATCH', body: JSON.stringify({ stock_qty }) });
+    toast('Stock updated');
+    await loadProducts();
+  } catch (err) { toast(err.message); }
+}
+
+async function editImage(id, current) {
+  const v = prompt('Image URL (leave blank to remove):', current || '');
+  if (v == null) return;
+  try {
+    await api('/products/' + id, { method: 'PATCH', body: JSON.stringify({ image_url: v.trim() || null }) });
+    toast('Image updated');
     await loadProducts();
   } catch (err) { toast(err.message); }
 }
@@ -499,6 +661,207 @@ async function exportOrdersCsv() {
     a.click();
     URL.revokeObjectURL(a.href);
   } catch (err) { toast('Export failed: ' + err.message); }
+}
+
+/* ---------------- Analytics ---------------- */
+
+let currentAnaDays = 7;
+
+async function loadAnalytics(days) {
+  currentAnaDays = days || currentAnaDays;
+  const btn7 = document.getElementById('anaBtn7');
+  const btn30 = document.getElementById('anaBtn30');
+  btn7.className = 'btn btn-xs ' + (currentAnaDays === 7 ? 'btn-primary' : 'btn-ghost');
+  btn30.className = 'btn btn-xs ' + (currentAnaDays === 30 ? 'btn-primary' : 'btn-ghost');
+
+  try {
+    const { analytics: a } = await api('/analytics?business_id=' + BIZ.id + '&days=' + currentAnaDays);
+
+    document.getElementById('anaRepeat').textContent =
+      a.repeat_customer_rate_pct == null ? '—' : a.repeat_customer_rate_pct + '%';
+    document.getElementById('anaAbandon').textContent =
+      a.cart_abandonment.abandonment_rate_pct == null ? '—' : a.cart_abandonment.abandonment_rate_pct + '%';
+    document.getElementById('anaNudge').textContent = a.nudge_recovery.nudges_sent === 0
+      ? '—'
+      : a.nudge_recovery.recovery_rate_pct + '% (' + a.nudge_recovery.recovered + '/' + a.nudge_recovery.nudges_sent + ')';
+
+    const maxGmv = Math.max(1, ...a.revenue_trend.map(d => Number(d.gmv_ghs)));
+    document.getElementById('anaRevenue').innerHTML = a.revenue_trend.map(d => {
+      const dateLabel = new Date(d.date).toLocaleDateString('en-GH', { month: 'short', day: 'numeric' });
+      const pct = Math.round((Number(d.gmv_ghs) / maxGmv) * 100);
+      return `<div class="bar-row">
+        <span class="bar-label">${dateLabel}</span>
+        <span class="bar-track"><span class="bar-fill" style="width:${pct}%"></span></span>
+        <span class="bar-val">${ghs(d.gmv_ghs)}</span>
+      </div>`;
+    }).join('') || '<p class="muted" style="font-size:13px">No sales yet.</p>';
+
+    const maxRev = Math.max(1, ...a.top_products.map(p => Number(p.revenue_ghs)));
+    document.getElementById('anaTopProducts').innerHTML = a.top_products.map(p => {
+      const pct = Math.round((Number(p.revenue_ghs) / maxRev) * 100);
+      return `<div class="bar-row">
+        <span class="bar-label" title="${esc(p.name)}">${esc(p.name)}</span>
+        <span class="bar-track"><span class="bar-fill" style="width:${pct}%"></span></span>
+        <span class="bar-val">${ghs(p.revenue_ghs)}</span>
+      </div>`;
+    }).join('') || '<p class="muted" style="font-size:13px">No sales yet.</p>';
+
+    const byHour = new Map(a.busiest_hours.map(h => [h.hour, h.orders]));
+    const maxHour = Math.max(1, ...a.busiest_hours.map(h => h.orders));
+    document.getElementById('anaHours').innerHTML = Array.from({ length: 24 }, (_, h) => {
+      const count = byHour.get(h) || 0;
+      const pct = Math.max(2, Math.round((count / maxHour) * 100));
+      return `<div class="hour-bar ${count > 0 ? 'active' : ''}" style="height:${pct}%" title="${h}:00 — ${count} order(s)"></div>`;
+    }).join('');
+  } catch (err) {
+    toast('Could not load analytics: ' + err.message);
+  }
+}
+
+/* ---------------- Inbox / conversations ---------------- */
+
+let activeConvId = null;
+
+async function loadConversations() {
+  const list = document.getElementById('convList');
+  try {
+    const { conversations } = await api('/conversations?business_id=' + BIZ.id + '&limit=50');
+    list.innerHTML = conversations.map(c => `
+      <div class="conv-item ${c.id === activeConvId ? 'active' : ''}" onclick="openConversation('${c.id}')">
+        <div class="name">${esc(c.display_name || c.whatsapp_number)}${c.bot_paused ? ' ⏸️' : ''}${c.opted_out ? ' 🔕' : ''}</div>
+        <div class="preview">${esc(c.last_message || 'No messages yet')}</div>
+      </div>`).join('') || '<p class="muted" style="padding:12px;font-size:13px">No conversations yet.</p>';
+  } catch (err) {
+    list.innerHTML = '<p class="muted" style="padding:12px;font-size:13px">Could not load: ' + esc(err.message) + '</p>';
+  }
+}
+
+async function openConversation(id) {
+  activeConvId = id;
+  document.querySelectorAll('.conv-item').forEach(el => el.classList.remove('active'));
+  const clicked = [...document.querySelectorAll('.conv-item')].find(el => el.getAttribute('onclick') === `openConversation('${id}')`);
+  if (clicked) clicked.classList.add('active');
+
+  const thread = document.getElementById('convThread');
+  thread.innerHTML = '<p class="muted" style="padding:20px;text-align:center">Loading…</p>';
+  try {
+    const { customer, messages } = await api('/conversations/' + id + '/messages');
+    thread.innerHTML = `
+      <div class="conv-thread-head">
+        <div><strong>${esc(customer.display_name || customer.whatsapp_number)}</strong><br><span class="muted" style="font-size:12px">${esc(customer.whatsapp_number)}</span></div>
+        <button class="btn btn-ghost btn-xs" onclick="togglePause('${customer.id}', ${!customer.bot_paused})">${customer.bot_paused ? 'Resume bot' : 'Pause bot'}</button>
+      </div>
+      <div class="conv-messages" id="convMessages">
+        ${messages.map(m => `
+          <div class="msg ${m.direction === 'inbound' ? 'msg-in' : 'msg-out'}">
+            ${esc(m.content || '')}
+            <div class="msg-meta">${new Date(m.created_at).toLocaleString()}</div>
+          </div>`).join('') || '<p class="muted" style="font-size:13px">No messages yet.</p>'}
+      </div>
+      <div class="conv-reply">
+        <input id="replyInput" placeholder="Type a reply…" onkeydown="if(event.key==='Enter') sendReply('${customer.id}')" />
+        <button class="btn btn-primary btn-xs" onclick="sendReply('${customer.id}')">Send</button>
+      </div>`;
+    const msgBox = document.getElementById('convMessages');
+    msgBox.scrollTop = msgBox.scrollHeight;
+  } catch (err) {
+    thread.innerHTML = '<p class="muted" style="padding:20px;text-align:center">Could not load: ' + esc(err.message) + '</p>';
+  }
+}
+
+async function sendReply(customerId) {
+  const input = document.getElementById('replyInput');
+  const text = input.value.trim();
+  if (!text) return;
+  try {
+    await api('/conversations/' + customerId + '/reply', { method: 'POST', body: JSON.stringify({ text }) });
+    input.value = '';
+    await openConversation(activeConvId);
+    await loadConversations();
+  } catch (err) { toast(err.message); }
+}
+
+async function togglePause(customerId, pause) {
+  try {
+    await api('/conversations/' + customerId + '/' + (pause ? 'pause' : 'resume'), { method: 'POST' });
+    toast(pause ? 'Bot paused for this customer' : 'Bot resumed');
+    await openConversation(activeConvId);
+    await loadConversations();
+  } catch (err) { toast(err.message); }
+}
+
+/* ---------------- Promo codes ---------------- */
+
+async function loadPromos() {
+  const { promos } = await api('/promos?business_id=' + BIZ.id);
+  const tbody = document.querySelector('#promoTable tbody');
+  tbody.innerHTML = promos.map(p => `
+    <tr>
+      <td><strong>${esc(p.code)}</strong></td>
+      <td>${p.type === 'percent' ? Number(p.value) + '%' : ghs(p.value)}</td>
+      <td>${p.used_count}${p.max_uses ? ' / ' + p.max_uses : ''}</td>
+      <td class="muted">${p.expires_at ? new Date(p.expires_at).toLocaleDateString() : '—'}</td>
+      <td><span class="pill ${p.active ? 'pill-ok' : 'pill-off'}">${p.active ? 'Active' : 'Off'}</span></td>
+      <td><button class="btn btn-ghost btn-xs" onclick="togglePromo('${p.id}', ${!p.active})">${p.active ? 'Disable' : 'Enable'}</button></td>
+    </tr>`).join('') || '<tr><td colspan="6" class="muted">No promo codes yet.</td></tr>';
+}
+
+async function addPromo() {
+  const code = document.getElementById('promoCode').value.trim();
+  const type = document.getElementById('promoType').value;
+  const value = parseFloat(document.getElementById('promoValue').value);
+  const maxUsesRaw = document.getElementById('promoMaxUses').value.trim();
+  const expiresRaw = document.getElementById('promoExpires').value;
+  if (!code || !(value > 0)) return toast('Code and a positive value are required');
+  try {
+    await api('/promos', {
+      method: 'POST',
+      body: JSON.stringify({
+        business_id: BIZ.id, code, type, value,
+        max_uses: maxUsesRaw ? parseInt(maxUsesRaw, 10) : null,
+        expires_at: expiresRaw ? new Date(expiresRaw + 'T23:59:59').toISOString() : null
+      })
+    });
+    ['promoCode','promoValue','promoMaxUses','promoExpires'].forEach(id => document.getElementById(id).value = '');
+    toast('Promo created');
+    await loadPromos();
+  } catch (err) { toast(err.message); }
+}
+
+async function togglePromo(id, active) {
+  try {
+    await api('/promos/' + id, { method: 'PATCH', body: JSON.stringify({ business_id: BIZ.id, active }) });
+    toast(active ? 'Promo enabled' : 'Promo disabled');
+    await loadPromos();
+  } catch (err) { toast(err.message); }
+}
+
+/* ---------------- Broadcast ---------------- */
+
+async function loadBroadcasts() {
+  const { broadcasts } = await api('/broadcasts?business_id=' + BIZ.id);
+  const tbody = document.querySelector('#broadcastTable tbody');
+  tbody.innerHTML = broadcasts.map(b => `
+    <tr>
+      <td style="max-width:280px">${esc(b.body)}</td>
+      <td><span class="pill ${b.status === 'done' ? 'pill-ok' : (b.status === 'failed' ? 'pill-off' : 'pill-warn')}">${esc(b.status)}</span></td>
+      <td>${b.sent_count}</td>
+      <td>${b.failed_count}</td>
+      <td>${b.target_count}</td>
+      <td class="muted">${new Date(b.created_at).toLocaleString()}</td>
+    </tr>`).join('') || '<tr><td colspan="6" class="muted">No broadcasts sent yet.</td></tr>';
+}
+
+async function sendBroadcast() {
+  const body = document.getElementById('bcBody').value.trim();
+  if (!body) return toast('Write a message first');
+  if (!confirm('Send this to every opted-in customer? This cannot be undone.')) return;
+  try {
+    const res = await api('/broadcasts', { method: 'POST', body: JSON.stringify({ business_id: BIZ.id, body }) });
+    document.getElementById('bcBody').value = '';
+    toast('Broadcast queued for ' + res.target_count + ' customer(s)');
+    await loadBroadcasts();
+  } catch (err) { toast(err.message); }
 }
 
 /* ---------------- Bot settings ---------------- */
