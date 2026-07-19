@@ -16,8 +16,16 @@ const router = express.Router();
  * row a merchant's dashboard sees (no internal ids, no payment_ref, phone
  * masked) — so a leaked receipt link exposes only what a paper receipt would.
  */
+// Reject non-UUID ids up front: Postgres throws "invalid input syntax for
+// type uuid" on malformed input, which would surface as a noisy 500 instead
+// of the 404 a bad receipt link deserves.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 router.get('/:id', async (req, res) => {
   try {
+    if (!UUID_RE.test(req.params.id)) {
+      return res.status(404).json({ success: false, error: 'Receipt not found' });
+    }
     const r = await query(
       `SELECT o.order_number, o.created_at, o.status, o.payment_status, o.payment_method,
               o.items, o.subtotal_ghs, o.delivery_fee, o.discount_ghs, o.promo_code, o.total_ghs,

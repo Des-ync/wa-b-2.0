@@ -212,15 +212,19 @@ async function notifyOrderStatusChange({ order, business }) {
     const customerRes = await query('SELECT * FROM customers WHERE id = $1', [order.customer_id]);
     const customer = customerRes.rows[0];
     if (!customer) return;
-    // Callers don't always pass the full business row; fetch the language if missing.
-    let lang = business && 'bot_language' in business ? langOf(business) : null;
-    if (lang == null) {
-      const bizRes = await query('SELECT bot_language FROM businesses WHERE id = $1', [order.business_id]);
-      lang = langOf(bizRes.rows[0]);
+    // Callers don't always pass the full business row; fetch what's missing.
+    // Both name and bot_language are needed — the notification text is
+    // branded with the shop's name, so a language-only fetch would leave
+    // customers seeing "at the shop" instead of the real business name.
+    let biz = business;
+    if (!biz || !('bot_language' in biz) || !biz.name) {
+      const bizRes = await query('SELECT name, bot_language FROM businesses WHERE id = $1', [order.business_id]);
+      biz = bizRes.rows[0] || biz;
     }
+    const lang = langOf(biz);
     await getAdapter(customer.channel).sendText(
       destOf(customer),
-      t(lang, key, { n: order.order_number, shop: business?.name || 'the shop' }),
+      t(lang, key, { n: order.order_number, shop: biz?.name || 'the shop' }),
       { businessId: order.business_id, customerId: customer.id }
     );
   } catch (err) {

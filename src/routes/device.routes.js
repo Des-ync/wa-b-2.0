@@ -36,6 +36,26 @@ router.post('/register', requireAuth('any'), async (req, res) => {
 });
 
 /**
+ * GET /api/devices
+ * Lists registered push devices for the caller: tenants see their own
+ * business's devices, admins see every admin/team device. Tokens are
+ * truncated — the full value is a push capability and never needs to
+ * round-trip back to a client.
+ */
+router.get('/', requireAuth('any'), async (req, res) => {
+  try {
+    const isAdmin = req.auth.scope === 'admin';
+    const r = isAdmin
+      ? await push.listDevices({ scope: 'admin' })
+      : await push.listDevices({ businessId: req.auth.businessId });
+    res.json({ success: true, devices: r });
+  } catch (err) {
+    logger.error('GET /devices failed: %s', err.message);
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+/**
  * POST /api/devices/unregister
  * Body: { fcm_token } — called on logout so a signed-out phone stops buzzing.
  */
@@ -43,7 +63,10 @@ router.post('/unregister', requireAuth('any'), async (req, res) => {
   try {
     const fcmToken = String(req.body?.fcm_token || '').trim();
     if (!fcmToken) return res.status(400).json({ success: false, error: 'fcm_token required' });
-    const removed = await push.unregisterDevice(fcmToken);
+    const removed = await push.unregisterDevice(fcmToken, {
+      scope: req.auth.scope,
+      businessId: req.auth.businessId
+    });
     res.json({ success: true, removed });
   } catch (err) {
     logger.error('POST /devices/unregister failed: %s', err.message);

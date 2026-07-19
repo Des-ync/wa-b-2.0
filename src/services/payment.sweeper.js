@@ -100,7 +100,7 @@ async function runPaymentSweeper() {
         `UPDATE orders
             SET status = 'cancelled'
           WHERE status = 'pending'
-            AND payment_status = 'unpaid'
+            AND payment_status IN ('unpaid', 'failed')
             AND updated_at < NOW() - ($1 || ' hours')::interval
           RETURNING order_number`,
         [String(STALE_ORDER_HOURS)]

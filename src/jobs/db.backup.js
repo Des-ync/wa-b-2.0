@@ -29,9 +29,21 @@ async function runDbBackupJob() {
 
     try {
       logger.info('[cron] db backup: starting pg_dump → %s', dumpFile);
+      // Pass the connection string and output path through the environment
+      // rather than interpolating into the command line: passwords with `$`,
+      // `"` or backticks would otherwise be shell-expanded (breaking the dump
+      // or worse), and the URL would leak into process listings via `ps`.
       await execAsync(
-        `pg_dump "${process.env.DATABASE_URL}" | gzip > "${dumpFile}"`,
-        { shell: '/bin/bash', maxBuffer: 1024 * 1024 * 64 }
+        `pg_dump "$WA_B_DB_URL" | gzip > "$WA_B_DUMP_FILE"`,
+        {
+          shell: '/bin/bash',
+          maxBuffer: 1024 * 1024 * 64,
+          env: {
+            ...process.env,
+            WA_B_DB_URL: process.env.DATABASE_URL,
+            WA_B_DUMP_FILE: dumpFile
+          }
+        }
       );
 
       const { size } = fs.statSync(dumpFile);

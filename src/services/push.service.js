@@ -59,9 +59,49 @@ async function registerDevice({ businessId = null, scope = 'tenant', fcmToken, p
   );
 }
 
-async function unregisterDevice(fcmToken) {
-  const res = await query(`DELETE FROM device_tokens WHERE fcm_token = $1`, [fcmToken]);
+/**
+ * Delete a device token, but only within the caller's authority: admins may
+ * remove any token, tenants only tokens registered under their own business.
+ * Without the ownership check any tenant could silence another tenant's
+ * (or an admin's) push notifications by guessing/leaking a token.
+ */
+async function unregisterDevice(fcmToken, authCtx = {}) {
+  if (authCtx.scope === 'admin') {
+    const res = await query(`DELETE FROM device_tokens WHERE fcm_token = $1`, [fcmToken]);
+    return res.rowCount > 0;
+  }
+  if (!authCtx.businessId) return false;
+  const res = await query(
+    `DELETE FROM device_tokens WHERE fcm_token = $1 AND business_id = $2`,
+    [fcmToken, authCtx.businessId]
+  );
   return res.rowCount > 0;
+}
+
+/**
+ * List registered devices for a business (or all admin devices). Returns a
+ * display-safe shape: the token is truncated to a recognizable suffix so the
+ * full push capability never leaves the server.
+ */
+async function listDevices({ businessId = null, scope = null } = {}) {
+  const res = scope === 'admin'
+    ? await query(
+        `SELECT id, platform, device_name, created_at, last_seen_at, fcm_token
+           FROM device_tokens WHERE scope = 'admin'
+          ORDER BY last_seen_at DESC`)
+    : await query(
+        `SELECT id, platform, device_name, created_at, last_seen_at, fcm_token
+           FROM device_tokens WHERE business_id = $1
+          ORDER BY last_seen_at DESC`,
+        [businessId]);
+  return res.rows.map(r => ({
+    id: r.id,
+    platform: r.platform,
+    device_name: r.device_name,
+    created_at: r.created_at,
+    last_seen_at: r.last_seen_at,
+    token_suffix: r.fcm_token.slice(-8)
+  }));
 }
 
 /**
@@ -126,4 +166,4 @@ async function pushToAdmins(payload) {
   }
 }
 
-module.exports = { init, registerDevice, unregisterDevice, pushToBusiness, pushToAdmins };
+module.exports = { init, registerDevice, unregisterDevice, listDevices, pushToBusiness, pushToAdmins };

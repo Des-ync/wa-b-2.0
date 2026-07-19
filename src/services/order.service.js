@@ -3,7 +3,7 @@ const logger = require('../utils/logger');
 const { generateOrderNumber } = require('../utils/helpers');
 
 const VALID_STATUSES = ['pending', 'confirmed', 'paid', 'preparing', 'ready', 'delivered', 'cancelled'];
-const VALID_PAYMENT_STATUSES = ['unpaid', 'pending', 'paid', 'refunded'];
+const VALID_PAYMENT_STATUSES = ['unpaid', 'pending', 'paid', 'refunded', 'failed'];
 const LOW_STOCK_THRESHOLD = 3;
 
 /**
@@ -370,9 +370,12 @@ async function markOrderPaid({ orderId, paymentRef, paymentMethod, amount }) {
 }
 
 async function markOrderFailed({ orderId, paymentRef }) {
+  // 'failed' (not 'unpaid') so the payment history distinguishes an attempt
+  // that bounced from an order that never entered payment. Retry still works:
+  // attachPaymentReference moves any non-paid/refunded order back to 'pending'.
   const res = await query(
     `UPDATE orders
-        SET payment_status = 'unpaid',
+        SET payment_status = 'failed',
             payment_ref    = COALESCE($2, payment_ref)
       WHERE id = $1
         AND payment_status NOT IN ('paid', 'refunded')
