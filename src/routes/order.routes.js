@@ -223,6 +223,8 @@ router.post('/', async (req, res) => {
       notes
     });
 
+    notification.notifyOrderReceived({ order, business: { id: business_id }, customer });
+
     res.status(201).json({ success: true, order, customer });
   } catch (err) {
     logger.error('POST /orders failed: %s', err.message, { stack: err.stack });

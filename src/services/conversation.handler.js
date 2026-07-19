@@ -1621,6 +1621,8 @@ async function finalizeOrderAndStartPayment({ business, customer, state }) {
     return;
   }
 
+  notificationService.notifyOrderReceived({ order, business, customer });
+
   await saveState(customer.id, {
     flow: 'paying',
     step: 'choose_method',

@@ -193,6 +193,23 @@ async function notifyOrderPaid({ order, business, customer }) {
 }
 
 /**
+ * Push to the business the moment an order is placed — before any payment.
+ * (notifyOrderPaid covers the paid case; this covers "you have a new order".)
+ * Fire-and-forget: push.service never throws, so callers don't need to await.
+ */
+function notifyOrderReceived({ order, business, customer }) {
+  if (!business?.id || !order) return;
+  const items = Array.isArray(order.items) ? order.items : [];
+  const count = items.reduce((n, i) => n + (Number(i.quantity) || 1), 0);
+  const who = customer?.display_name || customer?.whatsapp_number || 'A customer';
+  push.pushToBusiness(business.id, {
+    title: '🛒 New order received',
+    body: `${who} placed order #${order.order_number} — ${count} item${count === 1 ? '' : 's'}, ${formatGhs(order.total_ghs)}`,
+    data: { type: 'order', order_id: order.id }
+  });
+}
+
+/**
  * Tell the customer their order moved to a new fulfilment status.
  * Used by both the merchant's WhatsApp reply flow and the dashboard API.
  */
@@ -314,6 +331,7 @@ module.exports = {
   runSuspensionJob,
   runPruneJob,
   notifyOrderPaid,
+  notifyOrderReceived,
   notifyOrderStatusChange,
   notifySubscriptionRenewed,
   notifySubscriptionFailed
