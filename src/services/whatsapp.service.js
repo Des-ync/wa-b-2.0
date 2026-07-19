@@ -275,11 +275,12 @@ async function sendBusinessNotice({ to, templateEnv, bodyParams, fallbackText, m
    High-level templated messages
    ================================================================ */
 
-async function sendPaymentConfirmation(to, { orderNumber, total, businessName, lang }, meta = {}) {
+async function sendPaymentConfirmation(to, { orderNumber, total, businessName, lang, receiptUrl }, meta = {}) {
   const body = t(lang === 'tw' ? 'tw' : 'en', 'payment_received', {
     n: orderNumber,
     total: formatGhs(total),
-    shop: businessName || 'your vendor'
+    shop: businessName || 'your vendor',
+    receiptUrl
   });
   return sendText(to, body, meta);
 }

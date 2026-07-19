@@ -163,6 +163,12 @@ ALTER TABLE customers ADD COLUMN IF NOT EXISTS channel_id TEXT;
 UPDATE customers SET channel_id = whatsapp_number WHERE channel_id IS NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_customers_business_channel_id
   ON customers(business_id, channel, channel_id);
+-- Human takeover: when TRUE, the state machine stops auto-replying to this
+-- customer so a merchant can answer manually from the dashboard inbox.
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS bot_paused BOOLEAN NOT NULL DEFAULT FALSE;
+-- Broadcast opt-out (WhatsApp "STOP"). Strictly enforced — never broadcast to
+-- an opted-out customer, regardless of who's sending.
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS opted_out BOOLEAN NOT NULL DEFAULT FALSE;
 
 -- =========================================================================
 -- products: business catalogues
@@ -181,6 +187,12 @@ CREATE TABLE IF NOT EXISTS products (
 );
 CREATE INDEX IF NOT EXISTS idx_products_business ON products(business_id);
 CREATE INDEX IF NOT EXISTS idx_products_in_stock ON products(in_stock);
+-- Stock quantity tracking (upgrade path). NULL = untracked/unlimited stock,
+-- matching every existing product's behavior exactly. A non-null value is
+-- decremented on payment and auto-clears in_stock at zero.
+ALTER TABLE products ADD COLUMN IF NOT EXISTS stock_qty INT CHECK (stock_qty IS NULL OR stock_qty >= 0);
+-- Merchant is warned once per dip below the threshold, not on every sale.
+ALTER TABLE products ADD COLUMN IF NOT EXISTS low_stock_notified BOOLEAN NOT NULL DEFAULT FALSE;
 
 -- =========================================================================
 -- orders: customer purchases via WhatsApp
@@ -210,6 +222,9 @@ CREATE INDEX IF NOT EXISTS idx_orders_business ON orders(business_id);
 CREATE INDEX IF NOT EXISTS idx_orders_customer ON orders(customer_id);
 CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
 CREATE INDEX IF NOT EXISTS idx_orders_payment_ref ON orders(payment_ref);
+-- Discount code applied at checkout (upgrade path for existing databases).
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS promo_code TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS discount_ghs NUMERIC(10,2) NOT NULL DEFAULT 0;
 
 -- =========================================================================
 -- payment_attempts: EVERY payment reference ever issued for an order.
@@ -325,6 +340,64 @@ CREATE TABLE IF NOT EXISTS business_link_otps (
 );
 CREATE INDEX IF NOT EXISTS idx_link_otps_business ON business_link_otps(business_id);
 CREATE INDEX IF NOT EXISTS idx_link_otps_expires ON business_link_otps(expires_at);
+
+-- =========================================================================
+-- promos: discount codes applied at cart checkout
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS promos (
+  id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  business_id  UUID NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  code         TEXT NOT NULL,
+  type         TEXT NOT NULL CHECK (type IN ('percent','fixed')),
+  value        NUMERIC(10,2) NOT NULL CHECK (value > 0),
+  expires_at   TIMESTAMPTZ,
+  max_uses     INT CHECK (max_uses IS NULL OR max_uses > 0),
+  used_count   INT NOT NULL DEFAULT 0 CHECK (used_count >= 0),
+  active       BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (business_id, code)
+);
+CREATE INDEX IF NOT EXISTS idx_promos_business ON promos(business_id);
+
+-- =========================================================================
+-- broadcasts / broadcast_recipients: merchant-initiated re-engagement blasts.
+-- Recipients are fanned out up front (one row per opted-in customer) and
+-- drained by a rate-limited cron so a single request never sends thousands
+-- of messages synchronously or blows through Meta's rate limits.
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS broadcasts (
+  id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  business_id   UUID NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  body          TEXT NOT NULL,
+  status        TEXT NOT NULL DEFAULT 'pending'
+                CHECK (status IN ('pending','sending','done','failed')),
+  target_count  INT NOT NULL DEFAULT 0,
+  sent_count    INT NOT NULL DEFAULT 0,
+  failed_count  INT NOT NULL DEFAULT 0,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  completed_at  TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_broadcasts_business ON broadcasts(business_id);
+
+CREATE TABLE IF NOT EXISTS broadcast_recipients (
+  id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  broadcast_id  UUID NOT NULL REFERENCES broadcasts(id) ON DELETE CASCADE,
+  customer_id   UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  -- 'sending' is a claim state: the sender cron atomically flips a batch of
+  -- 'pending' rows to 'sending' in one UPDATE so two overlapping cron ticks
+  -- (or replicas) can never double-send the same recipient.
+  status        TEXT NOT NULL DEFAULT 'pending'
+                CHECK (status IN ('pending','sending','sent','failed')),
+  sent_at       TIMESTAMPTZ,
+  UNIQUE (broadcast_id, customer_id)
+);
+CREATE INDEX IF NOT EXISTS idx_broadcast_recipients_pending
+  ON broadcast_recipients(broadcast_id) WHERE status = 'pending';
+-- Upgrade path: widen the status CHECK to include the 'sending' claim state
+-- for any DB where this table was already created with the older 3-value set.
+ALTER TABLE broadcast_recipients DROP CONSTRAINT IF EXISTS broadcast_recipients_status_check;
+ALTER TABLE broadcast_recipients ADD CONSTRAINT broadcast_recipients_status_check
+  CHECK (status IN ('pending','sending','sent','failed'));
 
 -- =========================================================================
 -- api_keys: hashed credentials for admin + tenant-scoped API access.

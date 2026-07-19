@@ -235,11 +235,12 @@ async function markAsRead(_messageId, _meta = {}) {
    High-level templated messages (adapter parity with whatsapp.service)
    ================================================================ */
 
-async function sendPaymentConfirmation(to, { orderNumber, total, businessName, lang }, meta = {}) {
+async function sendPaymentConfirmation(to, { orderNumber, total, businessName, lang, receiptUrl }, meta = {}) {
   const body = t(lang === 'tw' ? 'tw' : 'en', 'payment_received', {
     n: orderNumber,
     total: formatGhs(total),
-    shop: businessName || 'your vendor'
+    shop: businessName || 'your vendor',
+    receiptUrl
   });
   return sendText(to, body, meta);
 }

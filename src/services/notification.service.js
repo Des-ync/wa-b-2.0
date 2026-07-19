@@ -156,12 +156,15 @@ async function notifyOrderPaid({ order, business, customer }) {
   // Customer receipt goes out on the channel the customer ordered from;
   // the merchant notification below stays WhatsApp-only.
   if (customer && destOf(customer)) {
+    const base = (process.env.PUBLIC_BASE_URL || '').replace(/\/$/, '');
+    const receiptUrl = base ? `${base}/wa-b/receipt.html?order=${order.id}` : null;
     promises.push(
       getAdapter(customer.channel).sendPaymentConfirmation(destOf(customer), {
         orderNumber: order.order_number,
         total: order.total_ghs,
         businessName: business?.name,
-        lang: langOf(business)
+        lang: langOf(business),
+        receiptUrl
       }, { businessId: business?.id, customerId: customer.id })
     );
   }

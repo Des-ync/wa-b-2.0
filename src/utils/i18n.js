@@ -36,6 +36,10 @@ const STRINGS = {
     en: () => `Cart cleared. Reply *MENU* to start over.`,
     tw: () => `Yɛapopa wo kɛntɛn no. Kyerɛw *MENU* na fi ase bio.`
   },
+  opted_out_confirm: {
+    en: p => `You've been unsubscribed from ${p.shop}'s promotional messages. You can still order anytime — reply *MENU* to shop, or *START* to resubscribe to updates.`,
+    tw: p => `Yɛayi wo afi ${p.shop} nsɛm a wɔde bɛto gua no mu. Wubetumi ato bere biara — kyerɛw *MENU* na tɔ adeɛ, anaa *START* na san gye nsɛm.`
+  },
   reply_menu: {
     en: () => `Reply *MENU* to start over.`,
     tw: () => `Kyerɛw *MENU* na fi ase bio.`
@@ -186,8 +190,26 @@ const STRINGS = {
     tw: () => `Wo kɛntɛn mu da mpan. Kyerɛw *MENU* na fi adetɔ ase.`
   },
   cart_review: {
-    en: p => `🛒 Your Cart\n\n${p.lines}\n\nSubtotal: *${p.subtotal}*\n\nContinue shopping or checkout?`,
-    tw: p => `🛒 Wo Kɛntɛn\n\n${p.lines}\n\nNe boɔ: *${p.subtotal}*\n\nToa adetɔ so anaa kɔ akatua so?`
+    en: p => `🛒 Your Cart\n\n${p.lines}\n\nSubtotal: *${p.subtotal}*\n\nContinue shopping or checkout? Have a promo code? Type it in (e.g. PROMO SAVE10).`,
+    tw: p => `🛒 Wo Kɛntɛn\n\n${p.lines}\n\nNe boɔ: *${p.subtotal}*\n\nToa adetɔ so anaa kɔ akatua so? Wowɔ promo code? Kyerɛw (te sɛ PROMO SAVE10).`
+  },
+
+  /* ---------- promo codes ---------- */
+  promo_applied: {
+    en: p => `✅ Promo *${p.code}* applied — you saved ${p.discount}.\n\nNew total: *${p.total}*`,
+    tw: p => `✅ Yɛde promo *${p.code}* ayɛ adwuma — woagye ${p.discount}.\n\nBoɔ foforo: *${p.total}*`
+  },
+  promo_invalid: {
+    en: () => `That promo code isn't valid. Check the code and try again, or continue without one.`,
+    tw: () => `Saa promo code no nyɛ. Hwɛ code no yiye na san sɔ hwɛ, anaasɛ toa so a wɔmfa promo code biara.`
+  },
+  promo_expired: {
+    en: () => `That promo code has expired.`,
+    tw: () => `Saa promo code no atwam dedaw.`
+  },
+  promo_exhausted: {
+    en: () => `That promo code has already reached its usage limit.`,
+    tw: () => `Saa promo code no adu ne dodow a wɔama ho kwan no.`
   },
 
   /* ---------- address / zones / confirm ---------- */
@@ -210,8 +232,12 @@ const STRINGS = {
     tw: p => `Ɔsoma ka ${p.fee}`
   },
   order_summary: {
-    en: p => `📦 Order Summary\n\n${p.lines}\n\nSubtotal: ${p.subtotal}\nDelivery${p.zone ? ` (${p.zone})` : ''}: ${p.fee}\n*Total: ${p.total}*\n\nAddress: ${p.address}\n\nConfirm and pay now?`,
-    tw: p => `📦 Nhyehyɛe Ho Nsɛm\n\n${p.lines}\n\nNe boɔ: ${p.subtotal}\nƆsoma ka${p.zone ? ` (${p.zone})` : ''}: ${p.fee}\n*Ne nyinaa: ${p.total}*\n\nAddress: ${p.address}\n\nSi so dua na tua seesei?`
+    en: p => `📦 Order Summary\n\n${p.lines}\n\nSubtotal: ${p.subtotal}${p.discountLine || ''}\nDelivery${p.zone ? ` (${p.zone})` : ''}: ${p.fee}\n*Total: ${p.total}*\n\nAddress: ${p.address}\n\nConfirm and pay now?`,
+    tw: p => `📦 Nhyehyɛe Ho Nsɛm\n\n${p.lines}\n\nNe boɔ: ${p.subtotal}${p.discountLine || ''}\nƆsoma ka${p.zone ? ` (${p.zone})` : ''}: ${p.fee}\n*Ne nyinaa: ${p.total}*\n\nAddress: ${p.address}\n\nSi so dua na tua seesei?`
+  },
+  order_summary_discount_line: {
+    en: p => `\nDiscount (${p.code}): -${p.discount}`,
+    tw: p => `\nTiaso (${p.code}): -${p.discount}`
   },
   order_broken: {
     en: () => `Something went wrong with your order. Reply *MENU* to start over.`,
@@ -268,8 +294,8 @@ const STRINGS = {
     tw: p => `⚠️ Nhyehyɛe *${p.n}* ho akatua no ansi yiye.\n\nWo nhyehyɛe no da so wɔ hɔ — wubetumi asan atua bio.`
   },
   payment_received: {
-    en: p => `✅ Payment received!\n\nOrder: ${p.n}\nTotal: ${p.total}\nBusiness: ${p.shop}\n\nWe'll notify you the moment your order is on its way. Thank you for shopping with us! 🛍️`,
-    tw: p => `✅ Yɛagye wo akatua no!\n\nNhyehyɛe: ${p.n}\nNe nyinaa: ${p.total}\nAdwuma: ${p.shop}\n\nSɛ wo nhyehyɛe no si kwan so a, yɛbɛbɔ wo amanneɛ. Yɛda wo ase sɛ wotɔɔ yɛn nkyɛn! 🛍️`
+    en: p => `✅ Payment received!\n\nOrder: ${p.n}\nTotal: ${p.total}\nBusiness: ${p.shop}\n\nWe'll notify you the moment your order is on its way. Thank you for shopping with us! 🛍️${p.receiptUrl ? `\n\nReceipt: ${p.receiptUrl}` : ''}`,
+    tw: p => `✅ Yɛagye wo akatua no!\n\nNhyehyɛe: ${p.n}\nNe nyinaa: ${p.total}\nAdwuma: ${p.shop}\n\nSɛ wo nhyehyɛe no si kwan so a, yɛbɛbɔ wo amanneɛ. Yɛda wo ase sɛ wotɔɔ yɛn nkyɛn! 🛍️${p.receiptUrl ? `\n\nReceipt: ${p.receiptUrl}` : ''}`
   },
 
   /* ---------- fulfilment status notifications ---------- */

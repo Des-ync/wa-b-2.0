@@ -41,6 +41,23 @@ function validateProductBody(body, { partial = false } = {}) {
   if (body.image_url !== undefined) {
     out.image_url = body.image_url == null ? null : String(body.image_url).slice(0, 500);
   }
+  if (body.stock_qty !== undefined) {
+    if (body.stock_qty === null || body.stock_qty === '') {
+      out.stock_qty = null; // untracked/unlimited
+    } else {
+      const qty = Number(body.stock_qty);
+      if (!Number.isInteger(qty) || qty < 0) errors.push('stock_qty must be a non-negative integer, or empty for untracked');
+      out.stock_qty = qty;
+      // A merchant setting real stock back above zero clearly means "in stock"
+      // and clears any stale low-stock nudge state — keep both in sync here
+      // rather than making the merchant flip in_stock separately.
+      if (qty > 0 && body.in_stock === undefined) out.in_stock = true;
+      if (qty === 0 && body.in_stock === undefined) out.in_stock = false;
+      // A merchant manually setting stock back up means they've restocked —
+      // clear the nudge flag so a future dip notifies again.
+      if (qty > 0) out.low_stock_notified = false;
+    }
+  }
   return { errors, out };
 }
 
@@ -63,7 +80,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-/** POST /api/products — create. Body: { business_id?, name, price_ghs, description?, category?, in_stock?, image_url? } */
+/** POST /api/products — create. Body: { business_id?, name, price_ghs, description?, category?, in_stock?, image_url?, stock_qty? } */
 router.post('/', async (req, res) => {
   try {
     const businessId = req.body?.business_id || req.auth?.businessId;
@@ -75,11 +92,12 @@ router.post('/', async (req, res) => {
     if (errors.length) return res.status(400).json({ success: false, error: errors.join('; ') });
 
     const result = await query(
-      `INSERT INTO products (business_id, name, description, price_ghs, category, in_stock, image_url)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      `INSERT INTO products (business_id, name, description, price_ghs, category, in_stock, image_url, stock_qty)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
       [
         businessId, out.name, out.description ?? null, out.price_ghs,
-        out.category || 'general', out.in_stock ?? true, out.image_url ?? null
+        out.category || 'general', out.in_stock ?? true, out.image_url ?? null,
+        out.stock_qty ?? null
       ]
     );
     res.status(201).json({ success: true, product: result.rows[0] });

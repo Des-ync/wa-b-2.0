@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Receipt · WA-B Solutions</title>
+<link rel="stylesheet" href="styles.css" />
+<style>
+  body { background: var(--bg-2); }
+  .receipt-wrap { max-width: 480px; margin: 40px auto; padding: 0 16px; }
+  .receipt-card {
+    background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-lg);
+    padding: 28px 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  }
+  .receipt-head { text-align: center; margin-bottom: 20px; }
+  .receipt-head h1 { font-size: 18px; margin: 0 0 4px; }
+  .receipt-head .muted { color: var(--muted); font-size: 13px; }
+  .receipt-status {
+    display: inline-block; margin-top: 10px; padding: 4px 12px; border-radius: 999px;
+    font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .status-paid { background: var(--accent-soft); color: var(--accent-ink); }
+  .status-unpaid, .status-pending { background: #fdf3e5; color: var(--warning); }
+  .status-failed, .status-cancelled { background: #fbeaea; color: var(--danger); }
+  .receipt-meta { font-size: 13px; color: var(--muted); border-top: 1px dashed var(--line-2); border-bottom: 1px dashed var(--line-2); padding: 14px 0; margin: 16px 0; }
+  .receipt-meta div { display: flex; justify-content: space-between; padding: 2px 0; }
+  .receipt-items { margin: 16px 0; }
+  .receipt-item { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; padding: 6px 0; }
+  .receipt-item .qty { color: var(--muted); font-family: var(--font-mono); font-size: 12px; }
+  .receipt-totals { border-top: 1px solid var(--line-2); margin-top: 12px; padding-top: 12px; }
+  .receipt-totals div { display: flex; justify-content: space-between; font-size: 14px; padding: 3px 0; }
+  .receipt-totals .grand { font-size: 18px; font-weight: 700; margin-top: 6px; }
+  .receipt-footer { text-align: center; margin-top: 20px; font-size: 12px; color: var(--muted-2); }
+  .receipt-actions { display: flex; gap: 10px; justify-content: center; margin-top: 20px; }
+  .err-box, .loading-box { text-align: center; padding: 60px 20px; color: var(--muted); }
+  @media print {
+    body { background: #fff; }
+    .receipt-actions, .nav, .site-footer { display: none !important; }
+    .receipt-wrap { margin: 0; max-width: none; }
+    .receipt-card { border: none; box-shadow: none; padding: 0; }
+  }
+</style>
+</head>
+<body>
+
+<header class="nav no-print"><div class="wrap nav-row">
+  <a href="index.html" class="brand"><span class="brand-mark">W</span><span>WA-B Solutions</span></a>
+</div></header>
+
+<div class="receipt-wrap">
+  <div id="loading" class="loading-box">Loading receipt…</div>
+  <div id="error" class="err-box" style="display:none"></div>
+  <div id="card" class="receipt-card" style="display:none"></div>
+  <div id="actions" class="receipt-actions" style="display:none">
+    <button class="btn btn-primary" onclick="window.print()">Print / Save PDF</button>
+    <button class="btn btn-ghost" id="copyLinkBtn">Copy link</button>
+  </div>
+</div>
+
+<script>
+function money(n) {
+  return 'GH¢' + Number(n || 0).toFixed(2);
+}
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[c]));
+}
+function statusClass(s) {
+  return 'status-' + (s || 'pending').toLowerCase();
+}
+
+async function loadReceipt() {
+  const params = new URLSearchParams(window.location.search);
+  const orderId = params.get('order');
+  const loadingEl = document.getElementById('loading');
+  const errorEl = document.getElementById('error');
+  const cardEl = document.getElementById('card');
+  const actionsEl = document.getElementById('actions');
+
+  if (!orderId) {
+    loadingEl.style.display = 'none';
+    errorEl.style.display = 'block';
+    errorEl.textContent = 'No order specified. Check the link and try again.';
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/receipts/' + encodeURIComponent(orderId));
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || 'Receipt not found');
+    }
+    const r = data.receipt;
+    const items = Array.isArray(r.items) ? r.items : [];
+    const itemsHtml = items.map(i => `
+      <div class="receipt-item">
+        <span><span class="qty">${esc(i.quantity || 1)}×</span> ${esc(i.name)}</span>
+        <span>${money((i.price_ghs || 0) * (i.quantity || 1))}</span>
+      </div>
+    `).join('') || '<p class="muted" style="font-size:13px">No items</p>';
+
+    const discountRow = Number(r.discount_ghs) > 0 ? `
+      <div><span>Discount${r.promo_code ? ' (' + esc(r.promo_code) + ')' : ''}</span><span>-${money(r.discount_ghs)}</span></div>
+    ` : '';
+
+    cardEl.innerHTML = `
+      <div class="receipt-head">
+        <h1>${esc(r.business_name)}</h1>
+        <div class="muted">Order ${esc(r.order_number)}</div>
+        <span class="receipt-status ${statusClass(r.payment_status)}">${esc(r.payment_status)}</span>
+      </div>
+      <div class="receipt-meta">
+        <div><span>Date</span><span>${new Date(r.created_at).toLocaleString('en-GH', { dateStyle: 'medium', timeStyle: 'short' })}</span></div>
+        <div><span>Customer</span><span>${esc(r.customer_name || 'Customer')} (${esc(r.customer_phone_masked)})</span></div>
+        ${r.delivery_address ? `<div><span>Delivery</span><span>${esc(r.delivery_address)}</span></div>` : ''}
+        <div><span>Order status</span><span>${esc(r.status)}</span></div>
+      </div>
+      <div class="receipt-items">${itemsHtml}</div>
+      <div class="receipt-totals">
+        <div><span>Subtotal</span><span>${money(r.subtotal_ghs)}</span></div>
+        ${discountRow}
+        <div><span>Delivery fee</span><span>${money(r.delivery_fee)}</span></div>
+        <div class="grand"><span>Total</span><span>${money(r.total_ghs)}</span></div>
+      </div>
+      <div class="receipt-footer">
+        Questions? Contact ${esc(r.business_name)} at ${esc(r.business_support_phone || '')}<br/>
+        Powered by WA-B Solutions
+      </div>
+    `;
+    loadingEl.style.display = 'none';
+    cardEl.style.display = 'block';
+    actionsEl.style.display = 'flex';
+  } catch (err) {
+    loadingEl.style.display = 'none';
+    errorEl.style.display = 'block';
+    errorEl.textContent = err.message || 'Could not load this receipt.';
+  }
+}
+
+document.getElementById('copyLinkBtn')?.addEventListener('click', () => {
+  navigator.clipboard?.writeText(window.location.href).then(() => {
+    const btn = document.getElementById('copyLinkBtn');
+    const original = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(() => { btn.textContent = original; }, 1500);
+  });
+});
+
+loadReceipt();
+</script>
+<script src="script.js"></script>
+</body>
+</html>

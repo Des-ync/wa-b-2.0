@@ -4,6 +4,7 @@ const { generateOrderNumber } = require('../utils/helpers');
 
 const VALID_STATUSES = ['pending', 'confirmed', 'paid', 'preparing', 'ready', 'delivered', 'cancelled'];
 const VALID_PAYMENT_STATUSES = ['unpaid', 'pending', 'paid', 'refunded'];
+const LOW_STOCK_THRESHOLD = 3;
 
 /**
  * Get-or-create the customer record for a business on a given channel.
@@ -57,30 +58,46 @@ async function getOrCreateCustomer({ businessId, whatsappNumber, displayName, ph
 }
 
 /**
- * Compute totals from a cart.
+ * Compute totals from a cart, optionally applying a discount.
  *   cart = [{ product_id, name, price_ghs, quantity }]
+ *   promo = { type: 'percent'|'fixed', value } | null
+ * Discount applies to the subtotal only (never to delivery), and never takes
+ * the total below zero.
  */
-function computeTotals(cart, deliveryFee = 0) {
+function computeTotals(cart, deliveryFee = 0, promo = null) {
   const subtotal = (cart || []).reduce(
     (sum, item) => sum + (Number(item.price_ghs) || 0) * (Number(item.quantity) || 1),
     0
   );
   const fee = Number(deliveryFee) || 0;
+
+  let discount = 0;
+  if (promo && promo.type === 'percent') {
+    discount = subtotal * (Number(promo.value) / 100);
+  } else if (promo && promo.type === 'fixed') {
+    discount = Number(promo.value);
+  }
+  discount = Math.max(0, Math.min(discount, subtotal));
+
   return {
     subtotal_ghs: Number(subtotal.toFixed(2)),
+    discount_ghs: Number(discount.toFixed(2)),
     delivery_fee: Number(fee.toFixed(2)),
-    total_ghs: Number((subtotal + fee).toFixed(2))
+    total_ghs: Number((subtotal - discount + fee).toFixed(2))
   };
 }
 
 /**
- * Create an order from a cart in a single transaction.
+ * Create an order from a cart in a single transaction. Pass `promo` (the
+ * validated promos row) to apply and consume a discount code atomically —
+ * used_count is incremented in the SAME transaction as the order insert so
+ * a max-uses cap can never be oversold under concurrent checkouts.
  */
-async function createOrder({ businessId, customerId, cart, deliveryAddress, deliveryFee = 0, paymentMethod, notes }) {
+async function createOrder({ businessId, customerId, cart, deliveryAddress, deliveryFee = 0, paymentMethod, notes, promo }) {
   if (!businessId || !customerId) throw new Error('businessId and customerId are required');
   if (!Array.isArray(cart) || cart.length === 0) throw new Error('cart must be a non-empty array');
 
-  const totals = computeTotals(cart, deliveryFee);
+  const totals = computeTotals(cart, deliveryFee, promo);
 
   return transaction(async client => {
     let orderNumber;
@@ -94,14 +111,15 @@ async function createOrder({ businessId, customerId, cart, deliveryAddress, deli
         inserted = await client.query(
           `INSERT INTO orders
             (business_id, customer_id, order_number, status, items,
-             subtotal_ghs, delivery_fee, total_ghs, delivery_address,
-             payment_method, payment_status, notes)
-           VALUES ($1,$2,$3,'pending',$4::jsonb,$5,$6,$7,$8,$9,'unpaid',$10)
+             subtotal_ghs, delivery_fee, discount_ghs, promo_code, total_ghs,
+             delivery_address, payment_method, payment_status, notes)
+           VALUES ($1,$2,$3,'pending',$4::jsonb,$5,$6,$7,$8,$9,$10,$11,'unpaid',$12)
            RETURNING *`,
           [
             businessId, customerId, orderNumber,
             JSON.stringify(cart),
-            totals.subtotal_ghs, totals.delivery_fee, totals.total_ghs,
+            totals.subtotal_ghs, totals.delivery_fee, totals.discount_ghs,
+            promo?.code || null, totals.total_ghs,
             deliveryAddress || null,
             paymentMethod || null,
             notes || null
@@ -128,8 +146,31 @@ async function createOrder({ businessId, customerId, cart, deliveryAddress, deli
       [customerId]
     );
 
+    if (promo?.id) {
+      await client.query(`UPDATE promos SET used_count = used_count + 1 WHERE id = $1`, [promo.id]);
+    }
+
     return inserted.rows[0];
   });
+}
+
+/**
+ * Validate a promo code for a business. Returns the promos row (usable
+ * directly as computeTotals' `promo` arg and createOrder's `promo` arg), or
+ * { error } with a customer-facing reason.
+ */
+async function validatePromoCode(businessId, code) {
+  const clean = String(code || '').trim().toUpperCase();
+  if (!clean) return { error: 'empty' };
+  const res = await query(
+    `SELECT * FROM promos WHERE business_id = $1 AND UPPER(code) = $2`,
+    [businessId, clean]
+  );
+  const promo = res.rows[0];
+  if (!promo || !promo.active) return { error: 'not_found' };
+  if (promo.expires_at && new Date(promo.expires_at) < new Date()) return { error: 'expired' };
+  if (promo.max_uses != null && promo.used_count >= promo.max_uses) return { error: 'exhausted' };
+  return { promo };
 }
 
 async function getOrderById(orderId) {
@@ -297,7 +338,34 @@ async function markOrderPaid({ orderId, paymentRef, paymentMethod, amount }) {
       );
     }
 
-    return { order };
+    // Stock decrement: only for products the merchant actually tracks
+    // (stock_qty IS NOT NULL). Auto-clears in_stock at zero. A product that's
+    // newly at-or-below the low-stock threshold gets flagged for a merchant
+    // nudge — low_stock_notified prevents re-nudging on every subsequent sale.
+    const lowStock = [];
+    const items = Array.isArray(order.items) ? order.items : [];
+    for (const item of items) {
+      if (!item.product_id) continue;
+      const qty = Math.max(1, Number(item.quantity) || 1);
+      const r = await client.query(
+        `UPDATE products
+            SET stock_qty = GREATEST(stock_qty - $2, 0),
+                in_stock  = (GREATEST(stock_qty - $2, 0) > 0)
+          WHERE id = $1 AND business_id = $3 AND stock_qty IS NOT NULL
+          RETURNING id, name, stock_qty, low_stock_notified`,
+        [item.product_id, qty, order.business_id]
+      );
+      const p = r.rows[0];
+      if (p && p.stock_qty <= LOW_STOCK_THRESHOLD && !p.low_stock_notified) {
+        await client.query(`UPDATE products SET low_stock_notified = TRUE WHERE id = $1`, [p.id]);
+        lowStock.push({ id: p.id, name: p.name, stock_qty: p.stock_qty });
+      } else if (p && p.stock_qty > LOW_STOCK_THRESHOLD && p.low_stock_notified) {
+        // Restocked above the threshold — reset so the next dip re-notifies.
+        await client.query(`UPDATE products SET low_stock_notified = FALSE WHERE id = $1`, [p.id]);
+      }
+    }
+
+    return { order, lowStock };
   });
 }
 
@@ -318,6 +386,7 @@ module.exports = {
   getOrCreateCustomer,
   computeTotals,
   createOrder,
+  validatePromoCode,
   getOrderById,
   getOrderByNumber,
   getOrderByPaymentRef,

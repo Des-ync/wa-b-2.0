@@ -476,11 +476,17 @@ async function handleSaasBilling({ business, inbound }) {
 
 /* ---------- Merchant order management by chat ---------- */
 
+// Full fulfilment ladder a merchant can move an order through by chat.
+// 'confirmed' matters for orders that reach the merchant before payment
+// (e.g. cash orders created from the dashboard) — paid orders are already
+// auto-confirmed by markOrderPaid, so this button just won't show for them.
 const MERCHANT_STATUS_LABELS = {
+  confirmed: 'Confirmed',
   preparing: 'Preparing',
   ready: 'Ready',
   delivered: 'Delivered'
 };
+const STATUS_LADDER_ORDER = ['pending', 'confirmed', 'preparing', 'ready', 'delivered'];
 
 async function merchantShowOrder(business, orderNumber) {
   const order = await orderService.getOrderByNumber(orderNumber);
@@ -503,8 +509,17 @@ Status: *${order.status}*
 Address: ${order.delivery_address || '—'}
 
 Update the status:`;
+  // Show the nearest next statuses first so the common case (advance one
+  // step) is always a visible button, even when the ladder has more than
+  // 3 remaining options (WhatsApp's button cap).
+  const currentRank = STATUS_LADDER_ORDER.indexOf(order.status);
   const buttons = Object.entries(MERCHANT_STATUS_LABELS)
     .filter(([status]) => status !== order.status)
+    .sort(([a], [b]) => {
+      const da = Math.abs(STATUS_LADDER_ORDER.indexOf(a) - currentRank);
+      const db = Math.abs(STATUS_LADDER_ORDER.indexOf(b) - currentRank);
+      return da - db;
+    })
     .slice(0, 3)
     .map(([status, label]) => ({ id: `ordst_${order.id}_${status}`, title: label }));
   await wa.sendButtons(business.whatsapp_number, body, buttons, { businessId: business.id });
@@ -750,6 +765,14 @@ async function handleCommerce({ business, inbound }) {
     await sleep(nextTypingDelay(`cust:${customer.id}`));
   }
 
+  // Human takeover: a merchant is answering this customer from the dashboard
+  // inbox. The state machine stays completely silent — the message is
+  // already logged above, that's all the merchant needs.
+  if (customer.bot_paused) {
+    logger.debug('Bot paused for customer %s — skipping auto-reply', customer.id);
+    return;
+  }
+
   // Abuse guard: replies stop past the cap; the customer's messages are
   // still logged above so nothing is lost, we just stop paying to answer.
   const rate = checkInboundRate(customer.id);
@@ -789,10 +812,24 @@ async function handleCommerce({ business, inbound }) {
 
   // Global commands
   if (['HI', 'HELLO', 'START', 'MENU'].includes(upper)) {
+    // START doubles as "resubscribe" — idempotent no-op if not opted out.
+    if (upper === 'START' && customer.opted_out) {
+      await query('UPDATE customers SET opted_out = FALSE WHERE id = $1', [customer.id]);
+    }
     await resetState(customer.id);
     return sendWelcome({ business, customer });
   }
-  if (upper === 'CANCEL' || upper === 'STOP') {
+  // STOP is WhatsApp's standard opt-out keyword — unsubscribes from broadcast
+  // messages AND clears the cart, distinct from CANCEL (cart-only).
+  if (upper === 'STOP') {
+    await query('UPDATE customers SET opted_out = TRUE WHERE id = $1', [customer.id]);
+    await resetState(customer.id);
+    await ch.sendText(dest, t(lang, 'opted_out_confirm', { shop: business.name }), {
+      businessId: business.id, customerId: customer.id
+    });
+    return;
+  }
+  if (upper === 'CANCEL') {
     await resetState(customer.id);
     await ch.sendText(dest, t(lang, 'cart_cleared'), {
       businessId: business.id, customerId: customer.id
@@ -1079,7 +1116,16 @@ async function continueOrderingFlow({ business, customer, state, inbound }) {
   const lang = langOf(business);
   const data = state.flow_data || {};
   const cart = Array.isArray(data.cart) ? data.cart : [];
+  const promoCode = data.promo_code || null;
   const upper = (inbound.text || '').toUpperCase().trim();
+
+  // Promo code entry: "PROMO SAVE10" works from cart review through order
+  // confirmation — anywhere the customer has an active cart.
+  const promoMatch = !inbound.interactiveId && cart.length
+    && (inbound.text || '').match(/^PROMO\s+(\S+)/i);
+  if (promoMatch && ['cart_review', 'confirm_order'].includes(state.current_step)) {
+    return applyPromoCode({ business, customer, state, cart, code: promoMatch[1] });
+  }
 
   // Menu pagination rows
   if (inbound.interactiveId && inbound.interactiveId.startsWith('menu_page_')) {
@@ -1099,7 +1145,7 @@ async function continueOrderingFlow({ business, customer, state, inbound }) {
       return startOrderingFlow({ business, customer });
     }
     if (inbound.interactiveId === 'checkout' || upper === 'CHECKOUT') {
-      return showCartReview({ business, customer, cart });
+      return showCartReview({ business, customer, cart, promoCode });
     }
     if (inbound.interactiveId === 'cancel_order' || upper === 'CANCEL') {
       await resetState(customer.id);
@@ -1115,7 +1161,7 @@ async function continueOrderingFlow({ business, customer, state, inbound }) {
       return startOrderingFlow({ business, customer });
     }
     if (inbound.interactiveId === 'checkout' || upper === 'CHECKOUT') {
-      return askForAddress({ business, customer });
+      return askForAddress({ business, customer, promoCode });
     }
     if (inbound.interactiveId === 'cancel_order' || upper === 'CANCEL') {
       await resetState(customer.id);
@@ -1126,7 +1172,7 @@ async function continueOrderingFlow({ business, customer, state, inbound }) {
   }
 
   if (state.current_step === 'get_address') {
-    return captureAddress({ business, customer, cart, address: inbound.text, location: inbound.location });
+    return captureAddress({ business, customer, cart, address: inbound.text, location: inbound.location, promoCode });
   }
 
   if (state.current_step === 'choose_zone') {
@@ -1139,11 +1185,12 @@ async function continueOrderingFlow({ business, customer, state, inbound }) {
           business, customer, cart,
           address: data.delivery_address,
           fee: zone.fee_ghs,
-          zoneName: zone.name
+          zoneName: zone.name,
+          promoCode
         });
       }
     }
-    return askForDeliveryZone({ business, customer, cart, address: data.delivery_address });
+    return askForDeliveryZone({ business, customer, cart, address: data.delivery_address, promoCode });
   }
 
   if (state.current_step === 'confirm_order') {
@@ -1182,7 +1229,7 @@ async function continueOrderingFlow({ business, customer, state, inbound }) {
   }
 
   // Fallback while in flow
-  return showCartReview({ business, customer, cart });
+  return showCartReview({ business, customer, cart, promoCode });
 }
 
 async function addProductToCart({ business, customer, productId, cart, quantity = 1 }) {
@@ -1249,7 +1296,7 @@ async function promptAddMoreOrCheckout({ business, customer, justAdded }) {
 
 /* ---------- Ordering: STEP 2 (cart review) ---------- */
 
-async function showCartReview({ business, customer, cart }) {
+async function showCartReview({ business, customer, cart, promoCode }) {
   const lang = langOf(business);
   if (!cart || cart.length === 0) {
     await chOf(customer).sendText(destOf(customer), t(lang, 'cart_empty'),
@@ -1257,24 +1304,61 @@ async function showCartReview({ business, customer, cart }) {
     await resetState(customer.id);
     return;
   }
-  const totals = orderService.computeTotals(cart, 0);
+  const promo = promoCode ? (await orderService.validatePromoCode(business.id, promoCode)).promo : null;
+  const totals = orderService.computeTotals(cart, 0, promo);
   const lines = cart.map(i => `• ${i.quantity}× ${i.name} — ${formatGhs(i.price_ghs * i.quantity)}`).join('\n');
 
-  await saveState(customer.id, { flow: 'ordering', step: 'cart_review', data: { cart } });
+  await saveState(customer.id, { flow: 'ordering', step: 'cart_review', data: { cart, promo_code: promo ? promo.code : null } });
   await chOf(customer).sendButtons(destOf(customer),
-    t(lang, 'cart_review', { lines, subtotal: formatGhs(totals.subtotal_ghs) }), [
+    t(lang, 'cart_review', {
+      lines,
+      subtotal: promo ? formatGhs(totals.total_ghs) : formatGhs(totals.subtotal_ghs)
+    }), [
     { id: 'continue_shop', title: t(lang, 'btn_continue') },
     { id: 'checkout', title: t(lang, 'btn_checkout') },
     { id: 'cancel_order', title: t(lang, 'btn_cancel') }
   ], { businessId: business.id, customerId: customer.id });
 }
 
+/**
+ * "PROMO <code>" command — validates and applies (or clears, on failure) a
+ * discount code, re-validating fresh each time rather than trusting whatever
+ * was stored earlier, since a code can expire or hit its usage cap mid-flow.
+ */
+async function applyPromoCode({ business, customer, state, cart, code }) {
+  const lang = langOf(business);
+  const { promo, error } = await orderService.validatePromoCode(business.id, code);
+  if (error) {
+    const key = error === 'expired' ? 'promo_expired' : error === 'exhausted' ? 'promo_exhausted' : 'promo_invalid';
+    await chOf(customer).sendText(destOf(customer), t(lang, key),
+      { businessId: business.id, customerId: customer.id });
+  } else {
+    const totals = orderService.computeTotals(cart, 0, promo);
+    await chOf(customer).sendText(destOf(customer),
+      t(lang, 'promo_applied', { code: promo.code, discount: formatGhs(totals.discount_ghs), total: formatGhs(totals.total_ghs) }),
+      { businessId: business.id, customerId: customer.id });
+  }
+
+  const promoCode = promo ? promo.code : null;
+  if (state.current_step === 'confirm_order') {
+    const data = state.flow_data || {};
+    return showOrderConfirm({
+      business, customer, cart,
+      address: data.delivery_address,
+      fee: data.delivery_fee,
+      zoneName: data.delivery_zone,
+      promoCode
+    });
+  }
+  return showCartReview({ business, customer, cart, promoCode });
+}
+
 /* ---------- Ordering: STEP 3 (delivery address) ---------- */
 
-async function askForAddress({ business, customer }) {
+async function askForAddress({ business, customer, promoCode }) {
   const state = await loadOrCreateState(customer.id);
   const cart = state.flow_data?.cart || [];
-  await saveState(customer.id, { flow: 'ordering', step: 'get_address', data: { cart } });
+  await saveState(customer.id, { flow: 'ordering', step: 'get_address', data: { cart, promo_code: promoCode || null } });
   await chOf(customer).sendText(destOf(customer),
     t(langOf(business), 'ask_address'),
     { businessId: business.id, customerId: customer.id });
@@ -1291,7 +1375,7 @@ function deliveryZonesOf(business) {
     .map(z => ({ name: z.name.trim(), fee_ghs: Number(Number(z.fee_ghs).toFixed(2)) }));
 }
 
-async function captureAddress({ business, customer, cart, address, location }) {
+async function captureAddress({ business, customer, cart, address, location, promoCode }) {
   let trimmed = String(address || '').trim();
   // A shared WhatsApp location pin is a perfectly good delivery address.
   if (location) {
@@ -1310,22 +1394,23 @@ async function captureAddress({ business, customer, cart, address, location }) {
   // apply the business's flat delivery fee (0 if unset).
   const zones = deliveryZonesOf(business);
   if (zones.length) {
-    return askForDeliveryZone({ business, customer, cart, address: trimmed });
+    return askForDeliveryZone({ business, customer, cart, address: trimmed, promoCode });
   }
   return showOrderConfirm({
     business, customer, cart,
     address: trimmed,
-    fee: Number(business.delivery_fee_ghs) || 0
+    fee: Number(business.delivery_fee_ghs) || 0,
+    promoCode
   });
 }
 
-async function askForDeliveryZone({ business, customer, cart, address }) {
+async function askForDeliveryZone({ business, customer, cart, address, promoCode }) {
   const lang = langOf(business);
   const zones = deliveryZonesOf(business);
   await saveState(customer.id, {
     flow: 'ordering',
     step: 'choose_zone',
-    data: { cart, delivery_address: address }
+    data: { cart, delivery_address: address, promo_code: promoCode || null }
   });
   const rows = zones.map((z, i) => ({
     id: `zone_${i}`,
@@ -1341,21 +1426,26 @@ async function askForDeliveryZone({ business, customer, cart, address }) {
   );
 }
 
-async function showOrderConfirm({ business, customer, cart, address, fee, zoneName }) {
+async function showOrderConfirm({ business, customer, cart, address, fee, zoneName, promoCode }) {
   const lang = langOf(business);
-  const totals = orderService.computeTotals(cart, fee);
+  const promo = promoCode ? (await orderService.validatePromoCode(business.id, promoCode)).promo : null;
+  const totals = orderService.computeTotals(cart, fee, promo);
   const lines = cart.map(i => `• ${i.quantity}× ${i.name} — ${formatGhs(i.price_ghs * i.quantity)}`).join('\n');
 
   await saveState(customer.id, {
     flow: 'ordering',
     step: 'confirm_order',
-    data: { cart, delivery_address: address, delivery_fee: totals.delivery_fee, delivery_zone: zoneName || null }
+    data: {
+      cart, delivery_address: address, delivery_fee: totals.delivery_fee, delivery_zone: zoneName || null,
+      promo_code: promo ? promo.code : null
+    }
   });
 
   await chOf(customer).sendButtons(destOf(customer),
     t(lang, 'order_summary', {
       lines,
       subtotal: formatGhs(totals.subtotal_ghs),
+      discountLine: promo ? t(lang, 'order_summary_discount_line', { code: promo.code, discount: formatGhs(totals.discount_ghs) }) : '',
       zone: zoneName,
       fee: formatGhs(totals.delivery_fee),
       total: formatGhs(totals.total_ghs),
@@ -1379,6 +1469,12 @@ async function finalizeOrderAndStartPayment({ business, customer, state }) {
     return;
   }
 
+  // Re-validate one last time — a code can expire or hit its usage cap in
+  // the gap between confirm-order and this tap. Silently proceed without the
+  // discount rather than block the order over a stale promo.
+  const promoCode = state.flow_data?.promo_code || null;
+  const promo = promoCode ? (await orderService.validatePromoCode(business.id, promoCode)).promo : null;
+
   let order;
   try {
     order = await orderService.createOrder({
@@ -1387,6 +1483,7 @@ async function finalizeOrderAndStartPayment({ business, customer, state }) {
       cart,
       deliveryAddress: address,
       deliveryFee: Number(state.flow_data?.delivery_fee) || 0,
+      promo,
       notes: state.flow_data?.delivery_zone ? `Zone: ${state.flow_data.delivery_zone}` : undefined
     });
   } catch (err) {
@@ -1618,6 +1715,16 @@ async function handlePaymentSuccess({ reference, gatewayRef, amount }) {
   }
 
   await notificationService.notifyOrderPaid({ order: updated, business, customer });
+
+  if (business?.whatsapp_number && result.lowStock?.length) {
+    for (const p of result.lowStock) {
+      const qtyLabel = p.stock_qty === 0 ? 'OUT OF STOCK' : `${p.stock_qty} left`;
+      wa.sendText(business.whatsapp_number,
+        `📉 Low stock: *${p.name}* — ${qtyLabel}. Update it from your dashboard.`,
+        { businessId: business.id }
+      ).catch(err => logger.warn('low-stock nudge failed for %s: %s', p.id, err.message));
+    }
+  }
 
   return { handled: true, order: updated };
 }

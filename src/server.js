@@ -10,6 +10,7 @@ const notification = require('./services/notification.service');
 const webhookProcessor = require('./services/webhook.processor');
 const paymentSweeper = require('./services/payment.sweeper');
 const cartNudge = require('./services/cart.nudge');
+const broadcastSender = require('./services/broadcast.sender');
 const { requireAuth } = require('./middleware/auth');
 
 const webhookRoutes = require('./routes/webhook.routes');
@@ -21,6 +22,11 @@ const productRoutes = require('./routes/product.routes');
 const authRoutes = require('./routes/auth.routes');
 const customerRoutes = require('./routes/customer.routes');
 const businessRoutes = require('./routes/business.routes');
+const analyticsRoutes = require('./routes/analytics.routes');
+const conversationsRoutes = require('./routes/conversations.routes');
+const broadcastRoutes = require('./routes/broadcast.routes');
+const promoRoutes = require('./routes/promo.routes');
+const receiptRoutes = require('./routes/receipt.routes');
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
@@ -137,6 +143,12 @@ app.use('/api/products', apiLimiter, productRoutes);
 app.use('/api/auth', apiLimiter, authRoutes);
 app.use('/api/customers', apiLimiter, customerRoutes);
 app.use('/api/business', apiLimiter, businessRoutes);
+app.use('/api/analytics', apiLimiter, analyticsRoutes);
+app.use('/api/conversations', apiLimiter, conversationsRoutes);
+app.use('/api/broadcasts', apiLimiter, broadcastRoutes);
+app.use('/api/promos', apiLimiter, promoRoutes);
+// Public, unauthenticated — the order id itself is the shareable capability.
+app.use('/api/receipts', apiLimiter, receiptRoutes);
 
 // Public system status — powers the (honest) status page. Exposes only
 // coarse operational signals, never tenant data.
@@ -249,7 +261,15 @@ function startCronJobs() {
     );
   }, { timezone: 'Africa/Accra' });
 
-  logger.info('Cron jobs scheduled (Africa/Accra) — 08:00 renewals, 09:00 reminders, 10:00 suspensions, 5-min payment sweeper, 15-min cart nudges, weekly prune.');
+  // Broadcast queue drain, once a minute — small rate-limited batches so a
+  // merchant's re-engagement blast never bursts past Meta's send limits.
+  cron.schedule('* * * * *', () => {
+    broadcastSender.runBroadcastSenderJob().catch(err =>
+      logger.error('broadcastSenderJob crashed: %s', err.message, { stack: err.stack })
+    );
+  }, { timezone: 'Africa/Accra' });
+
+  logger.info('Cron jobs scheduled (Africa/Accra) — 08:00 renewals, 09:00 reminders, 10:00 suspensions, 5-min payment sweeper, 15-min cart nudges, 1-min broadcast drain, weekly prune.');
 }
 
 /* -------------------------------------------------------------------------
