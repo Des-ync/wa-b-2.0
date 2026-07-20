@@ -7,7 +7,9 @@
  * starting with = + - @ or a leading tab/CR). */
 function csvCell(v) {
   let s = String(v == null ? '' : v);
-  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+  // Neutralize even when the formula trigger is preceded by whitespace
+  // (" =1+1" still executes in some spreadsheet apps once trimmed).
+  if (/^\s*[=+\-@\t\r]/.test(s)) s = "'" + s;
   return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 }
 

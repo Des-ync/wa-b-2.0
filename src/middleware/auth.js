@@ -238,6 +238,12 @@ function requireAuth(requiredScope = 'any') {
  */
 function requirePermission(capability, mode = 'write') {
   return (req, res, next) => {
+    // Defense-in-depth: requirePermission must never be the only auth gate.
+    // If requireAuth was not mounted ahead of it, req.auth is undefined —
+    // fail closed instead of falling back to the all-powerful 'owner' role.
+    if (!req.auth) {
+      return res.status(401).json({ success: false, error: 'Authentication required' });
+    }
     if (req.auth?.scope === 'admin') return next();
     const role = req.auth?.role || 'owner';
     if (!can(role, capability, mode)) {

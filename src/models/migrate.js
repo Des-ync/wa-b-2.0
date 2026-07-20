@@ -829,6 +829,10 @@ CREATE INDEX IF NOT EXISTS idx_audit_log_created ON audit_log(created_at DESC);
 ALTER TABLE billing_transactions DROP CONSTRAINT IF EXISTS billing_transactions_gateway_check;
 ALTER TABLE billing_transactions ADD CONSTRAINT billing_transactions_gateway_check
   CHECK (gateway IN ('hubtel','paystack','pawapay'));
+-- Pin the plan a charge was raised for AT INITIATION. Previously the plan was
+-- resolved dynamically at payment time from subscriptions.pending_plan_id, so a
+-- plan change landing between charge and callback would apply the wrong tier.
+ALTER TABLE billing_transactions ADD COLUMN IF NOT EXISTS plan_id UUID REFERENCES plans(id);
 ALTER TABLE webhook_events DROP CONSTRAINT IF EXISTS webhook_events_source_check;
 ALTER TABLE webhook_events ADD CONSTRAINT webhook_events_source_check
   CHECK (source IN ('whatsapp','paystack','hubtel','pawapay','instagram','messenger'));

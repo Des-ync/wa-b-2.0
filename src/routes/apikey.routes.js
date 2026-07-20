@@ -15,7 +15,7 @@ const KEY_COLUMNS = 'id, business_id, name, scope, role, expires_at, last_used_a
  * GET /api/keys?business_id= — every key for a business, oldest revoked
  * ones included so a rotation trail is visible. Never returns the hash.
  */
-router.get('/', async (req, res) => {
+router.get('/', requirePermission('staff', 'read'), async (req, res) => {
   try {
     const businessId = req.query.business_id || req.auth?.businessId;
     if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });

@@ -1,6 +1,6 @@
 const express = require('express');
 const logger = require('../utils/logger');
-const { query } = require('../config/database');
+const { query, transaction } = require('../config/database');
 const { requireAuth } = require('../middleware/auth');
 const { tenantBlocksBusinessId } = require('../middleware/tenantAccess');
 
@@ -133,15 +133,19 @@ router.post('/reorder', async (req, res) => {
     if (!Array.isArray(order) || !order.length || order.length > 200) {
       return res.status(400).json({ success: false, error: 'order must be a non-empty array of category names (max 200)' });
     }
-    for (let i = 0; i < order.length; i++) {
-      const name = String(order[i] || '').trim().toLowerCase().slice(0, 60);
-      if (!name) continue;
-      await query(
-        `INSERT INTO categories (business_id, name, sort_order) VALUES ($1,$2,$3)
-         ON CONFLICT (business_id, lower(name)) DO UPDATE SET sort_order = $3`,
-        [businessId, name, i]
-      );
-    }
+    // All-or-nothing: a failure partway through must not leave the category
+    // ordering half-applied.
+    await transaction(async client => {
+      for (let i = 0; i < order.length; i++) {
+        const name = String(order[i] || '').trim().toLowerCase().slice(0, 60);
+        if (!name) continue;
+        await client.query(
+          `INSERT INTO categories (business_id, name, sort_order) VALUES ($1,$2,$3)
+           ON CONFLICT (business_id, lower(name)) DO UPDATE SET sort_order = $3`,
+          [businessId, name, i]
+        );
+      }
+    });
     const result = await query(
       'SELECT * FROM categories WHERE business_id = $1 ORDER BY sort_order ASC, name ASC',
       [businessId]

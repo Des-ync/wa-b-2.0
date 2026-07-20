@@ -80,9 +80,19 @@ process.on('uncaughtException', err => {
   logger.error('Uncaught exception: %s', err.stack || err.message);
 });
 
-function shutdown(signal) {
+async function shutdown(signal) {
   logger.info('Received %s, shutting down worker...', signal);
   try { webhookProcessor.stop(); } catch (_e) { /* ignore */ }
+  // Stop cron so nothing new fires against a closing pool.
+  try { for (const task of cron.getTasks().values()) task.stop(); } catch (_e) { /* ignore */ }
+
+  // Let any in-flight webhook drain finish (up to ~10s) so mid-flight events
+  // aren't truncated into a stuck 'processing' state.
+  const deadline = Date.now() + 10_000;
+  while (webhookProcessor.isRunning() && Date.now() < deadline) {
+    await new Promise(resolve => setTimeout(resolve, 200));
+  }
+
   pool.end()
     .catch(() => {})
     .finally(() => process.exit(0));

@@ -18,6 +18,10 @@ function verifyHmacSignature(rawBody, signature, secret, label) {
     return false;
   }
   if (!signature || !signature.startsWith('sha256=')) return false;
+  // A malformed request (e.g. wrong content-type so express.raw() left req.body
+  // as {}) would make crypto .update() throw a TypeError. Guard the type so a
+  // bad body is a clean rejection, not an uncaught exception in the handler.
+  if (!Buffer.isBuffer(rawBody) && typeof rawBody !== 'string') return false;
   const expected = 'sha256=' + crypto
     .createHmac('sha256', secret)
     .update(rawBody)
@@ -72,6 +76,48 @@ function externalIdFor(payload) {
 }
 
 /**
+ * Meta batches deliveries: a single POST can carry multiple entries, multiple
+ * changes, and multiple messages/statuses. The old code only ever looked at
+ * entry[0].changes[0].value.messages[0], silently dropping everything else.
+ * Flatten the payload into one atomic queue event per message (and one per
+ * status batch), each with its own stable external_id so idempotency still
+ * holds. A plain single-message webhook yields exactly one event with the same
+ * `msg:{id}` external_id as before, so dedup behaviour is unchanged.
+ */
+function splitWhatsAppEvents(payload) {
+  const events = [];
+  const entries = Array.isArray(payload?.entry) ? payload.entry : [];
+  for (const entry of entries) {
+    const changes = Array.isArray(entry?.changes) ? entry.changes : [];
+    for (const change of changes) {
+      const value = change?.value || {};
+      const messages = Array.isArray(value.messages) ? value.messages : [];
+      for (const msg of messages) {
+        const single = {
+          ...payload,
+          entry: [{ ...entry, changes: [{ ...change, value: { ...value, messages: [msg], statuses: [] } }] }]
+        };
+        events.push({ externalId: externalIdFor(single), payload: single });
+      }
+      const statuses = Array.isArray(value.statuses) ? value.statuses : [];
+      if (statuses.length) {
+        const statusOnly = {
+          ...payload,
+          entry: [{ ...entry, changes: [{ ...change, value: { ...value, messages: [], statuses } }] }]
+        };
+        events.push({ externalId: externalIdFor(statusOnly), payload: statusOnly });
+      }
+    }
+  }
+  // No recognizable message/status content — fall back to one hashed event so
+  // nothing is silently swallowed (e.g. account_update, template events).
+  if (!events.length) {
+    events.push({ externalId: externalIdFor(payload), payload });
+  }
+  return events;
+}
+
+/**
  * POST /api/webhooks/whatsapp
  * Verify Meta x-hub-signature-256, persist to webhook_events (idempotent on
  * (source, external_id)) BEFORE responding. A worker drains the queue durably —
@@ -94,18 +140,19 @@ router.post('/whatsapp', async (req, res) => {
     return res.status(400).send('invalid json');
   }
 
-  const externalId = externalIdFor(payload);
-
   try {
-    const { duplicate } = await queue.enqueue({
-      source: 'whatsapp',
-      externalId,
-      payload,
-      signatureValid: true,
-      signatureHeader: signature
-    });
-    if (duplicate) {
-      logger.info('WhatsApp webhook duplicate ignored: %s', externalId);
+    const events = splitWhatsAppEvents(payload);
+    for (const ev of events) {
+      const { duplicate } = await queue.enqueue({
+        source: 'whatsapp',
+        externalId: ev.externalId,
+        payload: ev.payload,
+        signatureValid: true,
+        signatureHeader: signature
+      });
+      if (duplicate) {
+        logger.info('WhatsApp webhook duplicate ignored: %s', ev.externalId);
+      }
     }
     return res.status(200).send('EVENT_RECEIVED');
   } catch (err) {

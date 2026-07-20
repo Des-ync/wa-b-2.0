@@ -160,9 +160,27 @@ async function createOrder({ businessId, customerId, cart, deliveryAddress, deli
       [customerId]
     );
 
+    // Promo/reward validity was checked before this transaction opened, but the
+    // consume MUST re-check under a row lock — otherwise two concurrent checkouts
+    // both pass the earlier check and both consume, double-redeeming a reward or
+    // blowing past a promo's max_uses.
     if (promo?.source === 'reward') {
+      const lock = await client.query(
+        `SELECT redeemed_at FROM customer_rewards WHERE id = $1 FOR UPDATE`,
+        [promo.reward_id]
+      );
+      if (!lock.rows.length) throw new Error('Reward not found');
+      if (lock.rows[0].redeemed_at) throw new Error('Reward has already been redeemed');
       await client.query(`UPDATE customer_rewards SET redeemed_at = NOW() WHERE id = $1`, [promo.reward_id]);
     } else if (promo?.id) {
+      const lock = await client.query(
+        `SELECT max_uses, used_count FROM promos WHERE id = $1 FOR UPDATE`,
+        [promo.id]
+      );
+      const row = lock.rows[0];
+      if (row && row.max_uses != null && row.used_count >= row.max_uses) {
+        throw new Error('Promo code usage limit has been exceeded');
+      }
       await client.query(`UPDATE promos SET used_count = used_count + 1 WHERE id = $1`, [promo.id]);
     }
 
@@ -516,55 +534,62 @@ async function createRefund({ orderId, businessId, amountGhs, reason }) {
   const amount = Number(amountGhs);
   if (!Number.isFinite(amount) || amount <= 0) throw new Error('amountGhs must be a positive number');
 
-  const order = await getOrderById(orderId);
-  if (!order) throw new Error('Order not found');
-  if (order.payment_status !== 'paid' && order.payment_status !== 'refunded') {
-    throw new Error('Only paid orders can be refunded');
-  }
-
-  const existing = await query(
-    `SELECT COALESCE(SUM(amount_ghs), 0) AS total FROM order_refunds WHERE order_id = $1 AND status = 'processed'`,
-    [orderId]
-  );
-  const alreadyRefunded = Number(existing.rows[0].total);
-  if (alreadyRefunded + amount > Number(order.total_ghs) + 0.01) {
-    throw new Error(`Refund of ${amount} would exceed the order total (already refunded: ${alreadyRefunded}, order total: ${order.total_ghs})`);
-  }
-
-  let status = 'pending';
-  let gatewayRef = null;
-  if (order.payment_method !== 'cash' && order.payment_ref) {
-    const result = await paystack.refundTransaction(order.payment_ref, amount);
-    if (result.success) {
-      status = 'processed';
-      gatewayRef = result.gateway_ref || null;
-    } else {
-      logger.warn('refund gateway call failed for order %s: %s', orderId, result.error);
+  // Whole thing runs in one transaction with the order row locked FOR UPDATE.
+  // Without the lock, two concurrent refunds (e.g. a merchant double-click) both
+  // read the same "already refunded" total, both pass the ceiling check, and
+  // together over-refund past what was actually paid.
+  return transaction(async client => {
+    const orderRes = await client.query(`SELECT * FROM orders WHERE id = $1 FOR UPDATE`, [orderId]);
+    const order = orderRes.rows[0];
+    if (!order) throw new Error('Order not found');
+    if (order.payment_status !== 'paid' && order.payment_status !== 'refunded') {
+      throw new Error('Only paid orders can be refunded');
     }
-  } else {
-    // Cash refunds have no gateway leg — the merchant handed cash back, so
-    // the record is processed the moment it's logged.
-    status = 'processed';
-  }
 
-  const inserted = await query(
-    `INSERT INTO order_refunds (order_id, business_id, amount_ghs, reason, status, gateway_ref, processed_at)
-     VALUES ($1,$2,$3,$4,$5,$6, CASE WHEN $5 = 'processed' THEN NOW() ELSE NULL END)
-     RETURNING *`,
-    [orderId, businessId, amount.toFixed(2), reason || null, status, gatewayRef]
-  );
+    const existing = await client.query(
+      `SELECT COALESCE(SUM(amount_ghs), 0) AS total FROM order_refunds WHERE order_id = $1 AND status = 'processed'`,
+      [orderId]
+    );
+    const alreadyRefunded = Number(existing.rows[0].total);
+    if (alreadyRefunded + amount > Number(order.total_ghs) + 0.01) {
+      throw new Error(`Refund of ${amount} would exceed the order total (already refunded: ${alreadyRefunded}, order total: ${order.total_ghs})`);
+    }
 
-  const totalAfter = alreadyRefunded + (status === 'processed' ? amount : 0);
-  if (status === 'processed' && totalAfter >= Number(order.total_ghs) - 0.01) {
-    await query(`UPDATE orders SET payment_status = 'refunded' WHERE id = $1`, [orderId]);
-  }
+    let status = 'pending';
+    let gatewayRef = null;
+    if (order.payment_method !== 'cash' && order.payment_ref) {
+      const result = await paystack.refundTransaction(order.payment_ref, amount);
+      if (result.success) {
+        status = 'processed';
+        gatewayRef = result.gateway_ref || null;
+      } else {
+        logger.warn('refund gateway call failed for order %s: %s', orderId, result.error);
+      }
+    } else {
+      // Cash refunds have no gateway leg — the merchant handed cash back, so
+      // the record is processed the moment it's logged.
+      status = 'processed';
+    }
 
-  await logOrderEvent(orderId, `refund:${status}`, {
-    note: `GH₵${amount.toFixed(2)}${reason ? ' — ' + reason : ''}`,
-    changedBy: 'merchant'
+    const inserted = await client.query(
+      `INSERT INTO order_refunds (order_id, business_id, amount_ghs, reason, status, gateway_ref, processed_at)
+       VALUES ($1,$2,$3,$4,$5,$6, CASE WHEN $5 = 'processed' THEN NOW() ELSE NULL END)
+       RETURNING *`,
+      [orderId, businessId, amount.toFixed(2), reason || null, status, gatewayRef]
+    );
+
+    const totalAfter = alreadyRefunded + (status === 'processed' ? amount : 0);
+    if (status === 'processed' && totalAfter >= Number(order.total_ghs) - 0.01) {
+      await client.query(`UPDATE orders SET payment_status = 'refunded' WHERE id = $1`, [orderId]);
+    }
+
+    await logOrderEvent(orderId, `refund:${status}`, {
+      note: `GH₵${amount.toFixed(2)}${reason ? ' — ' + reason : ''}`,
+      changedBy: 'merchant'
+    }, client);
+
+    return inserted.rows[0];
   });
-
-  return inserted.rows[0];
 }
 
 async function getOrderHistory(orderId) {
@@ -753,7 +778,17 @@ async function markOrderPaid({ orderId, paymentRef, paymentMethod, amount }) {
     // newly at-or-below its own low_stock_threshold gets flagged for a
     // merchant nudge — low_stock_notified prevents re-nudging on every sale.
     const lowStock = [];
-    const items = Array.isArray(order.items) ? order.items : [];
+    // Decrement in a stable (product_id, variant_id) order so two concurrent
+    // checkouts of the same items in different cart orders can't grab row locks
+    // in opposite sequences and deadlock. Sort a copy — never mutate order.items.
+    const items = (Array.isArray(order.items) ? [...order.items] : []).sort((a, b) => {
+      const pa = String(a.product_id || '');
+      const pb = String(b.product_id || '');
+      if (pa !== pb) return pa < pb ? -1 : 1;
+      const va = String(a.variant_id || '');
+      const vb = String(b.variant_id || '');
+      return va < vb ? -1 : va > vb ? 1 : 0;
+    });
     for (const item of items) {
       if (!item.product_id) continue;
       const qty = Math.max(1, Number(item.quantity) || 1);

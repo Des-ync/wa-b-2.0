@@ -53,7 +53,12 @@ async function withLock(jobName, ttlSeconds, fn) {
     await fn();
     return { ran: true };
   } finally {
-    await release(jobName);
+    // Never let a lock-release failure mask the real error from fn().
+    try {
+      await release(jobName);
+    } catch (releaseErr) {
+      logger.warn('[lock] Failed to release %s: %s', jobName, releaseErr.message);
+    }
   }
 }
 

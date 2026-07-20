@@ -66,6 +66,16 @@ router.post('/', requirePermission('promos'), async (req, res) => {
     if (maxUses !== null && !(maxUses > 0)) {
       return res.status(400).json({ success: false, error: 'max_uses must be a positive integer' });
     }
+    // Validate the date here rather than letting an unparseable string reach
+    // Postgres and surface as a generic 500.
+    let expiresAt = null;
+    if (expires_at != null && expires_at !== '') {
+      const d = new Date(expires_at);
+      if (Number.isNaN(d.getTime())) {
+        return res.status(400).json({ success: false, error: 'expires_at must be a valid date' });
+      }
+      expiresAt = d.toISOString();
+    }
 
     let minOrderGhs = null;
     if (req.body?.min_order_ghs != null && req.body.min_order_ghs !== '') {
@@ -93,7 +103,7 @@ router.post('/', requirePermission('promos'), async (req, res) => {
          min_order_ghs, first_order_only, customer_tag, customer_segment, product_id, category
        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
        RETURNING ${PROMO_COLUMNS}`,
-      [business_id, code, type, value, expires_at || null, maxUses,
+      [business_id, code, type, value, expiresAt, maxUses,
         minOrderGhs, firstOrderOnly, customerTag, customerSegment, productId, category]
     );
     recordAudit({

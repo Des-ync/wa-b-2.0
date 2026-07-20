@@ -342,6 +342,9 @@ process.on('uncaughtException', err => {
 function gracefulShutdown(signal) {
   logger.info('Received %s, shutting down gracefully...', signal);
   try { webhookProcessor.stop(); } catch (_e) { /* ignore */ }
+  // Stop cron jobs before tearing down the pool, otherwise a job firing during
+  // shutdown queries a closed pool and logs a crash.
+  try { for (const task of cron.getTasks().values()) task.stop(); } catch (_e) { /* ignore */ }
   server.close(async () => {
     try { await pool.end(); } catch (_e) { /* ignore */ }
     process.exit(0);

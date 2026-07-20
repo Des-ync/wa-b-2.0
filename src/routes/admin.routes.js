@@ -457,8 +457,13 @@ function tailErrorLog(maxEntries = 100) {
     const readBytes = Math.min(stat.size, 256 * 1024);
     const fd = fs.openSync(file, 'r');
     const buf = Buffer.alloc(readBytes);
-    fs.readSync(fd, buf, 0, readBytes, stat.size - readBytes);
-    fs.closeSync(fd);
+    try {
+      fs.readSync(fd, buf, 0, readBytes, stat.size - readBytes);
+    } finally {
+      // Guarantee the descriptor is closed even if the read throws — otherwise
+      // repeated failures leak fds until the process hits EMFILE.
+      fs.closeSync(fd);
+    }
     return buf.toString('utf8')
       .split('\n')
       .filter(Boolean)

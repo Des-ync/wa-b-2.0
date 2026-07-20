@@ -85,6 +85,10 @@ async function claimNext(source) {
 }
 
 async function markDone(eventId) {
+  // Scope the write to the worker that currently holds the lock. If this event
+  // was reclaimed by another worker (because we blew past LOCK_TTL_SECONDS), our
+  // late completion must NOT clobber the new owner's state — the AND makes it a
+  // no-op in that case.
   await query(
     `UPDATE webhook_events
         SET status = 'done',
@@ -92,8 +96,8 @@ async function markDone(eventId) {
             locked_at = NULL,
             locked_by = NULL,
             last_error = NULL
-      WHERE id = $1`,
-    [eventId]
+      WHERE id = $1 AND locked_by = $2`,
+    [eventId, WORKER_ID]
   );
 }
 
@@ -109,10 +113,10 @@ async function markFailed(eventId, errorMsg, attempts, source) {
             locked_at       = NULL,
             locked_by       = NULL,
             next_attempt_at = NOW() + ($4 || ' seconds')::interval
-      WHERE id = $1`,
+      WHERE id = $1 AND locked_by = $5`,
     [eventId, String(errorMsg || '').slice(0, 2000),
      exhausted ? 'failed' : 'pending',
-     String(delay)]
+     String(delay), WORKER_ID]
   );
 
   // A webhook that never processes after every retry is real money or a

@@ -50,6 +50,14 @@ async function processPaystack(payload) {
   }
 
   if (eventType === 'charge.success' && data.status === 'success') {
+    // Paystack accounts can be multi-currency. `amount` is a bare minor-unit
+    // integer with no currency baked in, so a 1000 NGN charge would otherwise
+    // be credited as GH₵10.00. Only trust GHS charges.
+    if (data.currency && data.currency !== 'GHS') {
+      logger.error('Paystack charge %s completed in unexpected currency %s; dropping',
+        reference, data.currency);
+      return;
+    }
     await conversation.handlePaymentSuccess({ reference, gatewayRef, amount });
     return;
   }
@@ -91,7 +99,7 @@ async function applyBillingFailure({ reference, errorPayload, reason }) {
        FROM billing_transactions bt
        JOIN subscriptions s ON s.id = bt.subscription_id
        JOIN businesses b   ON b.id = bt.business_id
-       JOIN plans p        ON p.id = COALESCE(s.pending_plan_id, s.plan_id)
+       JOIN plans p        ON p.id = COALESCE(bt.plan_id, s.pending_plan_id, s.plan_id)
       WHERE bt.reference = $1`,
     [reference]
   );
@@ -194,6 +202,12 @@ const PROCESSORS = {
 
 let _running = false;
 let _timer = null;
+let _lastReclaimAt = 0;
+
+// Reclaiming stuck events only matters after a worker has actually been dead
+// longer than LOCK_TTL (60s). Running the two full-table sweeps on every 1.5s
+// tick was pure write contention for no benefit — a ~60s cooldown covers it.
+const RECLAIM_COOLDOWN_MS = 60_000;
 
 /**
  * Drain the queue, then schedule the next poll. Single-flight: never two drains
@@ -203,8 +217,13 @@ async function tick() {
   if (_running) return;
   _running = true;
   try {
-    // Free up events stuck in 'processing' from a prior crash.
-    await queue.reclaimStuck().catch(err => logger.warn('reclaimStuck failed: %s', err.message));
+    // Free up events stuck in 'processing' from a prior crash — on a cooldown,
+    // not every tick.
+    const now = Date.now();
+    if (now - _lastReclaimAt >= RECLAIM_COOLDOWN_MS) {
+      _lastReclaimAt = now;
+      await queue.reclaimStuck().catch(err => logger.warn('reclaimStuck failed: %s', err.message));
+    }
     const processed = await queue.drain(PROCESSORS, { maxBatch: 50 });
     if (processed > 0) logger.debug('Drained %d webhook event(s)', processed);
   } catch (err) {
@@ -235,4 +254,9 @@ function stop() {
   }
 }
 
-module.exports = { start, stop, tick, PROCESSORS };
+/** True while a drain tick is mid-flight — lets a graceful shutdown wait it out. */
+function isRunning() {
+  return _running;
+}
+
+module.exports = { start, stop, tick, isRunning, applyBillingSuccess, applyBillingFailure, PROCESSORS };

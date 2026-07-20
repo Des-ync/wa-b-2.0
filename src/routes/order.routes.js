@@ -3,7 +3,7 @@ const logger = require('../utils/logger');
 const orderService = require('../services/order.service');
 const notification = require('../services/notification.service');
 const { query } = require('../config/database');
-const { normalizeGhanaPhone, detectNetwork } = require('../utils/helpers');
+const { normalizeGhanaPhone, detectNetwork, isWithinBusinessHours } = require('../utils/helpers');
 const { requireAuth, requirePermission } = require('../middleware/auth');
 const { tenantBlocksBusinessId } = require('../middleware/tenantAccess');
 const { csvCell } = require('../utils/csv');
@@ -165,7 +165,7 @@ router.post('/', async (req, res) => {
     const addonIds = [...new Set(wanted.flatMap(i => Array.isArray(i.addon_ids) ? i.addon_ids : []).filter(Boolean).map(String))];
     const [r, vr, ar] = await Promise.all([
       ids.length
-        ? query(`SELECT id, name, price_ghs FROM products WHERE business_id = $1 AND id = ANY($2::uuid[])`, [business_id, ids])
+        ? query(`SELECT id, name, price_ghs, in_stock, hidden, available_from, available_to FROM products WHERE business_id = $1 AND id = ANY($2::uuid[])`, [business_id, ids])
         : Promise.resolve({ rows: [] }),
       variantIds.length
         ? query(`SELECT id, product_id, name, price_delta_ghs FROM product_variants WHERE business_id = $1 AND id = ANY($2::uuid[])`, [business_id, variantIds])
@@ -183,6 +183,18 @@ router.post('/', async (req, res) => {
       const p = byId.get(String(item.product_id));
       if (!p) {
         return res.status(400).json({ success: false, error: `Product not found: ${item.product_id}` });
+      }
+      // Don't let customers order items that aren't actually purchasable right
+      // now — hidden from the menu, out of stock, or outside their daily
+      // availability window. Otherwise the merchant just has to cancel later.
+      if (p.hidden) {
+        return res.status(400).json({ success: false, error: `Product not available: ${p.name}` });
+      }
+      if (p.in_stock === false) {
+        return res.status(400).json({ success: false, error: `Out of stock: ${p.name}` });
+      }
+      if (!isWithinBusinessHours(p.available_from, p.available_to)) {
+        return res.status(400).json({ success: false, error: `${p.name} is not available at this time` });
       }
       const variant = item.variant_id ? variantById.get(String(item.variant_id)) : null;
       if (item.variant_id && (!variant || variant.product_id !== p.id)) {

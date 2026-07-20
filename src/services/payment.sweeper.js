@@ -16,7 +16,10 @@
 const logger = require('../utils/logger');
 const { query } = require('../config/database');
 const paystack = require('./paystack.service');
+const pawapay = require('./pawapay.service');
 const orderService = require('./order.service');
+const subService = require('./subscription.service');
+const webhookProcessor = require('./webhook.processor');
 const conversation = require('./conversation.handler');
 const { getAdapter, destOf } = require('./channel.adapter');
 const lock = require('./worker.lock');
@@ -24,6 +27,9 @@ const lock = require('./worker.lock');
 const PENDING_TTL_MINUTES = parseInt(process.env.PAYMENT_PENDING_TTL_MINUTES || '15', 10);
 const HARD_EXPIRE_HOURS = parseInt(process.env.PAYMENT_HARD_EXPIRE_HOURS || '24', 10);
 const STALE_ORDER_HOURS = parseInt(process.env.STALE_ORDER_HOURS || '48', 10);
+// SaaS subscription billing (pawaPay) has its own, slightly longer grace before
+// we reconcile — a MoMo approval prompt can legitimately sit a few minutes.
+const BILLING_PENDING_TTL_MINUTES = parseInt(process.env.BILLING_PENDING_TTL_MINUTES || '30', 10);
 
 async function expirePendingPayment(order) {
   await orderService.markOrderFailed({ orderId: order.id, paymentRef: order.payment_ref });
@@ -43,6 +49,73 @@ async function expirePendingPayment(order) {
     }
   } catch (err) {
     logger.warn('[sweeper] retry notice failed for order %s: %s', order.order_number, err.message);
+  }
+}
+
+/**
+ * Reconcile SaaS subscription billing_transactions stuck at 'pending'. Only one
+ * pending charge per subscription is allowed (to prevent double billing), so a
+ * charge abandoned by the customer — or one left pending by a transient gateway
+ * error / lost callback — would otherwise block the merchant from ever renewing.
+ * We ask pawaPay for the true state and resolve it: applied, failed, or (after
+ * the hard-expiry window) force-failed to release the lock.
+ */
+async function reconcileStaleBilling() {
+  const stale = await query(
+    `SELECT * FROM billing_transactions
+      WHERE status = 'pending'
+        AND gateway = 'pawapay'
+        AND initiated_at < NOW() - ($1 || ' minutes')::interval
+      ORDER BY initiated_at ASC
+      LIMIT 25`,
+    [String(BILLING_PENDING_TTL_MINUTES)]
+  );
+  if (!stale.rows.length) return;
+  logger.info('[sweeper] %d stale pending billing transaction(s) to reconcile', stale.rows.length);
+
+  for (const tx of stale.rows) {
+    try {
+      const verified = await pawapay.checkDepositStatus(tx.reference);
+      if (!verified.success) {
+        logger.warn('[sweeper] billing status check failed ref=%s: %s', tx.reference, verified.error);
+        continue; // Try again next run.
+      }
+
+      if (verified.completed) {
+        if (verified.currency && verified.currency !== 'GHS') {
+          logger.error('[sweeper] billing %s completed in unexpected currency %s; failing',
+            tx.reference, verified.currency);
+          await subService.markPaymentFailed({ reference: tx.reference, errorPayload: { currency: verified.currency } });
+          continue;
+        }
+        logger.info('[sweeper] billing %s actually paid — applying', tx.reference);
+        await webhookProcessor.applyBillingSuccess({
+          reference: tx.reference,
+          transactionId: verified.providerTransactionId,
+          amount: verified.amount
+        });
+        continue;
+      }
+
+      if (verified.failed || !verified.found) {
+        await webhookProcessor.applyBillingFailure({
+          reference: tx.reference,
+          errorPayload: verified.failureReason || { notFound: !verified.found },
+          reason: verified.failureReason?.failureCode || (!verified.found ? 'not_found' : 'declined')
+        });
+        continue;
+      }
+
+      // Still in flight (ACCEPTED/PROCESSING). Give it until the hard-expiry
+      // window, then stop waiting so the subscription isn't blocked forever.
+      const ageHours = (Date.now() - new Date(tx.initiated_at).getTime()) / 3_600_000;
+      if (ageHours >= HARD_EXPIRE_HOURS) {
+        logger.warn('[sweeper] hard-failing billing %s after %dh pending', tx.reference, HARD_EXPIRE_HOURS);
+        await subService.markPaymentFailed({ reference: tx.reference, errorPayload: { reason: 'hard_expired' } });
+      }
+    } catch (err) {
+      logger.error('[sweeper] billing reconcile failed for ref=%s: %s', tx.reference, err.message);
+    }
   }
 }
 
@@ -111,7 +184,15 @@ async function runPaymentSweeper() {
     } catch (err) {
       logger.error('[sweeper] abandoned-order cleanup failed: %s', err.message);
     }
+
+    // Reconcile stuck SaaS subscription charges so a lost webhook / transient
+    // gateway error can't block a merchant's renewals indefinitely.
+    try {
+      await reconcileStaleBilling();
+    } catch (err) {
+      logger.error('[sweeper] billing reconciliation failed: %s', err.message);
+    }
   });
 }
 
-module.exports = { runPaymentSweeper };
+module.exports = { runPaymentSweeper, reconcileStaleBilling };

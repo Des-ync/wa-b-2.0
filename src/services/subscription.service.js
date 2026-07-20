@@ -167,10 +167,10 @@ async function initiateRenewal({ business, plan }) {
     const reference = uuidv4();
     const ins = await client.query(
       `INSERT INTO billing_transactions
-         (business_id, subscription_id, amount_ghs, gateway, reference, status)
-       VALUES ($1,$2,$3,'pawapay',$4,'pending')
+         (business_id, subscription_id, amount_ghs, gateway, reference, status, plan_id)
+       VALUES ($1,$2,$3,'pawapay',$4,'pending',$5)
        RETURNING *`,
-      [business.id, subscription.id, plan.price_ghs, reference]
+      [business.id, subscription.id, plan.price_ghs, reference, plan.id]
     );
     return { billing: ins.rows[0], subscription };
   });
@@ -197,6 +197,18 @@ async function initiateRenewal({ business, plan }) {
   });
 
   if (!charge.success) {
+    if (charge.transient) {
+      // Don't mark failed — the charge may actually have gone through. Leave it
+      // 'pending' so the pawaPay callback or the billing sweeper reconciles the
+      // true outcome. Record the transport error for visibility only.
+      await query(
+        `UPDATE billing_transactions SET gateway_response = $2::jsonb WHERE reference = $1`,
+        [reference, JSON.stringify({ transient: true, error: charge.error })]
+      );
+      logger.warn('initiateRenewal: transient gateway error ref=%s — left pending for reconciliation: %s',
+        reference, charge.error);
+      return { success: false, pending: true, error: charge.error, reference, status: 'pending' };
+    }
     await query(
       `UPDATE billing_transactions
           SET status = 'failed',
@@ -243,9 +255,11 @@ async function applySuccessfulPayment({ reference, transactionId, amount }) {
               p.display_name AS plan_display_name, p.price_ghs AS plan_price_ghs
          FROM billing_transactions bt
          JOIN subscriptions s ON s.id = bt.subscription_id
-         -- The charge was created for the pending plan when a change is in
-         -- flight, so cycle/name must come from that plan, not the current one.
-         JOIN plans p ON p.id = COALESCE(s.pending_plan_id, s.plan_id)
+         -- Resolve cycle/name/price from the plan this charge was RAISED for
+         -- (bt.plan_id, pinned at initiation). Fall back to the subscription's
+         -- pending/current plan only for legacy rows created before plan_id
+         -- existed, so a plan change mid-flight can't apply the wrong tier.
+         JOIN plans p ON p.id = COALESCE(bt.plan_id, s.pending_plan_id, s.plan_id)
         WHERE bt.reference = $1
         FOR UPDATE`,
       [reference]
@@ -316,7 +330,7 @@ async function applySuccessfulPayment({ reference, transactionId, amount }) {
     const subRes = await client.query(
       `UPDATE subscriptions
           SET status = 'active',
-              plan_id              = COALESCE(pending_plan_id, plan_id),
+              plan_id              = COALESCE($5, pending_plan_id, plan_id),
               pending_plan_id      = NULL,
               current_period_start = $2,
               current_period_end   = $3,
@@ -327,7 +341,7 @@ async function applySuccessfulPayment({ reference, transactionId, amount }) {
               last_payment_ref     = $4
         WHERE id = $1
         RETURNING *`,
-      [billing.subscription_id, now, periodEnd, reference]
+      [billing.subscription_id, now, periodEnd, reference, billing.plan_id || null]
     );
 
     await client.query(
@@ -404,6 +418,10 @@ async function markPaymentFailed({ reference, errorPayload }) {
  */
 async function cancelSubscription(businessId) {
   return transaction(async client => {
+    // Lock the business row FIRST, then subscriptions. suspendBusiness() takes
+    // the same businesses→subscriptions order; acquiring locks in one global
+    // order is what prevents a cancel-vs-suspend deadlock.
+    await client.query(`SELECT id FROM businesses WHERE id = $1 FOR UPDATE`, [businessId]);
     const subs = await client.query(
       `SELECT * FROM subscriptions WHERE business_id = $1 FOR UPDATE`,
       [businessId]

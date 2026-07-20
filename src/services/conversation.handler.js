@@ -349,9 +349,14 @@ async function loadOrCreateState(customerId) {
     }
     return existing.rows[0];
   }
+  // Two messages from a brand-new customer can land on two workers at once,
+  // racing this insert. ON CONFLICT makes the loser return the row the winner
+  // just created instead of throwing a unique-violation that aborts (and drops)
+  // the webhook. DO UPDATE (not DO NOTHING) guarantees a row is always returned.
   const ins = await query(
     `INSERT INTO conversation_state (customer_id, current_flow, current_step, flow_data)
      VALUES ($1, 'idle', 'start', '{}'::jsonb)
+     ON CONFLICT (customer_id) DO UPDATE SET updated_at = NOW()
      RETURNING *`,
     [customerId]
   );

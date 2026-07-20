@@ -11,6 +11,13 @@ const paystack = require('../src/services/paystack.service');
 let currentRefund = async () => { throw new Error('no refund handler installed for this test'); };
 paystack.refundTransaction = (...args) => currentRefund(...args);
 
+// createRefund now runs inside a transaction (order-row FOR UPDATE lock). Route
+// the fake client's query() through the same substring matcher `withQuery`
+// installs, so the existing refund handlers keep working unchanged. Installed
+// BEFORE requiring the service so its destructured `transaction` is this stub.
+let currentTransaction = async (fn) => fn({ query: (...args) => currentQuery(...args) });
+db.transaction = (...args) => currentTransaction(...args);
+
 const orderService = require('../src/services/order.service');
 
 /**

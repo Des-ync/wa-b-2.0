@@ -96,8 +96,19 @@ async function chargeSubscription({ phoneNumber, amountGhs, depositId, descripti
     };
   } catch (err) {
     logger.error('pawaPay deposit failed: %s | %j', err.message, err.response?.data);
+    // A transport-level failure (timeout, connection reset, 5xx) does NOT mean
+    // the deposit didn't happen — pawaPay may have accepted it and just failed
+    // to answer us. Flag it so the caller leaves the charge 'pending' for the
+    // callback/sweeper to resolve, instead of marking it failed and rejecting a
+    // later success callback (which would double-charge the merchant).
+    const status = err.response?.status;
+    const transient = !err.response
+      || err.code === 'ECONNABORTED'
+      || err.code === 'ETIMEDOUT'
+      || (typeof status === 'number' && status >= 500);
     return {
       success: false,
+      transient,
       error: err.response?.data?.failureReason?.failureMessage
         || err.response?.data?.message
         || err.message,
