@@ -766,6 +766,18 @@ async function markOrderPaid({ orderId, paymentRef, paymentMethod, amount }) {
         [item.product_id, qty, order.business_id]
       );
       const p = r.rows[0];
+      if (p) {
+        // Audit trail entry for the sale. quantity_delta is what was SOLD
+        // (may exceed the actual stock_qty drop when GREATEST(...,0) clamped
+        // an oversell) — quantity_after is the real resulting stock level,
+        // so the log stays honest about both what happened and where it landed.
+        await client.query(
+          `INSERT INTO stock_movements
+             (business_id, product_id, type, quantity_delta, quantity_after, order_id)
+           VALUES ($1,$2,'sale',$3,$4,$5)`,
+          [order.business_id, p.id, -qty, p.stock_qty, order.id]
+        );
+      }
       if (p && p.stock_qty <= p.low_stock_threshold && !p.low_stock_notified) {
         await client.query(`UPDATE products SET low_stock_notified = TRUE WHERE id = $1`, [p.id]);
         lowStock.push({ id: p.id, name: p.name, stock_qty: p.stock_qty });

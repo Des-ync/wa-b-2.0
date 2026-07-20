@@ -268,6 +268,7 @@ router.get('/businesses/:id', async (req, res) => {
     if (!business) return res.status(404).json({ success: false, error: 'Business not found' });
     delete business.wa_access_token;
     delete business.ig_page_access_token;
+    delete business.messenger_page_access_token;
 
     const [counters, messages] = await Promise.all([
       query(
@@ -310,7 +311,7 @@ const EDITABLE_BUSINESS_FIELDS = [
   'name', 'owner_name', 'industry', 'status', 'whatsapp_number',
   'wa_phone_number_id', 'welcome_message', 'support_phone', 'bot_language',
   'delivery_fee_ghs', 'open_time', 'close_time', 'trial_ends_at',
-  'payout_momo_number', 'payout_momo_network'
+  'payout_momo_number', 'payout_momo_network', 'slug', 'vat_rate_pct'
 ];
 const BUSINESS_STATUSES = ['trial', 'active', 'grace', 'suspended', 'cancelled'];
 const MOMO_NETWORKS = ['mtn', 'vodafone', 'airteltigo'];
@@ -346,6 +347,21 @@ router.patch('/businesses/:id', async (req, res) => {
           return res.status(400).json({ success: false, error: 'Invalid delivery fee' });
         }
       }
+      if (field === 'vat_rate_pct') {
+        value = Number(value);
+        if (!Number.isFinite(value) || value < 0 || value > 100) {
+          return res.status(400).json({ success: false, error: 'vat_rate_pct must be a number between 0 and 100' });
+        }
+      }
+      if (field === 'slug' && value) {
+        value = String(value).trim().toLowerCase();
+        if (!/^[a-z0-9](?:[a-z0-9-]{1,58}[a-z0-9])?$/.test(value)) {
+          return res.status(400).json({
+            success: false,
+            error: 'slug must be 3-60 lowercase letters/numbers/hyphens, no leading/trailing hyphen'
+          });
+        }
+      }
       params.push(value === '' ? null : value);
       sets.push(`${field} = $${params.length}`);
     }
@@ -362,6 +378,7 @@ router.patch('/businesses/:id', async (req, res) => {
     if (!business) return res.status(404).json({ success: false, error: 'Business not found' });
     delete business.wa_access_token;
     delete business.ig_page_access_token;
+    delete business.messenger_page_access_token;
     const changedFields = sets.map(s => s.split(' ')[0]);
     logger.info('admin: updated business %s fields [%s]', business.id, changedFields.join(', '));
     recordAudit({
@@ -370,6 +387,9 @@ router.patch('/businesses/:id', async (req, res) => {
     });
     res.json({ success: true, business });
   } catch (err) {
+    if (err.code === '23505' && /slug/.test(err.constraint || '')) {
+      return res.status(409).json({ success: false, error: 'That storefront handle is already taken' });
+    }
     logger.error('PATCH /admin/businesses/:id failed: %s', err.message);
     res.status(500).json({ success: false, error: 'Internal server error' });
   }
@@ -662,7 +682,7 @@ router.get('/webhooks', async (req, res) => {
     }
     params.push(limit);
     const result = await query(
-      `SELECT id, source, external_id, status, attempts, last_error,
+      `SELECT id, source, external_id, status, attempts, last_error, signature_valid,
               next_attempt_at, processed_at, received_at
          FROM webhook_events ${where}
         ORDER BY received_at DESC LIMIT $${params.length}`,
@@ -671,6 +691,25 @@ router.get('/webhooks', async (req, res) => {
     res.json({ success: true, webhooks: result.rows });
   } catch (err) {
     logger.error('GET /admin/webhooks failed: %s', err.message);
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+/**
+ * GET /api/admin/webhooks/:id — debug/diff viewer: the full stored event,
+ * raw payload included, so a failure can be diagnosed without SSHing in to
+ * read logs. signature_header is the raw header value the provider sent
+ * (present only for sources that verify one at the door — WhatsApp,
+ * Instagram, Paystack, Hubtel; pawaPay re-verifies server-side instead).
+ */
+router.get('/webhooks/:id', async (req, res) => {
+  try {
+    const result = await query('SELECT * FROM webhook_events WHERE id = $1', [req.params.id]);
+    const event = result.rows[0];
+    if (!event) return res.status(404).json({ success: false, error: 'Webhook event not found' });
+    res.json({ success: true, webhook: event });
+  } catch (err) {
+    logger.error('GET /admin/webhooks/:id failed: %s', err.message);
     res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });

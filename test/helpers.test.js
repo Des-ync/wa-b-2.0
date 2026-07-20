@@ -7,7 +7,10 @@ const {
   parseQuantityExpression,
   isWithinBusinessHours,
   buildMenuPage,
-  ORDER_NUMBER_RE
+  ORDER_NUMBER_RE,
+  slugify,
+  sanitizeBusiness,
+  mapsLinkForAddress
 } = require('../src/utils/helpers');
 
 test('normalizeGhanaPhone accepts common Ghanaian formats', () => {
@@ -84,4 +87,42 @@ test('buildMenuPage paginates past 8 products with nav rows', () => {
 test('ORDER_NUMBER_RE matches order numbers inside text', () => {
   assert.ok('status of ORD-2026-4821 please'.match(ORDER_NUMBER_RE));
   assert.equal('ORD-26-1'.match(ORDER_NUMBER_RE), null);
+});
+
+test('slugify collapses non-alphanumerics and strips edge hyphens', () => {
+  assert.equal(slugify("Auntie Ama's Kitchen"), 'auntie-ama-s-kitchen');
+  assert.equal(slugify('  --Café Deluxe!! -- '), 'caf-deluxe');
+  assert.equal(slugify(''), 'shop');
+  assert.equal(slugify(null), 'shop');
+});
+
+test('slugify truncates to 60 chars', () => {
+  const long = 'a'.repeat(100);
+  assert.equal(slugify(long).length, 60);
+});
+
+test('mapsLinkForAddress builds a Google Maps search URL with the address encoded', () => {
+  const link = mapsLinkForAddress('12 Oxford St, Osu, Accra');
+  assert.ok(link.startsWith('https://www.google.com/maps/search/?api=1&query='));
+  assert.ok(link.includes(encodeURIComponent('12 Oxford St, Osu, Accra')));
+});
+
+test('mapsLinkForAddress returns null for an empty/missing address', () => {
+  assert.equal(mapsLinkForAddress(''), null);
+  assert.equal(mapsLinkForAddress(null), null);
+  assert.equal(mapsLinkForAddress(undefined), null);
+});
+
+test('sanitizeBusiness strips every channel access token', () => {
+  const business = {
+    id: 'biz-1', name: 'Shop', wa_access_token: 'wa-secret',
+    ig_page_access_token: 'ig-secret', messenger_page_access_token: 'fb-secret',
+    slug: 'shop'
+  };
+  const safe = sanitizeBusiness(business);
+  assert.equal(safe.wa_access_token, undefined);
+  assert.equal(safe.ig_page_access_token, undefined);
+  assert.equal(safe.messenger_page_access_token, undefined);
+  assert.equal(safe.name, 'Shop');
+  assert.equal(safe.slug, 'shop');
 });

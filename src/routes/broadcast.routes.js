@@ -2,17 +2,12 @@ const express = require('express');
 const logger = require('../utils/logger');
 const { query, transaction } = require('../config/database');
 const { requireAuth } = require('../middleware/auth');
+const { tenantBlocksBusinessId } = require('../middleware/tenantAccess');
 const { buildAudienceClauses, describeAudience } = require('../utils/audience');
 
 const router = express.Router();
 
 router.use(requireAuth('any'));
-
-function tenantBlocksBusinessId(req, businessId) {
-  if (req.auth?.scope === 'admin') return false;
-  if (!req.auth?.businessId) return true;
-  return businessId && businessId !== req.auth.businessId;
-}
 
 /**
  * GET /api/broadcasts?business_id=

@@ -36,6 +36,10 @@ const onboardingRoutes = require('./routes/onboarding.routes');
 const categoryRoutes = require('./routes/category.routes');
 const notificationRoutes = require('./routes/notification.routes');
 const searchRoutes = require('./routes/search.routes');
+const apikeyRoutes = require('./routes/apikey.routes');
+const storefrontRoutes = require('./routes/storefront.routes');
+const inventoryRoutes = require('./routes/inventory.routes');
+const accountingRoutes = require('./routes/accounting.routes');
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
@@ -93,6 +97,10 @@ app.use(
 );
 app.use(
   '/api/webhooks/instagram',
+  express.raw({ type: '*/*', limit: '1mb' })
+);
+app.use(
+  '/api/webhooks/messenger',
   express.raw({ type: '*/*', limit: '1mb' })
 );
 app.use(
@@ -166,8 +174,12 @@ app.use('/api/onboarding', apiLimiter, onboardingRoutes);
 app.use('/api/categories', apiLimiter, categoryRoutes);
 app.use('/api/notifications', apiLimiter, notificationRoutes);
 app.use('/api/search', apiLimiter, searchRoutes);
+app.use('/api/keys', apiLimiter, apikeyRoutes);
 // Public, unauthenticated — the order id itself is the shareable capability.
 app.use('/api/receipts', apiLimiter, receiptRoutes);
+app.use('/api/storefront', apiLimiter, storefrontRoutes);
+app.use('/api/inventory', apiLimiter, inventoryRoutes);
+app.use('/api/accounting', apiLimiter, accountingRoutes);
 
 // Public system status — powers the (honest) status page. Exposes only
 // coarse operational signals, never tenant data.

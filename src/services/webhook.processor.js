@@ -29,6 +29,14 @@ async function processInstagram(payload) {
   await conversation.handleInbound(payload, 'instagram');
 }
 
+/**
+ * Process a Messenger event pulled from the queue — same normalize-then-run
+ * pattern as Instagram, feeding the same conversation state machine.
+ */
+async function processMessenger(payload) {
+  await conversation.handleInbound(payload, 'messenger');
+}
+
 async function processPaystack(payload) {
   const eventType = payload?.event;
   const data = payload?.data || {};
@@ -178,6 +186,7 @@ async function processPawapay(payload) {
 const PROCESSORS = {
   whatsapp:  processWhatsApp,
   instagram: processInstagram,
+  messenger: processMessenger,
   paystack:  processPaystack,
   hubtel:    processHubtel,
   pawapay:   processPawapay

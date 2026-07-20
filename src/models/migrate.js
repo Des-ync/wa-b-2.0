@@ -43,6 +43,21 @@ ALTER TABLE businesses ADD COLUMN IF NOT EXISTS clerk_user_id TEXT UNIQUE;
 -- Instagram DM channel (upgrade path for existing databases).
 ALTER TABLE businesses ADD COLUMN IF NOT EXISTS ig_business_account_id TEXT UNIQUE;
 ALTER TABLE businesses ADD COLUMN IF NOT EXISTS ig_page_access_token TEXT;
+-- Facebook Messenger channel (upgrade path for existing databases). Same
+-- credential shape as Instagram: a Page-scoped id that routes inbound
+-- webhooks, and its Page access token (falls back to env MESSENGER_ACCESS_TOKEN).
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS messenger_page_id TEXT UNIQUE;
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS messenger_page_access_token TEXT;
+-- Public storefront handle (e.g. sikabook.com/store/mikes-shop). NULL until
+-- backfilled/chosen; merchant-editable via PATCH /api/business/settings.
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS slug TEXT UNIQUE;
+CREATE INDEX IF NOT EXISTS idx_businesses_slug ON businesses(slug);
+-- Backfill: name-derived slug + short id suffix guarantees uniqueness without
+-- a collision-retry loop. Existing businesses get a stable, if unglamorous,
+-- storefront URL immediately; merchants can rename it any time after.
+UPDATE businesses
+   SET slug = LOWER(REGEXP_REPLACE(TRIM(name), '[^a-zA-Z0-9]+', '-', 'g')) || '-' || SUBSTRING(id::text, 1, 6)
+ WHERE slug IS NULL;
 -- Merchant-configurable bot settings (upgrade path for existing databases).
 -- welcome_message: branded greeting shown instead of the stock welcome.
 -- support_phone: number handed out on "Talk to us" (falls back to whatsapp_number).
@@ -511,6 +526,11 @@ CREATE INDEX IF NOT EXISTS idx_webhook_events_status_next
   ON webhook_events(status, next_attempt_at);
 CREATE INDEX IF NOT EXISTS idx_webhook_events_received
   ON webhook_events(received_at);
+-- Raw signature header the provider sent, kept for audit/debugging — e.g.
+-- confirming a "signature invalid" rejection wasn't a header-parsing bug.
+-- Never populated for /reject paths (bad signatures are 401'd before any
+-- INSERT), only for events that made it into the queue.
+ALTER TABLE webhook_events ADD COLUMN IF NOT EXISTS signature_header TEXT;
 
 -- =========================================================================
 -- worker_locks: cooperative single-leader cron lock
@@ -628,6 +648,19 @@ CREATE TABLE IF NOT EXISTS api_keys (
 );
 CREATE INDEX IF NOT EXISTS idx_api_keys_business ON api_keys(business_id);
 CREATE INDEX IF NOT EXISTS idx_api_keys_active   ON api_keys(scope) WHERE revoked_at IS NULL;
+-- Role-based access control: which staff role this key acts as (tenant keys
+-- only — admin-scoped keys ignore role, they're already full-platform).
+-- 'owner' is the default so every pre-existing key keeps exactly the full
+-- access it always had — this column is purely additive.
+ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'owner'
+  CHECK (role IN ('owner','manager','support','accountant'));
+ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
+ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS last_used_ip TEXT;
+ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS last_used_user_agent TEXT;
+-- Set on the NEW key when it was created by rotating an old one — lets the
+-- rotation UI show "replaces key X" and lets us tell a legitimate rotation
+-- apart from an unrelated new key when reviewing the audit log.
+ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS rotated_from UUID REFERENCES api_keys(id) ON DELETE SET NULL;
 
 -- =========================================================================
 -- device_tokens: FCM push tokens for the mobile app. business_id NULL means
@@ -664,6 +697,98 @@ CREATE TABLE IF NOT EXISTS dashboard_notifications (
 );
 CREATE INDEX IF NOT EXISTS idx_dash_notif_business_created ON dashboard_notifications(business_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_dash_notif_business_unread ON dashboard_notifications(business_id) WHERE read_at IS NULL;
+
+-- =========================================================================
+-- suppliers: vendors a business restocks from. Free-form, merchant-managed —
+-- no verification/onboarding flow, just a record for "who do I call/pay for
+-- more of this."
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS suppliers (
+  id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  business_id   UUID NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  name          TEXT NOT NULL,
+  contact_name  TEXT,
+  contact_phone TEXT,
+  notes         TEXT,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_suppliers_business ON suppliers(business_id);
+
+-- Cost/margin tracking + a product's default restock source. Nullable:
+-- merchants who never fill this in see no change (margin simply isn't shown).
+ALTER TABLE products ADD COLUMN IF NOT EXISTS cost_price_ghs NUMERIC(10,2) CHECK (cost_price_ghs IS NULL OR cost_price_ghs >= 0);
+ALTER TABLE products ADD COLUMN IF NOT EXISTS supplier_id UUID REFERENCES suppliers(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_products_supplier ON products(supplier_id);
+
+-- =========================================================================
+-- stock_movements: append-only inventory audit log. Every change to a
+-- product's stock_qty — a sale (negative delta, written by order.service on
+-- payment), a restock (positive delta, merchant-entered with cost/supplier),
+-- or a manual correction — is one row here. This is what "inventory
+-- history" means: not a snapshot, the full trail of how the number got there.
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS stock_movements (
+  id               UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  business_id      UUID NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  product_id       UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  type             TEXT NOT NULL CHECK (type IN ('sale','restock','adjustment','return')),
+  quantity_delta   INT NOT NULL,
+  quantity_after   INT,
+  unit_cost_ghs    NUMERIC(10,2) CHECK (unit_cost_ghs IS NULL OR unit_cost_ghs >= 0),
+  supplier_id      UUID REFERENCES suppliers(id) ON DELETE SET NULL,
+  order_id         UUID REFERENCES orders(id) ON DELETE SET NULL,
+  note             TEXT,
+  created_by       TEXT,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_stock_movements_business ON stock_movements(business_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_stock_movements_product ON stock_movements(product_id, created_at DESC);
+
+-- VAT/NHIL-style tax rate for exports (upgrade path for existing databases).
+-- Merchant-configurable, default 0 (most micro-merchants aren't VAT
+-- registered) — never assumed, never guessed at a statutory rate.
+-- Prices are treated as tax-INCLUSIVE when this is set (the common retail
+-- convention: the sticker price already has tax baked in).
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS vat_rate_pct NUMERIC(5,2) NOT NULL DEFAULT 0 CHECK (vat_rate_pct >= 0 AND vat_rate_pct <= 100);
+
+-- =========================================================================
+-- expenses: merchant-recorded business costs (rent, ingredients, staff,
+-- transport, ...) — the other half of a P&L alongside order revenue. No
+-- receipt/OCR pipeline, just a ledger a merchant or their accountant fills in.
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS expenses (
+  id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  business_id   UUID NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  category      TEXT NOT NULL DEFAULT 'general',
+  amount_ghs    NUMERIC(10,2) NOT NULL CHECK (amount_ghs > 0),
+  description   TEXT,
+  expense_date  DATE NOT NULL DEFAULT CURRENT_DATE,
+  created_by    TEXT,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_expenses_business ON expenses(business_id, expense_date DESC);
+
+-- =========================================================================
+-- payouts: MANUAL record of money actually sent to a merchant's MoMo.
+-- Customer order payments all land in the platform's own Paystack/Hubtel/
+-- pawaPay account (there is no per-tenant subaccount/split), so paying a
+-- merchant their share is an operational step ops performs outside this
+-- codebase — this table is the audit trail for that step, not an automated
+-- disbursement integration (never invent one without vendor docs in hand).
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS payouts (
+  id             UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  business_id    UUID NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  amount_ghs     NUMERIC(10,2) NOT NULL CHECK (amount_ghs > 0),
+  momo_number    TEXT,
+  momo_network   TEXT CHECK (momo_network IS NULL OR momo_network IN ('mtn','vodafone','airteltigo')),
+  reference      TEXT,
+  note           TEXT,
+  recorded_by    TEXT,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_payouts_business ON payouts(business_id, created_at DESC);
 
 -- =========================================================================
 -- admin_alerts: history of platform-level ops alerts (alert.service.js) —
@@ -706,7 +831,7 @@ ALTER TABLE billing_transactions ADD CONSTRAINT billing_transactions_gateway_che
   CHECK (gateway IN ('hubtel','paystack','pawapay'));
 ALTER TABLE webhook_events DROP CONSTRAINT IF EXISTS webhook_events_source_check;
 ALTER TABLE webhook_events ADD CONSTRAINT webhook_events_source_check
-  CHECK (source IN ('whatsapp','paystack','hubtel','pawapay','instagram'));
+  CHECK (source IN ('whatsapp','paystack','hubtel','pawapay','instagram','messenger'));
 
 -- =========================================================================
 -- updated_at trigger
@@ -724,7 +849,7 @@ DECLARE
   t TEXT;
 BEGIN
   FOR t IN SELECT unnest(ARRAY[
-    'businesses','subscriptions','products','orders','conversation_state'
+    'businesses','subscriptions','products','orders','conversation_state','suppliers'
   ]) LOOP
     EXECUTE format('DROP TRIGGER IF EXISTS trg_%I_updated_at ON %I;', t, t);
     EXECUTE format(

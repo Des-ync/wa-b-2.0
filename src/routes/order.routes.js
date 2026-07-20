@@ -4,7 +4,8 @@ const orderService = require('../services/order.service');
 const notification = require('../services/notification.service');
 const { query } = require('../config/database');
 const { normalizeGhanaPhone, detectNetwork } = require('../utils/helpers');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, requirePermission } = require('../middleware/auth');
+const { tenantBlocksBusinessId } = require('../middleware/tenantAccess');
 const { csvCell } = require('../utils/csv');
 
 const router = express.Router();
@@ -13,12 +14,6 @@ const router = express.Router();
 // keys are restricted to their own business_id (enforced inline below since
 // business_id arrives in the query string or body, not as a route param).
 router.use(requireAuth('any'));
-
-function tenantBlocksBusinessId(req, businessId) {
-  if (req.auth?.scope === 'admin') return false;
-  if (!req.auth?.businessId) return true;
-  return businessId && businessId !== req.auth.businessId;
-}
 
 /**
  * GET /api/orders?business_id=&status=&limit=
@@ -121,21 +116,6 @@ router.get('/export', async (req, res) => {
     res.send(lines.join('\r\n'));
   } catch (err) {
     logger.error('GET /orders/export failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
-  }
-});
-
-/** GET /api/orders/:id */
-router.get('/:id', async (req, res) => {
-  try {
-    const order = await orderService.getOrderById(req.params.id);
-    if (!order) return res.status(404).json({ success: false, error: 'Order not found' });
-    if (tenantBlocksBusinessId(req, order.business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
-    }
-    res.json({ success: true, order });
-  } catch (err) {
-    logger.error('GET /orders/:id failed: %s', err.message);
     res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });
@@ -341,8 +321,15 @@ router.patch('/:id/delivery', async (req, res) => {
     }
     const body = req.body || {};
     let order = existing;
+    let bizForNotify = null;
     if (body.rider_name !== undefined) {
       order = await orderService.assignDelivery(req.params.id, { riderName: body.rider_name, riderPhone: body.rider_phone });
+      if (order && body.rider_phone) {
+        const bizRes = await query('SELECT id, name FROM businesses WHERE id = $1', [order.business_id]);
+        bizForNotify = bizRes.rows[0];
+        notification.notifyRiderAssigned({ order, business: bizForNotify, riderPhone: body.rider_phone })
+          .catch(err => logger.warn('rider assigned notify failed: %s', err.message));
+      }
     }
     if (body.delivery_status !== undefined) {
       if (!orderService.VALID_DELIVERY_STATUSES.includes(body.delivery_status)) {
@@ -352,6 +339,18 @@ router.patch('/:id/delivery', async (req, res) => {
         });
       }
       order = await orderService.updateDeliveryStatus(req.params.id, body.delivery_status, { proofUrl: body.delivery_proof_url });
+      // Only notify the customer when marked delivered WITH a proof photo —
+      // the general "your order is delivered" message already goes out via
+      // notifyOrderStatusChange when the order's own status column advances;
+      // this is additive (the photo), not a duplicate of that.
+      if (order && body.delivery_status === 'delivered' && body.delivery_proof_url) {
+        if (!bizForNotify) {
+          const bizRes = await query('SELECT id, name, bot_language FROM businesses WHERE id = $1', [order.business_id]);
+          bizForNotify = bizRes.rows[0];
+        }
+        notification.notifyDeliveryCompleted({ order, business: bizForNotify })
+          .catch(err => logger.warn('delivery completed notify failed: %s', err.message));
+      }
     }
     res.json({ success: true, order });
   } catch (err) {
@@ -384,7 +383,7 @@ router.patch('/:id/estimates', async (req, res) => {
 });
 
 /** POST /api/orders/:id/refund — body: { amount_ghs, reason? } */
-router.post('/:id/refund', async (req, res) => {
+router.post('/:id/refund', requirePermission('financial'), async (req, res) => {
   try {
     const existing = await orderService.getOrderById(req.params.id);
     if (!existing) return res.status(404).json({ success: false, error: 'Order not found' });

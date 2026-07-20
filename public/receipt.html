@@ -151,7 +151,7 @@ async function loadReceipt() {
       <div class="receipt-meta">
         <div><span>Date</span><span>${new Date(r.created_at).toLocaleString('en-GH', { dateStyle: 'medium', timeStyle: 'short' })}</span></div>
         <div><span>Customer</span><span>${esc(r.customer_name || 'Customer')} (${esc(r.customer_phone_masked)})</span></div>
-        ${r.delivery_address ? `<div><span>Delivery</span><span>${esc(r.delivery_address)}</span></div>` : ''}
+        ${r.delivery_address ? `<div><span>Delivery</span><span>${esc(r.delivery_address)} · <a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(r.delivery_address)}" target="_blank" rel="noopener">Map ↗</a></span></div>` : ''}
         <div><span>Order status</span><span>${esc(r.status)}</span></div>
       </div>
       ${etaHtml}

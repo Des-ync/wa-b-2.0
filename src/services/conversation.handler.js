@@ -133,6 +133,7 @@ function titleMatches(text, ...keys) {
  */
 function extractInbound(payload, channel = 'whatsapp') {
   if (channel === 'instagram') return extractInstagramInbound(payload);
+  if (channel === 'messenger') return extractMessengerInbound(payload);
   return extractWhatsAppInbound(payload);
 }
 
@@ -240,6 +241,43 @@ function extractInstagramInbound(payload) {
     };
   } catch (err) {
     logger.error('extractInstagramInbound failed: %s', err.message);
+    return null;
+  }
+}
+
+/**
+ * Envelope confirmed against Meta's Messenger Platform webhook docs:
+ * entry[].messaging[] with sender.id / recipient.id, message.mid,
+ * message.text, quick_reply.payload, and is_echo for Page-sent echoes —
+ * the identical shape Instagram uses (same underlying Send/webhook API).
+ * entry[].id is the Facebook Page id (used for tenant routing).
+ */
+function extractMessengerInbound(payload) {
+  try {
+    const entry = payload?.entry?.[0];
+    const messaging = entry?.messaging?.[0];
+    if (!messaging) return null;
+    const message = messaging.message;
+    if (!message || message.is_echo) return null;
+
+    const quickReplyId = message.quick_reply?.payload || null;
+    const text = String(message.text || '').trim();
+
+    return {
+      channel: 'messenger',
+      from: String(messaging.sender?.id || ''),
+      profileName: null,
+      messageId: message.mid || null,
+      type: quickReplyId ? 'interactive' : 'text',
+      text,
+      interactiveId: quickReplyId,
+      interactiveTitle: quickReplyId ? (text || null) : null,
+      location: null,
+      raw: messaging,
+      messengerPageId: String(messaging.recipient?.id || entry?.id || '')
+    };
+  } catch (err) {
+    logger.error('extractMessengerInbound failed: %s', err.message);
     return null;
   }
 }
@@ -381,15 +419,28 @@ async function handleInbound(payload, channel = 'whatsapp') {
     return;
   }
 
-  // Instagram is END-CUSTOMER commerce only: route by the IG business account
-  // that received the DM and go straight to the commerce flow. The merchant
-  // SaaS billing flow stays WhatsApp-only, keyed on business.whatsapp_number.
+  // Instagram and Messenger are END-CUSTOMER commerce only: route by the
+  // account/Page that received the message and go straight to the commerce
+  // flow. The merchant SaaS billing flow stays WhatsApp-only, keyed on
+  // business.whatsapp_number.
   if (inbound.channel === 'instagram') {
     const tenant = await getBusinessByIgAccountId(inbound.igBusinessAccountId);
     if (!tenant) {
       logger.warn(
         'IG inbound from %s on ig_business_account_id=%s — no matching tenant; dropping.',
         inbound.from, inbound.igBusinessAccountId
+      );
+      return;
+    }
+    return handleCommerce({ business: tenant, inbound });
+  }
+
+  if (inbound.channel === 'messenger') {
+    const tenant = await getBusinessByMessengerPageId(inbound.messengerPageId);
+    if (!tenant) {
+      logger.warn(
+        'Messenger inbound from %s on messenger_page_id=%s — no matching tenant; dropping.',
+        inbound.from, inbound.messengerPageId
       );
       return;
     }
@@ -441,6 +492,15 @@ async function getBusinessByIgAccountId(igAccountId) {
   const res = await query(
     `SELECT * FROM businesses WHERE ig_business_account_id = $1 LIMIT 1`,
     [igAccountId]
+  );
+  return res.rows[0] || null;
+}
+
+async function getBusinessByMessengerPageId(pageId) {
+  if (!pageId) return null;
+  const res = await query(
+    `SELECT * FROM businesses WHERE messenger_page_id = $1 LIMIT 1`,
+    [pageId]
   );
   return res.rows[0] || null;
 }
@@ -858,14 +918,15 @@ async function handleCommerce({ business, inbound }) {
 
   const state = await loadOrCreateState(customer.id);
 
-  // Instagram text mode: the IG adapter sends numbered text menus instead of
-  // buttons (chips vanish mid-conversation and never render on desktop), so
-  // typed replies are translated here — BEFORE any routing looks at the
-  // message — onto the same interactive ids the button UI produces.
+  // Instagram/Messenger text mode: both adapters send numbered text menus
+  // instead of native buttons (chips vanish mid-conversation and never
+  // render on desktop), so typed replies are translated here — BEFORE any
+  // routing looks at the message — onto the same interactive ids the button
+  // UI produces.
   //   "2"            → the 2nd option of the last menu we sent (ig_options)
   //   simple phrases → fixed en/tw vocabulary (nl.intent.js), business
   //                    context only; anything unknown falls through untouched.
-  if (customer.channel === 'instagram' && !inbound.interactiveId && inbound.text) {
+  if (['instagram', 'messenger'].includes(customer.channel) && !inbound.interactiveId && inbound.text) {
     const step = state.current_step;
     // Steps where free text IS the answer — never reinterpret those.
     const freeTextSteps = ['get_address', 'momo_get_phone'];
@@ -2111,8 +2172,8 @@ async function continuePaymentFlow({ business, customer, state, inbound }) {
     if (inbound.interactiveId === 'pay_momo' || upper === 'MOMO' || upper === 'MOBILE MONEY') {
       await saveState(customer.id, { flow: 'paying', step: 'momo_get_phone', data });
       // "USE THIS" only makes sense on WhatsApp, where the chat identity IS a
-      // phone number. Instagram customers must type their MoMo number.
-      const prompt = customer.channel === 'instagram'
+      // phone number. Instagram/Messenger customers must type their MoMo number.
+      const prompt = ['instagram', 'messenger'].includes(customer.channel)
         ? t(lang, 'momo_ask_ig')
         : t(lang, 'momo_ask', { number: customer.whatsapp_number });
       await chOf(customer).sendText(destOf(customer), prompt,
@@ -2135,7 +2196,7 @@ async function continuePaymentFlow({ business, customer, state, inbound }) {
 
   if (state.current_step === 'momo_get_phone') {
     let momoNumber;
-    if (upper === 'USE THIS' && customer.channel !== 'instagram') {
+    if (upper === 'USE THIS' && !['instagram', 'messenger'].includes(customer.channel)) {
       momoNumber = customer.whatsapp_number;
     } else {
       momoNumber = normalizeGhanaPhone(inbound.text);

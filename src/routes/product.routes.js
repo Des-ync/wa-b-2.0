@@ -2,6 +2,7 @@ const express = require('express');
 const logger = require('../utils/logger');
 const { query } = require('../config/database');
 const { requireAuth } = require('../middleware/auth');
+const { tenantBlocksBusinessId } = require('../middleware/tenantAccess');
 const { toCsv, parseCsv } = require('../utils/csv');
 const orderService = require('../services/order.service');
 
@@ -12,12 +13,6 @@ const TIME_RE = /^([01]?\d|2[0-3]):[0-5]\d$/;
 // Same auth model as orders: admin keys see everything, tenant keys are
 // pinned to their own business_id.
 router.use(requireAuth('any'));
-
-function tenantBlocksBusinessId(req, businessId) {
-  if (req.auth?.scope === 'admin') return false;
-  if (!req.auth?.businessId) return true;
-  return businessId && businessId !== req.auth.businessId;
-}
 
 function validateProductBody(body, { partial = false } = {}) {
   const errors = [];
@@ -66,6 +61,18 @@ function validateProductBody(body, { partial = false } = {}) {
     const n = Number(body.low_stock_threshold);
     if (!Number.isInteger(n) || n < 0) errors.push('low_stock_threshold must be a non-negative integer');
     out.low_stock_threshold = n;
+  }
+  if (body.cost_price_ghs !== undefined) {
+    if (body.cost_price_ghs === null || body.cost_price_ghs === '') {
+      out.cost_price_ghs = null;
+    } else {
+      const n = Number(body.cost_price_ghs);
+      if (!Number.isFinite(n) || n < 0) errors.push('cost_price_ghs must be a non-negative number, or empty to clear it');
+      out.cost_price_ghs = Math.round(n * 100) / 100;
+    }
+  }
+  if (body.supplier_id !== undefined) {
+    out.supplier_id = body.supplier_id || null;
   }
   if (body.featured !== undefined) out.featured = !!body.featured;
   if (body.hidden !== undefined) out.hidden = !!body.hidden;
@@ -172,13 +179,15 @@ router.post('/', async (req, res) => {
     const result = await query(
       `INSERT INTO products (
          business_id, name, description, price_ghs, category, in_stock, image_url, stock_qty,
-         low_stock_threshold, featured, hidden, sort_order, available_from, available_to
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
+         low_stock_threshold, featured, hidden, sort_order, available_from, available_to,
+         cost_price_ghs, supplier_id
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
       [
         businessId, out.name, out.description ?? null, out.price_ghs,
         out.category || 'general', out.in_stock ?? true, out.image_url ?? null,
         out.stock_qty ?? null, out.low_stock_threshold ?? 3, out.featured ?? false,
-        out.hidden ?? false, out.sort_order ?? 0, out.available_from ?? null, out.available_to ?? null
+        out.hidden ?? false, out.sort_order ?? 0, out.available_from ?? null, out.available_to ?? null,
+        out.cost_price_ghs ?? null, out.supplier_id ?? null
       ]
     );
     res.status(201).json({ success: true, product: result.rows[0] });
@@ -441,7 +450,7 @@ router.delete('/addons/:addonId', async (req, res) => {
 /* ============================ CSV import/export ========================= */
 
 const CSV_COLUMNS = [
-  'id', 'name', 'description', 'price_ghs', 'category', 'in_stock', 'stock_qty',
+  'id', 'name', 'description', 'price_ghs', 'cost_price_ghs', 'category', 'in_stock', 'stock_qty',
   'low_stock_threshold', 'featured', 'hidden', 'available_from', 'available_to', 'image_url'
 ];
 
@@ -513,6 +522,7 @@ router.post('/import', async (req, res) => {
         name: record.name,
         description: record.description || undefined,
         price_ghs: record.price_ghs,
+        cost_price_ghs: record.cost_price_ghs === '' ? null : (record.cost_price_ghs || undefined),
         category: record.category || undefined,
         in_stock: record.in_stock === undefined ? undefined : /^(1|true|yes)$/i.test(String(record.in_stock).trim()),
         stock_qty: record.stock_qty === '' ? null : record.stock_qty,
@@ -546,13 +556,14 @@ router.post('/import', async (req, res) => {
         await query(
           `INSERT INTO products (
              business_id, name, description, price_ghs, category, in_stock, image_url, stock_qty,
-             low_stock_threshold, featured, hidden, available_from, available_to
-           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+             low_stock_threshold, featured, hidden, available_from, available_to, cost_price_ghs
+           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
           [
             businessId, out.name, out.description ?? null, out.price_ghs,
             out.category || 'general', out.in_stock ?? true, out.image_url ?? null,
             out.stock_qty ?? null, out.low_stock_threshold ?? 3, out.featured ?? false,
-            out.hidden ?? false, out.available_from ?? null, out.available_to ?? null
+            out.hidden ?? false, out.available_from ?? null, out.available_to ?? null,
+            out.cost_price_ghs ?? null
           ]
         );
         created++;

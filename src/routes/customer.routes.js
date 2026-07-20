@@ -1,7 +1,8 @@
 const express = require('express');
 const logger = require('../utils/logger');
 const { query } = require('../config/database');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, requirePermission } = require('../middleware/auth');
+const { tenantBlocksBusinessId } = require('../middleware/tenantAccess');
 const { buildAudienceClauses, SEGMENTS } = require('../utils/audience');
 const { computeVipTier, computePointsRedemptionValue, generateRewardCode } = require('../utils/loyalty');
 const { getAdapter, destOf } = require('../services/channel.adapter');
@@ -9,12 +10,6 @@ const { getAdapter, destOf } = require('../services/channel.adapter');
 const router = express.Router();
 
 router.use(requireAuth('any'));
-
-function tenantBlocksBusinessId(req, businessId) {
-  if (req.auth?.scope === 'admin') return false;
-  if (!req.auth?.businessId) return true;
-  return businessId && businessId !== req.auth.businessId;
-}
 
 /**
  * GET /api/customers?business_id=&limit=&sort=spent|recent&tag=&segment=&min_spend_ghs=
@@ -213,7 +208,7 @@ router.get('/:id/loyalty', async (req, res) => {
  * to the customer. Kept merchant-initiated (not a customer chat command) so
  * the points-to-cash math is always confirmed by a human before it fires.
  */
-router.post('/:id/loyalty/redeem-points', async (req, res) => {
+router.post('/:id/loyalty/redeem-points', requirePermission('financial'), async (req, res) => {
   try {
     const custRes = await query('SELECT * FROM customers WHERE id = $1', [req.params.id]);
     const customer = custRes.rows[0];

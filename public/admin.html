@@ -58,6 +58,19 @@
     </div>
 
     <div class="dash-card">
+      <h2>Record a payout</h2>
+      <p class="muted" style="margin-bottom:14px;font-size:13px">Customer order payments all land in the platform's own payment account — there's no per-tenant subaccount/split. Once you've sent a merchant their MoMo transfer, log it here so their dashboard's payout balance stays accurate.</p>
+      <div class="row-form" style="grid-template-columns:1.5fr 1fr 1fr 1fr 1.5fr auto">
+        <div><label>Business ID</label><input id="poBusinessId" placeholder="paste from the table below" /></div>
+        <div><label>Amount GH₵</label><input id="poAmount" type="number" min="0" step="0.01" placeholder="500.00" /></div>
+        <div><label>MoMo number</label><input id="poMomoNumber" placeholder="0241234567" /></div>
+        <div><label>Network</label><select id="poMomoNetwork"><option value="">—</option><option value="mtn">MTN</option><option value="vodafone">Vodafone/Telecel</option><option value="airteltigo">AirtelTigo</option></select></div>
+        <div><label>Reference / note</label><input id="poNote" placeholder="Weekly settlement" /></div>
+        <div><button class="btn btn-primary btn-sm" onclick="recordPayout()">Record</button></div>
+      </div>
+    </div>
+
+    <div class="dash-card">
       <h2>Operational health</h2>
       <div id="opsBox" class="muted">Loading…</div>
     </div>
@@ -110,6 +123,13 @@
   </div>
 </main>
 
+<div id="webhookModalOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:100;align-items:flex-start;justify-content:center;overflow-y:auto;padding:40px 16px" onclick="if(event.target===this) closeWebhookModal()">
+  <div style="background:var(--bg);border-radius:var(--r-lg,12px);max-width:700px;width:100%;padding:24px;box-shadow:0 8px 32px rgba(0,0,0,0.2)">
+    <button class="btn btn-ghost btn-xs" style="float:right" onclick="closeWebhookModal()">✕ Close</button>
+    <div id="webhookModalBody"><p class="muted">Loading…</p></div>
+  </div>
+</div>
+
 <script>
 const STEP_LABELS = {
   business_profile: 'Business profile',
@@ -160,7 +180,10 @@ async function loadIncomplete() {
   }
   tbody.innerHTML = businesses.map(b => `
     <tr>
-      <td><strong>${b.name}</strong>${b.owner_name ? `<div class="muted" style="font-size:12px">${b.owner_name}</div>` : ''}</td>
+      <td>
+        <strong>${b.name}</strong>${b.owner_name ? `<div class="muted" style="font-size:12px">${b.owner_name}</div>` : ''}
+        <div class="muted" style="font-size:11px;cursor:pointer" title="Click to copy business ID" onclick="copyBusinessId('${b.id}')">${b.id}</div>
+      </td>
       <td>${b.whatsapp_number || '—'}</td>
       <td>${b.status}</td>
       <td>${b.percent}%</td>
@@ -168,6 +191,33 @@ async function loadIncomplete() {
       <td>${fmtDate(b.created_at)}</td>
     </tr>
   `).join('');
+}
+
+function copyBusinessId(id) {
+  navigator.clipboard?.writeText(id);
+  document.getElementById('poBusinessId').value = id;
+}
+
+async function recordPayout() {
+  const businessId = document.getElementById('poBusinessId').value.trim();
+  const amount = parseFloat(document.getElementById('poAmount').value);
+  if (!businessId) return alert('Business ID is required');
+  if (!(amount > 0)) return alert('Enter a valid amount');
+  try {
+    await api('/accounting/payouts', {
+      method: 'POST',
+      body: JSON.stringify({
+        business_id: businessId,
+        amount_ghs: amount,
+        momo_number: document.getElementById('poMomoNumber').value.trim() || null,
+        momo_network: document.getElementById('poMomoNetwork').value || null,
+        note: document.getElementById('poNote').value.trim() || null
+      })
+    });
+    ['poAmount', 'poMomoNumber', 'poNote'].forEach(id => document.getElementById(id).value = '');
+    document.getElementById('poMomoNetwork').value = '';
+    alert('Payout recorded');
+  } catch (err) { alert(err.message); }
 }
 
 async function loadOps() {
@@ -284,7 +334,10 @@ async function loadWebhooks() {
         <td>${w.attempts}</td>
         <td class="muted" style="font-size:12px;max-width:280px">${esc((w.last_error || '').slice(0, 160))}</td>
         <td class="muted">${fmtDateTime(w.received_at)}</td>
-        <td>${w.status === 'failed' ? `<button class="btn btn-ghost btn-xs" onclick="retryWebhook('${w.id}')">Retry</button>` : ''}</td>
+        <td style="white-space:nowrap">
+          <button class="btn btn-ghost btn-xs" onclick="viewWebhook('${w.id}')">View</button>
+          ${w.status === 'failed' ? `<button class="btn btn-ghost btn-xs" onclick="retryWebhook('${w.id}')">Retry</button>` : ''}
+        </td>
       </tr>`).join('') || '<tr><td colspan="6" class="muted">Nothing here.</td></tr>';
   } catch (err) {
     tbody.innerHTML = '<tr><td colspan="6" class="muted">Could not load: ' + esc(err.message) + '</td></tr>';
@@ -296,6 +349,49 @@ async function retryWebhook(id) {
     await api('/admin/webhooks/' + id + '/retry', { method: 'POST' });
     await loadWebhooks();
   } catch (err) { alert(err.message); }
+}
+
+function closeWebhookModal() {
+  document.getElementById('webhookModalOverlay').style.display = 'none';
+}
+
+async function viewWebhook(id) {
+  document.getElementById('webhookModalOverlay').style.display = 'flex';
+  document.getElementById('webhookModalBody').innerHTML = '<p class="muted">Loading…</p>';
+  try {
+    const { webhook: w } = await api('/admin/webhooks/' + id);
+    document.getElementById('webhookModalBody').innerHTML = `
+      <h2 style="margin-bottom:2px">${esc(w.source)} — ${esc(w.external_id)}</h2>
+      <span class="muted" style="font-size:13px">${fmtDateTime(w.received_at)}</span>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin:16px 0">
+        <div style="border:1px solid var(--line);border-radius:8px;padding:10px 12px">
+          <div style="font-size:11px;color:var(--muted)">Status</div>
+          <div style="font-size:16px;font-weight:700;margin-top:2px">${esc(w.status)}</div>
+        </div>
+        <div style="border:1px solid var(--line);border-radius:8px;padding:10px 12px">
+          <div style="font-size:11px;color:var(--muted)">Attempts</div>
+          <div style="font-size:16px;font-weight:700;margin-top:2px">${w.attempts}</div>
+        </div>
+        <div style="border:1px solid var(--line);border-radius:8px;padding:10px 12px">
+          <div style="font-size:11px;color:var(--muted)">Signature valid</div>
+          <div style="font-size:16px;font-weight:700;margin-top:2px">${w.signature_valid ? 'Yes' : 'No'}</div>
+        </div>
+        <div style="border:1px solid var(--line);border-radius:8px;padding:10px 12px">
+          <div style="font-size:11px;color:var(--muted)">Next attempt</div>
+          <div style="font-size:13px;font-weight:600;margin-top:4px">${fmtDateTime(w.next_attempt_at)}</div>
+        </div>
+      </div>
+      ${w.signature_header ? `<h3 style="font-size:14px;margin-bottom:6px">Signature header</h3>
+        <code style="display:block;background:var(--bg-2);border-radius:6px;padding:8px 10px;font-size:12px;word-break:break-all;margin-bottom:16px">${esc(w.signature_header)}</code>` : ''}
+      ${w.last_error ? `<h3 style="font-size:14px;margin-bottom:6px">Last error</h3>
+        <div style="background:var(--bg-2);border-radius:6px;padding:8px 10px;font-size:13px;margin-bottom:16px;white-space:pre-wrap">${esc(w.last_error)}</div>` : ''}
+      <h3 style="font-size:14px;margin-bottom:6px">Raw payload</h3>
+      <pre style="background:var(--bg-2);border-radius:6px;padding:10px;font-size:12px;overflow-x:auto;max-height:320px">${esc(JSON.stringify(w.payload, null, 2))}</pre>
+      ${w.status === 'failed' ? `<div style="margin-top:16px"><button class="btn btn-primary btn-sm" onclick="retryWebhook('${w.id}').then(closeWebhookModal)">Retry this event</button></div>` : ''}
+    `;
+  } catch (err) {
+    document.getElementById('webhookModalBody').innerHTML = '<p class="muted">Could not load: ' + esc(err.message) + '</p>';
+  }
 }
 
 async function retryAllFailed() {

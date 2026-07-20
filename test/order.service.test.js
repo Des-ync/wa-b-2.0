@@ -87,6 +87,9 @@ function makeClient(orderRow, {
         p.in_stock = p.stock_qty > 0;
         return { rows: [p], rowCount: 1 };
       }
+      if (sql.includes('INSERT INTO stock_movements')) {
+        return { rows: [{ id: 'move-1' }], rowCount: 1 };
+      }
       throw new Error('Unexpected query in test: ' + sql.slice(0, 60));
     }
   };

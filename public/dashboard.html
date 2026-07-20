@@ -255,6 +255,24 @@
         <div id="anaHours" class="hour-chart"></div>
       </div>
     </div>
+
+    <!-- Delivery SLA -->
+    <div class="dash-card">
+      <h2>Delivery SLA</h2>
+      <p class="muted" style="margin-bottom:16px;font-size:13px">Time from rider assignment to delivered, for orders completed in the selected window above.</p>
+      <div class="stat-grid" style="margin-bottom:20px">
+        <div class="stat"><div class="stat-label">Completed deliveries</div><div class="stat-val" id="slaCount">—</div></div>
+        <div class="stat"><div class="stat-label">Avg. time to deliver</div><div class="stat-val" id="slaAvg">—</div></div>
+        <div class="stat"><div class="stat-label">Late deliveries</div><div class="stat-val" id="slaLate">—</div></div>
+        <div class="stat"><div class="stat-label">Late rate</div><div class="stat-val" id="slaLateRate">—</div></div>
+      </div>
+      <div class="scroll-x">
+        <table id="slaRiderTable">
+          <thead><tr><th>Rider</th><th>Deliveries</th><th>Avg. minutes</th><th>Late</th><th>Late rate</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
     </div>
 
     <!-- ============ CUSTOMERS ============ -->
@@ -360,6 +378,50 @@
       </div>
     </div>
 
+    <!-- Reorder suggestions -->
+    <div class="dash-card">
+      <h2>Reorder suggestions</h2>
+      <p class="muted" style="margin-bottom:14px;font-size:13px">Products at or below their low-stock threshold, with a suggested quantity to bring back a healthy buffer.</p>
+      <div class="scroll-x">
+        <table id="reorderTable">
+          <thead><tr><th>Product</th><th>Stock left</th><th>Suggested reorder</th><th>Supplier</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Suppliers -->
+    <div class="dash-card">
+      <h2>Suppliers</h2>
+      <div class="scroll-x">
+        <table id="supplierTable">
+          <thead><tr><th>Name</th><th>Contact</th><th>Phone</th><th>Notes</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div style="margin-top:20px;border-top:1px solid var(--line);padding-top:16px">
+        <div class="row-form" style="grid-template-columns:1fr 1fr 1fr 1fr auto">
+          <div><label>Name</label><input id="supName" placeholder="Kejetia Wholesale" /></div>
+          <div><label>Contact name</label><input id="supContact" placeholder="Kwame" /></div>
+          <div><label>Phone</label><input id="supPhone" placeholder="0241234567" /></div>
+          <div><label>Notes</label><input id="supNotes" placeholder="Delivers Tuesdays" /></div>
+          <div><button class="btn btn-primary btn-sm" onclick="addSupplier()">Add</button></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Stock history -->
+    <div class="dash-card">
+      <h2>Stock history</h2>
+      <p class="muted" style="margin-bottom:14px;font-size:13px">Every sale, restock, and manual adjustment — the audit trail behind each product's current stock number.</p>
+      <div class="scroll-x">
+        <table id="movementTable">
+          <thead><tr><th>When</th><th>Product</th><th>Type</th><th>Change</th><th>Stock after</th><th>Cost/unit</th><th>Supplier</th><th>Note</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
     <!-- Categories -->
     <div class="dash-card">
       <h2>Categories</h2>
@@ -460,16 +522,44 @@
           <div><label>Opens (HH:MM)</label><input id="sOpen" placeholder="08:00" /></div>
           <div><label>Closes (HH:MM)</label><input id="sClose" placeholder="21:00" /></div>
         </div>
-        <div class="row-form" style="grid-template-columns:1fr 1fr 1fr">
+        <div class="row-form" style="grid-template-columns:1fr 1fr 1fr 1fr">
           <div><label>Owner name</label><input id="sOwnerName" placeholder="Ama Boateng" /></div>
           <div><label>MoMo payout number</label><input id="sPayoutNumber" placeholder="0241234567" /></div>
           <div><label>MoMo network</label><select id="sPayoutNetwork"><option value="">Select network</option><option value="mtn">MTN</option><option value="vodafone">Vodafone/Telecel</option><option value="airteltigo">AirtelTigo</option></select></div>
+          <div><label>VAT rate % (0 if not VAT-registered)</label><input id="sVatRate" type="number" min="0" max="100" step="0.01" placeholder="0" /></div>
         </div>
         <div>
           <label style="font-size:12px;color:var(--muted)">Delivery zones — one per line as <code>Zone name: fee</code> (overrides the flat fee; customers pick their zone at checkout)</label>
           <textarea id="sZones" rows="4" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-sm,6px);font:inherit;background:var(--bg);color:var(--ink)" placeholder="East Legon: 15&#10;Osu: 10&#10;Madina: 20"></textarea>
         </div>
         <div><button class="btn btn-primary btn-sm" onclick="saveSettings()">Save settings</button></div>
+      </div>
+    </div>
+
+    <!-- Marketing: public storefront + QR ordering -->
+    <div class="dash-card">
+      <h2>Storefront &amp; QR ordering</h2>
+      <p class="muted" style="margin-bottom:14px;font-size:13px">A public web page listing your catalog, synced live from what you sell on WhatsApp. Share the link or print the QR code for your counter — customers land on the page and tap through to order on WhatsApp.</p>
+      <div style="display:grid;gap:14px;max-width:640px">
+        <div>
+          <label style="font-size:12px;color:var(--muted)">Storefront handle (letters, numbers, hyphens)</label>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input id="sSlug" placeholder="mikes-shop" style="flex:1" />
+            <button class="btn btn-primary btn-sm" onclick="saveSlug()">Save</button>
+          </div>
+        </div>
+        <div id="storeLinkBox" style="display:none">
+          <label style="font-size:12px;color:var(--muted)">Your storefront link</label>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <a id="storeLinkA" href="#" target="_blank" rel="noopener" style="font-family:var(--font-mono);font-size:13px"></a>
+            <button class="btn btn-ghost btn-xs" id="copyStoreLinkBtn">Copy link</button>
+          </div>
+        </div>
+        <div id="storeQrBox" style="display:none">
+          <label style="font-size:12px;color:var(--muted)">QR ordering code — print it, stick it on your counter</label>
+          <div><img id="storeQrImg" alt="Storefront QR code" style="width:180px;height:180px;border:1px solid var(--line);border-radius:var(--r-sm,6px)" /></div>
+          <a id="storeQrDownload" class="btn btn-ghost btn-xs" style="margin-top:8px" download="storefront-qr.png">Download QR</a>
+        </div>
       </div>
     </div>
 
@@ -522,6 +612,67 @@
           <textarea id="loyVipTiers" rows="3" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-sm,6px);font:inherit;background:var(--bg);color:var(--ink)" placeholder="Silver: 200&#10;Gold: 500&#10;Platinum: 1000"></textarea>
         </div>
         <div><button class="btn btn-primary btn-sm" onclick="saveLoyaltySettings()">Save loyalty settings</button></div>
+      </div>
+    </div>
+
+    <!-- Accounting -->
+    <div class="dash-card">
+      <h2>Accounting</h2>
+      <p class="muted" style="margin-bottom:14px;font-size:13px">Daily sales, profit &amp; loss, VAT export, payouts, and expenses. Give your accountant an "Accountant" role key from Team access below and point them at <code>/wa-b/accountant.html</code> for a read-only view of all of this.</p>
+      <div id="acctDailyBox" class="stat-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px;margin-bottom:20px"></div>
+
+      <div style="display:flex;gap:10px;align-items:end;margin-bottom:16px;flex-wrap:wrap">
+        <div><label style="font-size:12px;color:var(--muted)">VAT export month</label><input id="acctVatMonth" type="month" /></div>
+        <button class="btn btn-ghost btn-sm" onclick="downloadVatExportFromDash()">Download VAT CSV</button>
+      </div>
+
+      <div style="border-top:1px solid var(--line);padding-top:16px;margin-bottom:20px">
+        <h3 style="font-size:14px;margin-bottom:10px">Payout balance</h3>
+        <div id="acctPayoutBox" class="stat-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px"></div>
+      </div>
+
+      <div style="border-top:1px solid var(--line);padding-top:16px">
+        <h3 style="font-size:14px;margin-bottom:10px">Expenses</h3>
+        <div class="scroll-x">
+          <table id="expenseTable">
+            <thead><tr><th>Date</th><th>Category</th><th>Amount (GH₵)</th><th>Description</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="row-form" style="grid-template-columns:1fr 1fr 1fr 2fr auto;margin-top:16px">
+          <div><label>Date</label><input id="expDate" type="date" /></div>
+          <div><label>Category</label><input id="expCategory" placeholder="ingredients" /></div>
+          <div><label>Amount GH₵</label><input id="expAmount" type="number" min="0" step="0.01" placeholder="50.00" /></div>
+          <div><label>Description</label><input id="expDescription" placeholder="Weekly market run" /></div>
+          <div><button class="btn btn-primary btn-sm" onclick="addExpense()">Add</button></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Team access -->
+    <div class="dash-card">
+      <h2>Team access</h2>
+      <p class="muted" style="margin-bottom:14px;font-size:13px">Issue a role-scoped key for each staff member instead of sharing your own login. Owner sees everything; Manager can't touch settings; Support can't touch products/promos; Accountant is read-only.</p>
+      <div class="scroll-x">
+        <table id="keysTable">
+          <thead><tr><th>Name</th><th>Role</th><th>Last used</th><th>Expires</th><th>Status</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div style="margin-top:20px;border-top:1px solid var(--line);padding-top:16px">
+        <div class="row-form" style="grid-template-columns:1fr 1fr 1fr auto">
+          <div><label>Name</label><input id="keyName" placeholder="Kwame — kitchen" /></div>
+          <div><label>Role</label>
+            <select id="keyRole">
+              <option value="manager">Manager</option>
+              <option value="support">Support</option>
+              <option value="accountant">Accountant</option>
+              <option value="owner">Owner</option>
+            </select>
+          </div>
+          <div><label>Expires (optional)</label><input id="keyExpires" type="date" /></div>
+          <div><button class="btn btn-primary btn-sm" onclick="issueTeamKey()">Issue key</button></div>
+        </div>
       </div>
     </div>
     </div><!-- /account section -->
@@ -636,7 +787,13 @@ async function onAuthStateChange() {
       loadBroadcasts().catch(() => {}),
       loadOnboarding().catch(() => {}),
       loadNotifications().catch(() => {}),
-      loadLoyaltySettings().catch(() => {})
+      loadLoyaltySettings().catch(() => {}),
+      loadTeamKeys().catch(() => {}),
+      loadSuppliers().catch(() => {}),
+      loadReorderSuggestions().catch(() => {}),
+      loadStockHistory().catch(() => {}),
+      loadAccountingSummary().catch(() => {}),
+      loadExpenses().catch(() => {})
     ]);
     if (!notifPollTimer) notifPollTimer = setInterval(() => loadNotifications().catch(() => {}), 30000);
   } catch (err) {
@@ -703,6 +860,10 @@ async function verifyLinkOtp() {
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
     ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+
+function mapsLink(address) {
+  return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(address || '');
 }
 
 /* ---------------- Notifications ---------------- */
@@ -869,9 +1030,11 @@ async function loadProducts() {
       <td><span class="pill ${stockPill}">${esc(String(stockLabel))}</span></td>
       <td>${flags}</td>
       <td style="white-space:nowrap">
-        <button class="btn btn-ghost btn-xs" onclick="toggleStock('${p.id}', ${!p.in_stock})">${p.in_stock ? 'Mark out' : 'Restock'}</button>
+        <button class="btn btn-ghost btn-xs" onclick="toggleStock('${p.id}', ${!p.in_stock})">${p.in_stock ? 'Mark out' : 'Mark in stock'}</button>
         <button class="btn btn-ghost btn-xs" onclick="editPrice('${p.id}', ${Number(p.price_ghs)})">Price</button>
+        <button class="btn btn-ghost btn-xs" onclick="editCostPrice('${p.id}', ${p.cost_price_ghs == null ? 'null' : Number(p.cost_price_ghs)})">Cost</button>
         <button class="btn btn-ghost btn-xs" onclick="editStockQty('${p.id}', ${p.stock_qty == null ? 'null' : p.stock_qty})">Qty</button>
+        <button class="btn btn-ghost btn-xs" onclick="quickRestock('${p.id}', '${esc(p.name)}')">Add stock</button>
         <button class="btn btn-ghost btn-xs" onclick="editThreshold('${p.id}', ${threshold})">Low-stock at</button>
         <button class="btn btn-ghost btn-xs" data-image-url="${esc(p.image_url || '')}" onclick="editImage('${p.id}', this.dataset.imageUrl)">Image</button>
         <button class="btn btn-ghost btn-xs" onclick="toggleFeatured('${p.id}', ${!p.featured})">${p.featured ? 'Unfeature' : 'Feature'}</button>
@@ -1093,6 +1256,38 @@ async function editPrice(id, current) {
   } catch (err) { toast(err.message); }
 }
 
+async function editCostPrice(id, current) {
+  const v = prompt('Cost price (GH₵) — what you pay to get one unit, leave blank to clear:', current == null ? '' : current.toFixed(2));
+  if (v == null) return;
+  const trimmed = v.trim();
+  const cost_price_ghs = trimmed === '' ? null : parseFloat(trimmed);
+  if (trimmed !== '' && !(cost_price_ghs >= 0)) return toast('Invalid cost price');
+  try {
+    await api('/products/' + id, { method: 'PATCH', body: JSON.stringify({ cost_price_ghs }) });
+    toast('Cost price updated');
+    await loadProducts();
+  } catch (err) { toast(err.message); }
+}
+
+async function quickRestock(id, name) {
+  const qtyRaw = prompt('Add how many units of "' + name + '" to stock?');
+  if (qtyRaw == null) return;
+  const quantity = parseInt(qtyRaw.trim(), 10);
+  if (!Number.isInteger(quantity) || quantity <= 0) return toast('Enter a positive whole number');
+  const costRaw = prompt('Cost per unit this time (GH₵, optional — updates the product\'s cost price):', '');
+  const unit_cost_ghs = costRaw && costRaw.trim() !== '' ? parseFloat(costRaw.trim()) : undefined;
+  if (unit_cost_ghs !== undefined && !(unit_cost_ghs >= 0)) return toast('Invalid cost price');
+  try {
+    await api('/inventory/restock', {
+      method: 'POST',
+      body: JSON.stringify({ business_id: BIZ.id, product_id: id, quantity, unit_cost_ghs })
+    });
+    toast('Added ' + quantity + ' to stock');
+    await loadProducts();
+    loadReorderSuggestions().catch(() => {});
+  } catch (err) { toast(err.message); }
+}
+
 async function editStockQty(id, current) {
   const v = prompt('Stock quantity (leave blank for unlimited/untracked):', current == null ? '' : String(current));
   if (v == null) return;
@@ -1123,6 +1318,83 @@ async function removeProduct(id, name) {
     toast('Deleted');
     await loadProducts();
   } catch (err) { toast(err.message); }
+}
+
+/* ---------------- Inventory: suppliers, reorder suggestions, history ---------------- */
+
+async function loadSuppliers() {
+  const { suppliers } = await api('/inventory/suppliers?business_id=' + BIZ.id);
+  const tbody = document.querySelector('#supplierTable tbody');
+  tbody.innerHTML = suppliers.map(s => `
+    <tr>
+      <td><strong>${esc(s.name)}</strong></td>
+      <td class="muted">${esc(s.contact_name || '')}</td>
+      <td class="muted">${esc(s.contact_phone || '')}</td>
+      <td class="muted">${esc(s.notes || '')}</td>
+      <td><button class="btn btn-ghost btn-xs" onclick="deleteSupplier('${s.id}', '${esc(s.name)}')">Delete</button></td>
+    </tr>
+  `).join('') || '<tr><td colspan="5" class="muted">No suppliers yet. Add your first below.</td></tr>';
+  window.SUPPLIERS = suppliers;
+}
+
+async function addSupplier() {
+  const name = document.getElementById('supName').value.trim();
+  if (!name) return toast('Supplier name is required');
+  try {
+    await api('/inventory/suppliers', {
+      method: 'POST',
+      body: JSON.stringify({
+        business_id: BIZ.id, name,
+        contact_name: document.getElementById('supContact').value.trim() || null,
+        contact_phone: document.getElementById('supPhone').value.trim() || null,
+        notes: document.getElementById('supNotes').value.trim() || null
+      })
+    });
+    ['supName', 'supContact', 'supPhone', 'supNotes'].forEach(id => document.getElementById(id).value = '');
+    toast('Supplier added');
+    await loadSuppliers();
+  } catch (err) { toast(err.message); }
+}
+
+async function deleteSupplier(id, name) {
+  if (!confirm('Delete supplier "' + name + '"? Products keep selling — this just removes the vendor record.')) return;
+  try {
+    await api('/inventory/suppliers/' + id, { method: 'DELETE' });
+    toast('Supplier removed');
+    await loadSuppliers();
+  } catch (err) { toast(err.message); }
+}
+
+async function loadReorderSuggestions() {
+  const { suggestions } = await api('/inventory/reorder-suggestions?business_id=' + BIZ.id);
+  const tbody = document.querySelector('#reorderTable tbody');
+  tbody.innerHTML = suggestions.map(s => `
+    <tr>
+      <td><strong>${esc(s.name)}</strong></td>
+      <td><span class="pill ${s.stock_qty === 0 ? 'pill-off' : 'pill-warn'}">${esc(String(s.stock_qty))}</span></td>
+      <td>${esc(String(s.suggested_reorder_qty))}</td>
+      <td class="muted">${s.supplier_name ? esc(s.supplier_name) + (s.supplier_phone ? ' (' + esc(s.supplier_phone) + ')' : '') : '—'}</td>
+      <td><button class="btn btn-ghost btn-xs" onclick="quickRestock('${s.id}', '${esc(s.name)}')">Add stock</button></td>
+    </tr>
+  `).join('') || '<tr><td colspan="5" class="muted">Nothing low on stock right now.</td></tr>';
+}
+
+async function loadStockHistory() {
+  const { movements } = await api('/inventory/movements?business_id=' + BIZ.id + '&limit=50');
+  const tbody = document.querySelector('#movementTable tbody');
+  const typeLabel = { sale: 'Sale', restock: 'Restock', adjustment: 'Adjustment', return: 'Return' };
+  tbody.innerHTML = movements.map(m => `
+    <tr>
+      <td class="muted">${new Date(m.created_at).toLocaleString('en-GH', { dateStyle: 'medium', timeStyle: 'short' })}</td>
+      <td>${esc(m.product_name)}</td>
+      <td>${esc(typeLabel[m.type] || m.type)}</td>
+      <td>${m.quantity_delta > 0 ? '+' : ''}${esc(String(m.quantity_delta))}</td>
+      <td>${m.quantity_after != null ? esc(String(m.quantity_after)) : '—'}</td>
+      <td>${m.unit_cost_ghs != null ? 'GH₵' + Number(m.unit_cost_ghs).toFixed(2) : '—'}</td>
+      <td class="muted">${esc(m.supplier_name || '')}</td>
+      <td class="muted">${esc(m.note || '')}</td>
+    </tr>
+  `).join('') || '<tr><td colspan="8" class="muted">No stock movements yet.</td></tr>';
 }
 
 /* ---------------- Orders ---------------- */
@@ -1242,6 +1514,7 @@ function renderOrderModal(detail) {
     ${attempts}
 
     <h3>Delivery</h3>
+    ${o.delivery_address ? `<p style="margin-bottom:10px"><span class="muted">${esc(o.delivery_address)}</span> — <a href="${esc(mapsLink(o.delivery_address))}" target="_blank" rel="noopener">View on map ↗</a></p>` : ''}
     <div class="row-form" style="grid-template-columns:1fr 1fr 1fr auto;align-items:end">
       <div><label>Rider name</label><input id="omRiderName" value="${esc(o.rider_name || '')}" /></div>
       <div><label>Rider phone</label><input id="omRiderPhone" value="${esc(o.rider_phone || '')}" /></div>
@@ -1251,6 +1524,11 @@ function renderOrderModal(detail) {
         </select>
       </div>
       <div><button class="btn btn-primary btn-sm" onclick="saveOrderDelivery('${o.id}')">Save</button></div>
+    </div>
+    <div style="margin-top:10px">
+      <label style="font-size:12px;color:var(--muted)">Delivery proof photo URL — set this alongside marking the order "delivered" to notify the customer with the photo</label>
+      <input id="omDeliveryProof" placeholder="https://…" value="${esc(o.delivery_proof_url || '')}" style="width:100%" />
+      ${o.delivery_proof_url ? `<div style="margin-top:6px"><img src="${esc(o.delivery_proof_url)}" style="max-width:160px;border-radius:var(--r-sm,6px)" onerror="this.style.display='none'" /></div>` : ''}
     </div>
     <div class="row-form" style="grid-template-columns:1fr 1fr;margin-top:10px">
       <div><label>Estimated ready</label><input id="omReadyAt" type="datetime-local" value="${o.estimated_ready_at ? toLocalDatetimeValue(o.estimated_ready_at) : ''}" /></div>
@@ -1299,8 +1577,10 @@ async function saveOrderDelivery(orderId) {
     const riderName = document.getElementById('omRiderName').value.trim();
     const riderPhone = document.getElementById('omRiderPhone').value.trim();
     const deliveryStatus = document.getElementById('omDeliveryStatus').value;
+    const proofUrl = document.getElementById('omDeliveryProof').value.trim();
     const body = { delivery_status: deliveryStatus };
     if (riderName) { body.rider_name = riderName; body.rider_phone = riderPhone || null; }
+    if (proofUrl) body.delivery_proof_url = proofUrl;
     await api('/orders/' + orderId + '/delivery', { method: 'PATCH', body: JSON.stringify(body) });
     toast('Delivery info saved');
     await openOrderDetail(orderId);
@@ -1634,8 +1914,32 @@ async function loadAnalytics(days) {
       const pct = Math.max(2, Math.round((count / maxHour) * 100));
       return `<div class="hour-bar ${count > 0 ? 'active' : ''}" style="height:${pct}%" title="${h}:00 — ${count} order(s)"></div>`;
     }).join('');
+
+    await loadDeliverySla(currentAnaDays);
   } catch (err) {
     toast('Could not load analytics: ' + err.message);
+  }
+}
+
+async function loadDeliverySla(days) {
+  try {
+    const { delivery_sla: s } = await api('/analytics/delivery-sla?business_id=' + BIZ.id + '&days=' + (days === 30 ? 30 : 7));
+    document.getElementById('slaCount').textContent = s.completed_deliveries;
+    document.getElementById('slaAvg').textContent = s.avg_minutes_to_deliver == null ? '—' : s.avg_minutes_to_deliver + ' min';
+    document.getElementById('slaLate').textContent = s.late_count;
+    document.getElementById('slaLateRate').textContent = s.late_rate_pct == null ? '—' : s.late_rate_pct + '%';
+    document.querySelector('#slaRiderTable tbody').innerHTML = s.by_rider.map(r => `
+      <tr>
+        <td>${esc(r.rider_name)}</td>
+        <td>${r.deliveries}</td>
+        <td>${r.avg_minutes}</td>
+        <td>${r.late_count}</td>
+        <td>${r.late_rate_pct == null ? '—' : r.late_rate_pct + '%'}</td>
+      </tr>
+    `).join('') || '<tr><td colspan="5" class="muted">No completed deliveries in this window.</td></tr>';
+  } catch (err) {
+    // Non-fatal — the rest of the analytics tab already rendered.
+    console.warn('loadDeliverySla failed:', err.message);
   }
 }
 
@@ -1858,8 +2162,12 @@ async function loadSettings() {
   document.getElementById('sOwnerName').value = settings.owner_name || '';
   document.getElementById('sPayoutNumber').value = settings.payout_momo_number || '';
   document.getElementById('sPayoutNetwork').value = settings.payout_momo_network || '';
+  document.getElementById('sVatRate').value = settings.vat_rate_pct != null ? Number(settings.vat_rate_pct) : 0;
   const zones = Array.isArray(settings.delivery_zones) ? settings.delivery_zones : [];
   document.getElementById('sZones').value = zones.map(z => z.name + ': ' + Number(z.fee_ghs).toFixed(2)).join('\n');
+
+  document.getElementById('sSlug').value = settings.slug || '';
+  renderStoreLink(settings.slug);
 
   document.getElementById('cnEnabled').checked = settings.cart_nudge_enabled !== false;
   document.getElementById('cnDelay').value = settings.cart_nudge_delay_minutes || 60;
@@ -1931,6 +2239,153 @@ async function saveLoyaltySettings() {
   } catch (err) { toast(err.message); }
 }
 
+/* ---------------- Accounting ---------------- */
+
+function acctStatBox(label, value) {
+  return `<div style="border:1px solid var(--line);border-radius:8px;padding:12px 14px">
+    <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">${esc(label)}</div>
+    <div style="font-size:18px;font-weight:700;margin-top:4px">${esc(value)}</div>
+  </div>`;
+}
+
+async function loadAccountingSummary() {
+  const [daily, balance] = await Promise.all([
+    api('/accounting/daily-sales?business_id=' + BIZ.id),
+    api('/accounting/payout-balance?business_id=' + BIZ.id)
+  ]);
+  document.getElementById('acctDailyBox').innerHTML = [
+    acctStatBox('Orders today', daily.report.order_count),
+    acctStatBox('Revenue today', 'GH₵' + Number(daily.report.total_ghs).toFixed(2)),
+    acctStatBox('MoMo', 'GH₵' + Number(daily.report.momo_ghs).toFixed(2)),
+    acctStatBox('Card', 'GH₵' + Number(daily.report.card_ghs).toFixed(2)),
+    acctStatBox('Cash', 'GH₵' + Number(daily.report.cash_ghs).toFixed(2))
+  ].join('');
+  document.getElementById('acctPayoutBox').innerHTML = [
+    acctStatBox('Collected all-time', 'GH₵' + balance.collected_ghs),
+    acctStatBox('Paid out', 'GH₵' + balance.paid_out_ghs),
+    acctStatBox('Balance owed to you', 'GH₵' + balance.balance_ghs)
+  ].join('');
+}
+
+function downloadVatExportFromDash() {
+  const month = document.getElementById('acctVatMonth').value;
+  if (!month) return toast('Pick a month first');
+  window.open('/api/accounting/vat-export?business_id=' + BIZ.id + '&month=' + encodeURIComponent(month), '_blank');
+}
+
+async function loadExpenses() {
+  const { expenses } = await api('/accounting/expenses?business_id=' + BIZ.id);
+  const tbody = document.querySelector('#expenseTable tbody');
+  tbody.innerHTML = expenses.map(e => `
+    <tr>
+      <td class="muted">${e.expense_date}</td>
+      <td>${esc(e.category)}</td>
+      <td>${Number(e.amount_ghs).toFixed(2)}</td>
+      <td class="muted">${esc(e.description || '')}</td>
+      <td><button class="btn btn-ghost btn-xs" onclick="deleteExpense('${e.id}')">Delete</button></td>
+    </tr>
+  `).join('') || '<tr><td colspan="5" class="muted">No expenses recorded yet.</td></tr>';
+}
+
+async function addExpense() {
+  const amount = parseFloat(document.getElementById('expAmount').value);
+  if (!(amount > 0)) return toast('Enter a valid amount');
+  try {
+    await api('/accounting/expenses', {
+      method: 'POST',
+      body: JSON.stringify({
+        business_id: BIZ.id,
+        amount_ghs: amount,
+        category: document.getElementById('expCategory').value.trim() || 'general',
+        description: document.getElementById('expDescription').value.trim() || null,
+        expense_date: document.getElementById('expDate').value || null
+      })
+    });
+    ['expDate', 'expCategory', 'expAmount', 'expDescription'].forEach(id => document.getElementById(id).value = '');
+    toast('Expense recorded');
+    await loadExpenses();
+  } catch (err) { toast(err.message); }
+}
+
+async function deleteExpense(id) {
+  if (!confirm('Delete this expense?')) return;
+  try {
+    await api('/accounting/expenses/' + id, { method: 'DELETE' });
+    toast('Expense deleted');
+    await loadExpenses();
+  } catch (err) { toast(err.message); }
+}
+
+/* ---------------- Team access (RBAC keys) ---------------- */
+
+async function loadTeamKeys() {
+  const tbody = document.querySelector('#keysTable tbody');
+  try {
+    const { keys } = await api('/keys?business_id=' + BIZ.id);
+    tbody.innerHTML = keys.map(k => {
+      const revoked = !!k.revoked_at;
+      const expired = k.expires_at && new Date(k.expires_at) < new Date();
+      const statusPill = revoked ? '<span class="pill pill-off">Revoked</span>'
+        : expired ? '<span class="pill pill-warn">Expired</span>'
+        : '<span class="pill pill-ok">Active</span>';
+      return `
+      <tr>
+        <td><strong>${esc(k.name)}</strong></td>
+        <td class="muted">${esc(k.role)}</td>
+        <td class="muted">${k.last_used_at ? new Date(k.last_used_at).toLocaleString() : 'Never'}</td>
+        <td class="muted">${k.expires_at ? new Date(k.expires_at).toLocaleDateString() : '—'}</td>
+        <td>${statusPill}</td>
+        <td style="white-space:nowrap">
+          ${!revoked ? `
+            <button class="btn btn-ghost btn-xs" onclick="rotateTeamKey('${k.id}')">Rotate</button>
+            <button class="btn btn-ghost btn-xs" onclick="revokeTeamKey('${k.id}')">Revoke</button>
+          ` : ''}
+        </td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="6" class="muted">No team keys yet — issue one below.</td></tr>';
+  } catch (err) {
+    tbody.innerHTML = '<tr><td colspan="6" class="muted">Could not load: ' + esc(err.message) + '</td></tr>';
+  }
+}
+
+async function issueTeamKey() {
+  const name = document.getElementById('keyName').value.trim();
+  const role = document.getElementById('keyRole').value;
+  const expiresRaw = document.getElementById('keyExpires').value;
+  if (!name) return toast('Give the key a name (e.g. who it\'s for)');
+  try {
+    const { key } = await api('/keys', {
+      method: 'POST',
+      body: JSON.stringify({
+        business_id: BIZ.id, name, role,
+        expires_at: expiresRaw ? new Date(expiresRaw + 'T23:59:59').toISOString() : null
+      })
+    });
+    document.getElementById('keyName').value = '';
+    document.getElementById('keyExpires').value = '';
+    alert(`Key issued for "${name}":\n\n${key.plaintext}\n\nCopy this now — it won't be shown again.`);
+    await loadTeamKeys();
+  } catch (err) { toast(err.message); }
+}
+
+async function revokeTeamKey(id) {
+  if (!confirm('Revoke this key? Whoever is using it will lose access immediately.')) return;
+  try {
+    await api('/keys/' + id + '/revoke', { method: 'POST' });
+    toast('Key revoked');
+    await loadTeamKeys();
+  } catch (err) { toast(err.message); }
+}
+
+async function rotateTeamKey(id) {
+  if (!confirm('Rotate this key? The old key stops working immediately and a new one is issued.')) return;
+  try {
+    const { key } = await api('/keys/' + id + '/rotate', { method: 'POST' });
+    alert(`Rotated. New key:\n\n${key.plaintext}\n\nCopy this now — it won't be shown again.`);
+    await loadTeamKeys();
+  } catch (err) { toast(err.message); }
+}
+
 async function saveSettings() {
   const zonesText = document.getElementById('sZones').value.trim();
   const zones = [];
@@ -1951,6 +2406,8 @@ async function saveSettings() {
     payout_momo_number: document.getElementById('sPayoutNumber').value.trim() || null,
     payout_momo_network: document.getElementById('sPayoutNetwork').value || null
   };
+  const vatRaw = document.getElementById('sVatRate').value.trim();
+  if (vatRaw !== '') body.vat_rate_pct = parseFloat(vatRaw);
   if (feeRaw !== '') body.delivery_fee_ghs = parseFloat(feeRaw);
   try {
     await api('/business/settings', { method: 'PATCH', body: JSON.stringify(body) });
@@ -1958,6 +2415,48 @@ async function saveSettings() {
     loadOnboarding().catch(() => {});
   } catch (err) { toast(err.message); }
 }
+
+/* ---------------- Storefront & QR ordering ---------------- */
+
+function renderStoreLink(slug) {
+  const linkBox = document.getElementById('storeLinkBox');
+  const qrBox = document.getElementById('storeQrBox');
+  if (!slug) {
+    linkBox.style.display = 'none';
+    qrBox.style.display = 'none';
+    return;
+  }
+  const url = window.location.origin + '/wa-b/storefront.html?shop=' + encodeURIComponent(slug);
+  const linkA = document.getElementById('storeLinkA');
+  linkA.href = url;
+  linkA.textContent = url;
+  linkBox.style.display = '';
+
+  const qrUrl = '/api/storefront/' + encodeURIComponent(slug) + '/qr';
+  document.getElementById('storeQrImg').src = qrUrl;
+  document.getElementById('storeQrDownload').href = qrUrl;
+  qrBox.style.display = '';
+}
+
+async function saveSlug() {
+  const slug = document.getElementById('sSlug').value.trim().toLowerCase();
+  if (!/^[a-z0-9](?:[a-z0-9-]{1,58}[a-z0-9])?$/.test(slug)) {
+    return toast('Handle must be 3-60 lowercase letters, numbers, or hyphens');
+  }
+  try {
+    const { settings } = await api('/business/settings', { method: 'PATCH', body: JSON.stringify({ slug }) });
+    document.getElementById('sSlug').value = settings.slug || '';
+    renderStoreLink(settings.slug);
+    toast('Storefront handle saved');
+  } catch (err) { toast(err.message); }
+}
+
+document.getElementById('copyStoreLinkBtn')?.addEventListener('click', () => {
+  const href = document.getElementById('storeLinkA').href;
+  if (!href) return;
+  navigator.clipboard?.writeText(href);
+  toast('Link copied');
+});
 
 /* ---------------- Onboarding checklist ---------------- */
 

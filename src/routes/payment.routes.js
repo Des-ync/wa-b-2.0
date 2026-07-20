@@ -50,7 +50,8 @@ router.post('/paystack/webhook', async (req, res) => {
       source: 'paystack',
       externalId,
       payload: event,
-      signatureValid: true
+      signatureValid: true,
+      signatureHeader: signature
     });
     if (duplicate) {
       logger.info('Paystack webhook duplicate ignored: %s', externalId);
@@ -191,7 +192,8 @@ router.post('/hubtel/callback', async (req, res) => {
       source: 'hubtel',
       externalId,
       payload: event,
-      signatureValid: true
+      signatureValid: true,
+      signatureHeader: signature
     });
     if (duplicate) {
       logger.info('Hubtel webhook duplicate ignored: %s', externalId);

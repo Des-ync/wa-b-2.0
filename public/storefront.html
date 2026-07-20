@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Shop · WA-B Solutions</title>
+<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png" />
+<link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16.png" />
+<link rel="apple-touch-icon" sizes="180x180" href="assets/favicon-180.png" />
+<link rel="stylesheet" href="styles.css" />
+<style>
+  body { background: var(--bg-2); }
+  .store-wrap { max-width: 720px; margin: 0 auto; padding: 0 16px 60px; }
+  .store-head { text-align: center; padding: 32px 16px 20px; }
+  .store-head h1 { font-size: 22px; margin: 0 0 6px; }
+  .store-head .muted { color: var(--muted); font-size: 13px; }
+  .store-open { display: inline-block; margin-top: 10px; padding: 4px 12px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .open-yes { background: var(--accent-soft); color: var(--accent-ink); }
+  .open-no { background: #fbeaea; color: var(--danger); }
+  .store-cta { text-align: center; margin: 8px 0 24px; }
+  .store-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
+  .prod-card {
+    background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-lg);
+    overflow: hidden; display: flex; flex-direction: column;
+  }
+  .prod-img { width: 100%; aspect-ratio: 4/3; object-fit: cover; background: var(--bg-2); }
+  .prod-body { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
+  .prod-name { font-weight: 600; font-size: 14px; }
+  .prod-desc { color: var(--muted); font-size: 12px; flex: 1; }
+  .prod-cat { color: var(--muted-2); font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .prod-price { font-weight: 700; font-size: 15px; margin-top: 4px; }
+  .prod-featured { font-size: 11px; color: var(--accent-ink); font-weight: 600; }
+  .prod-oos { font-size: 11px; color: var(--danger); font-weight: 600; }
+  .err-box, .loading-box, .empty-box { text-align: center; padding: 60px 20px; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<header class="nav"><div class="wrap nav-row">
+  <a href="index.html" class="brand"><img class="brand-logo brand-logo-light" src="assets/logo-light.jpg" alt="WA-B Solutions" /><img class="brand-logo brand-logo-dark" src="assets/logo-dark.jpg" alt="WA-B Solutions" /></a>
+</div></header>
+
+<div class="store-wrap">
+  <div id="loading" class="loading-box">Loading shop…</div>
+  <div id="error" class="err-box" style="display:none"></div>
+  <div id="content" style="display:none">
+    <div id="head" class="store-head"></div>
+    <div class="store-cta"><a id="chatBtn" class="btn btn-primary" href="#" target="_blank" rel="noopener">💬 Start an order on WhatsApp</a></div>
+    <div id="grid" class="store-grid"></div>
+    <div id="empty" class="empty-box" style="display:none">No products listed yet — check back soon.</div>
+  </div>
+</div>
+
+<script>
+function money(n) {
+  return 'GH¢' + Number(n || 0).toFixed(2);
+}
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[c]));
+}
+
+async function loadStore() {
+  const params = new URLSearchParams(window.location.search);
+  const slug = params.get('shop');
+  const loadingEl = document.getElementById('loading');
+  const errorEl = document.getElementById('error');
+  const contentEl = document.getElementById('content');
+
+  if (!slug) {
+    loadingEl.style.display = 'none';
+    errorEl.style.display = 'block';
+    errorEl.textContent = 'No shop specified. Check the link and try again.';
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/storefront/' + encodeURIComponent(slug));
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || 'Shop not found');
+    }
+    const shop = data.shop;
+    const products = Array.isArray(data.products) ? data.products : [];
+
+    document.title = esc(shop.name) + ' · WA-B Solutions';
+    document.getElementById('head').innerHTML = `
+      <h1>${esc(shop.name)}</h1>
+      ${shop.welcome_message ? `<div class="muted">${esc(shop.welcome_message)}</div>` : ''}
+      <span class="store-open ${shop.open_now ? 'open-yes' : 'open-no'}">${shop.open_now ? 'Open now' : 'Currently closed'}</span>
+    `;
+
+    const digits = String(shop.whatsapp_number || '').replace(/[^\d]/g, '');
+    const chatBtn = document.getElementById('chatBtn');
+    if (digits) {
+      chatBtn.href = 'https://wa.me/' + digits + '?text=' + encodeURIComponent('Hi ' + shop.name + ', I would like to order');
+    } else {
+      chatBtn.style.display = 'none';
+    }
+
+    const gridEl = document.getElementById('grid');
+    if (!products.length) {
+      document.getElementById('empty').style.display = 'block';
+    } else {
+      gridEl.innerHTML = products.map(p => `
+        <div class="prod-card">
+          ${p.image_url ? `<img class="prod-img" src="${esc(p.image_url)}" alt="${esc(p.name)}" onerror="this.style.display='none'" />` : ''}
+          <div class="prod-body">
+            <div class="prod-cat">${esc(p.category)}</div>
+            <div class="prod-name">${esc(p.name)}</div>
+            ${p.description ? `<div class="prod-desc">${esc(p.description)}</div>` : ''}
+            <div class="prod-price">${money(p.price_ghs)}</div>
+            ${p.featured ? '<div class="prod-featured">★ Featured</div>' : ''}
+            ${!p.in_stock ? '<div class="prod-oos">Out of stock</div>' : ''}
+            ${digits ? `<a class="btn btn-ghost btn-xs" href="https://wa.me/${digits}?text=${encodeURIComponent('Hi ' + shop.name + ', I would like to order: ' + p.name)}" target="_blank" rel="noopener">Order on WhatsApp</a>` : ''}
+          </div>
+        </div>
+      `).join('');
+    }
+
+    loadingEl.style.display = 'none';
+    contentEl.style.display = 'block';
+  } catch (err) {
+    loadingEl.style.display = 'none';
+    errorEl.style.display = 'block';
+    errorEl.textContent = err.message || 'Could not load this shop.';
+  }
+}
+
+loadStore();
+</script>
+
+</body>
+</html>

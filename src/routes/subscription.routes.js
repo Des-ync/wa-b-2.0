@@ -3,14 +3,9 @@ const logger = require('../utils/logger');
 const subService = require('../services/subscription.service');
 const { normalizeGhanaPhone, sanitizeBusiness } = require('../utils/helpers');
 const { requireAuth } = require('../middleware/auth');
+const { tenantBlocksBusinessId } = require('../middleware/tenantAccess');
 
 const router = express.Router();
-
-function tenantBlocksBusinessId(req, businessId) {
-  if (req.auth?.scope === 'admin') return false;
-  if (!req.auth?.businessId) return true;
-  return businessId && businessId !== req.auth.businessId;
-}
 
 /** GET /api/subscriptions/plans — list active SaaS plans (public). */
 router.get('/plans', async (_req, res) => {

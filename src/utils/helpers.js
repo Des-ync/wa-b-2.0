@@ -154,9 +154,36 @@ function sanitizeBusiness(business) {
   const {
     wa_access_token: _wa,
     ig_page_access_token: _ig,
+    messenger_page_access_token: _msgr,
     ...safe
   } = business;
   return safe;
+}
+
+/**
+ * A Google Maps search deep-link for a delivery address. Uses the plain
+ * search URL format (no API key, no geocoding call) — works for any text
+ * address, opens directly in the Maps app on mobile. Returns null for an
+ * empty address so callers can skip rendering the link entirely.
+ */
+function mapsLinkForAddress(address) {
+  const clean = String(address || '').trim();
+  if (!clean) return null;
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(clean)}`;
+}
+
+/**
+ * URL-safe storefront handle from a business name: lowercase, non-alphanumeric
+ * runs collapsed to a single hyphen, no leading/trailing hyphen. Callers
+ * append a uniqueness suffix (e.g. a short id) when colliding.
+ */
+function slugify(name) {
+  return String(name || '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60) || 'shop';
 }
 
 /**
@@ -289,6 +316,8 @@ module.exports = {
   formatDate,
   truncate,
   sanitizeBusiness,
+  slugify,
+  mapsLinkForAddress,
   sleep,
   safeJsonParse,
   ORDER_NUMBER_RE,

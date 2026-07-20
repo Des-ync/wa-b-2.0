@@ -1,7 +1,7 @@
 const { v4: uuidv4 } = require('uuid');
 const { query, transaction } = require('../config/database');
 const logger = require('../utils/logger');
-const { addDays } = require('../utils/helpers');
+const { addDays, slugify } = require('../utils/helpers');
 const pawapay = require('./pawapay.service');
 
 const SUSPENSION_GRACE_DAYS = parseInt(process.env.SUSPENSION_GRACE_DAYS || '3', 10);
@@ -75,7 +75,17 @@ async function ensureBusiness({ name, ownerName, whatsappNumber, industry }) {
     [name || 'Unnamed Business', ownerName || null, whatsappNumber, industry || 'retail',
      String(DEFAULT_TRIAL_DAYS)]
   );
-  return inserted.rows[0];
+  const business = inserted.rows[0];
+
+  // Storefront handle: name-derived + a short id suffix, so it's unique on
+  // the first try without a collision-retry loop (same approach the
+  // migration's backfill uses for pre-existing rows).
+  const slug = `${slugify(business.name)}-${business.id.slice(0, 6)}`;
+  const withSlug = await query(
+    `UPDATE businesses SET slug = $2 WHERE id = $1 RETURNING *`,
+    [business.id, slug]
+  );
+  return withSlug.rows[0] || business;
 }
 
 async function createPendingSubscription({ businessId, planId }) {

@@ -2,16 +2,12 @@ const express = require('express');
 const logger = require('../utils/logger');
 const { query } = require('../config/database');
 const { requireAuth } = require('../middleware/auth');
+const { resolveBusinessId } = require('../middleware/tenantAccess');
 const wa = require('../services/whatsapp.service');
 
 const router = express.Router();
 
 router.use(requireAuth('any'));
-
-function resolveBusinessId(req) {
-  if (req.auth?.scope === 'admin') return req.query.business_id || req.body?.business_id || null;
-  return req.auth?.businessId || null;
-}
 
 /**
  * Pure step computation — no DB access — so it's cheap to unit test and to

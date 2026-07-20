@@ -22,7 +22,7 @@ const BACKOFF_SECONDS = [5, 15, 60, 300, 900, 1800, 3600, 7200];
  * Returns:
  *   { event, duplicate: boolean }
  */
-async function enqueue({ source, externalId, payload, signatureValid = true }) {
+async function enqueue({ source, externalId, payload, signatureValid = true, signatureHeader = null }) {
   if (!source) throw new Error('source required');
   if (!externalId) {
     // Fall back to a deterministic hash so repeated identical bodies dedupe too.
@@ -34,11 +34,11 @@ async function enqueue({ source, externalId, payload, signatureValid = true }) {
 
   const res = await query(
     `INSERT INTO webhook_events
-       (source, external_id, payload, signature_valid, status)
-     VALUES ($1,$2,$3::jsonb,$4,'pending')
+       (source, external_id, payload, signature_valid, signature_header, status)
+     VALUES ($1,$2,$3::jsonb,$4,$5,'pending')
      ON CONFLICT (source, external_id) DO NOTHING
      RETURNING *`,
-    [source, externalId, JSON.stringify(payload || {}), !!signatureValid]
+    [source, externalId, JSON.stringify(payload || {}), !!signatureValid, signatureHeader ? String(signatureHeader).slice(0, 500) : null]
   );
 
   if (res.rowCount === 0) {

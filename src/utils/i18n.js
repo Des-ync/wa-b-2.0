@@ -411,6 +411,16 @@ const STRINGS = {
     en: p => `✅ Payment received!\n\nOrder: ${p.n}\nTotal: ${p.total}\nBusiness: ${p.shop}\n\nWe'll notify you the moment your order is on its way. Thank you for shopping with us! 🛍️${p.receiptUrl ? `\n\nReceipt: ${p.receiptUrl}` : ''}\n\nWant the same again next time? Just reply *REPEAT*.`,
     tw: p => `✅ Yɛagye wo akatua no!\n\nNhyehyɛe: ${p.n}\nNe nyinaa: ${p.total}\nAdwuma: ${p.shop}\n\nSɛ wo nhyehyɛe no si kwan so a, yɛbɛbɔ wo amanneɛ. Yɛda wo ase sɛ wotɔɔ yɛn nkyɛn! 🛍️${p.receiptUrl ? `\n\nReceipt: ${p.receiptUrl}` : ''}\n\nWopɛ sɛ wonya bio a, kyerɛw *REPEAT*.`
   },
+  // Compact SMS fallback — kept to one GSM-7 segment (≤160 chars) wherever
+  // possible; used only when the customer's primary channel send failed.
+  sms_payment_receipt: {
+    en: p => `${p.shop}: Payment received for order ${p.n}, total ${p.total}. Thank you!${p.receiptUrl ? ` Receipt: ${p.receiptUrl}` : ''}`,
+    tw: p => `${p.shop}: Yɛagye akatua ama nhyehyɛe ${p.n}, ne nyinaa ${p.total}. Yɛda wo ase!${p.receiptUrl ? ` Receipt: ${p.receiptUrl}` : ''}`
+  },
+  sms_cart_nudge: {
+    en: p => `${p.shop}: You left ${p.count} item(s) in your cart. Reply to this WhatsApp/Instagram chat to finish your order.`,
+    tw: p => `${p.shop}: Wogyaw nneɛma ${p.count} wɔ wo cart mu. San kɔ WhatsApp/Instagram nkitahodi no so na wie wo nhyehyɛe no.`
+  },
 
   /* ---------- fulfilment status notifications ---------- */
   ns_confirmed: {
@@ -428,6 +438,13 @@ const STRINGS = {
   ns_delivered: {
     en: p => `🎉 Order *${p.n}* delivered. Thank you for shopping with ${p.shop}!`,
     tw: p => `🎉 Nhyehyɛe *${p.n}* adu. Yɛda wo ase sɛ wotɔɔ ${p.shop} nkyɛn!`
+  },
+  // Fires only when a proof photo was attached — a distinct, additive
+  // message from ns_delivered (which covers the general order-status flow),
+  // not a duplicate of it.
+  delivery_completed: {
+    en: p => `📸 Delivery proof for order *${p.n}* from ${p.shop}${p.proofUrl ? `:\n${p.proofUrl}` : '.'}`,
+    tw: p => `📸 Nhyehyɛe *${p.n}* a efi ${p.shop} adansedie${p.proofUrl ? `:\n${p.proofUrl}` : '.'}`
   },
   ns_cancelled: {
     en: p => `Your order *${p.n}* at ${p.shop} has been cancelled. Reply *MENU* to order again.`,

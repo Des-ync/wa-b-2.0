@@ -78,3 +78,37 @@ test('enqueue: source is mandatory', async () => {
     /source required/
   );
 });
+
+test('enqueue: stores the raw signature header for audit/debugging', async () => {
+  let capturedParams = null;
+  const fakeQuery = async (sql, params) => {
+    if (sql.includes('INSERT INTO webhook_events')) {
+      capturedParams = params;
+      return { rows: [{ id: 'evt-sig' }], rowCount: 1 };
+    }
+    return { rows: [], rowCount: 0 };
+  };
+  await withQuery(fakeQuery, async () => {
+    await queue.enqueue({
+      source: 'whatsapp', externalId: 'wamid.sig', payload: { a: 1 },
+      signatureValid: true, signatureHeader: 'sha256=abc123'
+    });
+  });
+  // [source, externalId, payloadJson, signatureValid, signatureHeader]
+  assert.equal(capturedParams[4], 'sha256=abc123');
+});
+
+test('enqueue: a missing signature header stores null, not undefined/empty-string weirdness', async () => {
+  let capturedParams = null;
+  const fakeQuery = async (sql, params) => {
+    if (sql.includes('INSERT INTO webhook_events')) {
+      capturedParams = params;
+      return { rows: [{ id: 'evt-nosig' }], rowCount: 1 };
+    }
+    return { rows: [], rowCount: 0 };
+  };
+  await withQuery(fakeQuery, async () => {
+    await queue.enqueue({ source: 'pawapay', externalId: 'dep.1', payload: { a: 1 } });
+  });
+  assert.equal(capturedParams[4], null);
+});

@@ -1,19 +1,14 @@
 const express = require('express');
 const logger = require('../utils/logger');
 const { query } = require('../config/database');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, requirePermission } = require('../middleware/auth');
+const { tenantBlocksBusinessId } = require('../middleware/tenantAccess');
 const { SEGMENTS } = require('../utils/audience');
 const { recordAudit } = require('../utils/auditLog');
 
 const router = express.Router();
 
 router.use(requireAuth('any'));
-
-function tenantBlocksBusinessId(req, businessId) {
-  if (req.auth?.scope === 'admin') return false;
-  if (!req.auth?.businessId) return true;
-  return businessId && businessId !== req.auth.businessId;
-}
 
 const PROMO_COLUMNS =
   'id, code, type, value, expires_at, max_uses, used_count, active, created_at, ' +
@@ -44,7 +39,7 @@ router.get('/', async (req, res) => {
  *         min_order_ghs?, first_order_only?, customer_tag?, customer_segment?,
  *         product_id?, category? }
  */
-router.post('/', async (req, res) => {
+router.post('/', requirePermission('promos'), async (req, res) => {
   try {
     const { business_id, type, expires_at } = req.body || {};
     const code = String(req.body?.code || '').trim().toUpperCase();
@@ -117,7 +112,7 @@ router.post('/', async (req, res) => {
 });
 
 /** PATCH /api/promos/:id — toggle active, e.g. { business_id, active: false } */
-router.patch('/:id', async (req, res) => {
+router.patch('/:id', requirePermission('promos'), async (req, res) => {
   try {
     const { business_id } = req.body || {};
     if (!business_id) return res.status(400).json({ success: false, error: 'business_id required' });

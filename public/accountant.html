@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Accountant view · WA-B Solutions</title>
+<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png" />
+<link rel="stylesheet" href="styles.css" />
+<style>
+  .dash { max-width: var(--max, 1100px); margin: 0 auto; padding: 40px 20px 80px; }
+  .dash h1 { margin-bottom: 4px; }
+  .dash .sub { color: var(--muted); margin-bottom: 32px; }
+  .dash-card { border: 1px solid var(--line); border-radius: var(--r-lg, 12px); padding: 24px; margin-bottom: 24px; background: var(--bg); }
+  .dash-card h2 { font-size: 18px; margin-bottom: 16px; }
+  .dash table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .dash th { text-align: left; color: var(--muted); font-weight: 600; padding: 8px 10px; border-bottom: 1px solid var(--line); font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .dash td { padding: 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  .dash tr:last-child td { border-bottom: none; }
+  .dash input, .dash select { padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--r-sm, 6px); font: inherit; background: var(--bg); color: var(--ink); }
+  .dash .pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .pill-warn { background: color-mix(in srgb, var(--warning) 18%, transparent); color: var(--warning); }
+  .pill-ok { background: color-mix(in srgb, var(--success, #2e7d32) 15%, transparent); color: var(--success, #2e7d32); }
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(150px,1fr)); gap: 14px; }
+  .stat-box { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+  .stat-box .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  .stat-box .value { font-size: 20px; font-weight: 700; margin-top: 4px; }
+  .muted { color: var(--muted); }
+</style>
+</head>
+<body>
+<main class="dash">
+  <h1>Accountant view</h1>
+  <p class="sub">Read-only books access — orders, revenue, VAT, payouts, and expenses for one business. Nothing here can be edited from this page.</p>
+
+  <div class="dash-card" id="keyCard">
+    <h2>Access key</h2>
+    <p class="muted" style="margin-bottom:12px;font-size:13px">Ask the shop owner for an accountant-role API key from their dashboard's "Team access" card. Stored only in this browser's local storage, sent as a Bearer token.</p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <input id="acctKey" type="password" placeholder="sk_live_..." style="flex:1;min-width:280px" />
+      <button class="btn btn-primary btn-sm" onclick="saveKeyAndLoad()">Connect</button>
+    </div>
+    <p id="keyError" class="muted" style="color:var(--danger,#c0392b);margin-top:8px;display:none"></p>
+  </div>
+
+  <div id="app" style="display:none">
+    <div class="dash-card">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:16px">
+        <h2 style="margin-bottom:0">Today's sales</h2>
+        <button class="btn btn-ghost btn-sm" onclick="signOut()">Sign out</button>
+      </div>
+      <div id="dailyBox" class="stat-grid"><p class="muted">Loading…</p></div>
+    </div>
+
+    <div class="dash-card">
+      <h2>Profit &amp; loss</h2>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;align-items:end">
+        <div><label class="muted" style="font-size:12px;display:block">From</label><input id="plFrom" type="date" /></div>
+        <div><label class="muted" style="font-size:12px;display:block">To</label><input id="plTo" type="date" /></div>
+        <button class="btn btn-ghost btn-sm" onclick="loadProfitLoss()">Apply</button>
+      </div>
+      <div id="plBox" class="stat-grid"><p class="muted">Loading…</p></div>
+      <div class="scroll-x" style="margin-top:16px">
+        <table id="plCategoryTable">
+          <thead><tr><th>Expense category</th><th>Count</th><th>Total (GH₵)</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="dash-card">
+      <h2>VAT export</h2>
+      <p class="muted" style="margin-bottom:14px;font-size:13px">Monthly CSV of paid orders with net/VAT/gross columns, computed from the shop's configured VAT rate.</p>
+      <div style="display:flex;gap:10px;align-items:end">
+        <div><label class="muted" style="font-size:12px;display:block">Month</label><input id="vatMonth" type="month" /></div>
+        <button class="btn btn-ghost btn-sm" onclick="downloadVatExport()">Download CSV</button>
+      </div>
+    </div>
+
+    <div class="dash-card">
+      <h2>Payout balance</h2>
+      <div id="payoutBalanceBox" class="stat-grid"><p class="muted">Loading…</p></div>
+      <div class="scroll-x" style="margin-top:16px">
+        <table id="payoutTable">
+          <thead><tr><th>Date</th><th>Amount (GH₵)</th><th>MoMo</th><th>Reference</th><th>Note</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="dash-card">
+      <h2>Expenses</h2>
+      <div class="scroll-x">
+        <table id="expenseTable">
+          <thead><tr><th>Date</th><th>Category</th><th>Amount (GH₵)</th><th>Description</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="dash-card">
+      <h2>Payment reconciliation</h2>
+      <p class="muted" style="margin-bottom:14px;font-size:13px">Paid orders with no matching gateway webhook event on file — worth a second look.</p>
+      <div id="reconSummary" class="stat-grid" style="margin-bottom:16px"><p class="muted">Loading…</p></div>
+      <div class="scroll-x">
+        <table id="reconTable">
+          <thead><tr><th>Order</th><th>Date</th><th>Amount (GH₵)</th><th>Method</th><th>Payment ref</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+function getKey() { return localStorage.getItem('wab_accountant_key') || ''; }
+
+async function api(path, opts = {}) {
+  const res = await fetch('/api' + path, {
+    ...opts,
+    headers: { Authorization: 'Bearer ' + getKey(), 'Content-Type': 'application/json', ...(opts.headers || {}) }
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok || body.success === false) throw new Error(body.error || ('HTTP ' + res.status));
+  return body;
+}
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+function money(n) { return Number(n || 0).toFixed(2); }
+function statBox(label, value) {
+  return `<div class="stat-box"><div class="label">${esc(label)}</div><div class="value">${esc(value)}</div></div>`;
+}
+
+async function loadDailySales() {
+  const { report } = await api('/accounting/daily-sales');
+  document.getElementById('dailyBox').innerHTML = [
+    statBox('Orders', report.order_count),
+    statBox('Revenue', 'GH₵' + money(report.total_ghs)),
+    statBox('MoMo', 'GH₵' + money(report.momo_ghs)),
+    statBox('Card', 'GH₵' + money(report.card_ghs)),
+    statBox('Cash', 'GH₵' + money(report.cash_ghs)),
+    statBox('Discounts', 'GH₵' + money(report.discount_ghs))
+  ].join('');
+}
+
+async function loadProfitLoss() {
+  const from = document.getElementById('plFrom').value;
+  const to = document.getElementById('plTo').value;
+  const qs = (from ? 'from=' + from + '&' : '') + (to ? 'to=' + to : '');
+  const data = await api('/accounting/profit-loss?' + qs);
+  document.getElementById('plBox').innerHTML = [
+    statBox('Revenue', 'GH₵' + data.revenue_ghs),
+    statBox('Expenses', 'GH₵' + data.expenses_ghs),
+    statBox('Net', 'GH₵' + data.net_ghs)
+  ].join('');
+  const tbody = document.querySelector('#plCategoryTable tbody');
+  tbody.innerHTML = data.expenses_by_category.map(c => `
+    <tr><td>${esc(c.category)}</td><td>${esc(String(c.n))}</td><td>${money(c.expenses)}</td></tr>
+  `).join('') || '<tr><td colspan="3" class="muted">No expenses recorded for this period.</td></tr>';
+}
+
+function downloadVatExport() {
+  const month = document.getElementById('vatMonth').value;
+  if (!month) return alert('Pick a month first');
+  const url = '/api/accounting/vat-export?month=' + encodeURIComponent(month);
+  fetch(url, { headers: { Authorization: 'Bearer ' + getKey() } })
+    .then(res => { if (!res.ok) throw new Error('Export failed (' + res.status + ')'); return res.blob(); })
+    .then(blob => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'vat-export-' + month + '.csv';
+      a.click();
+    })
+    .catch(err => alert(err.message));
+}
+
+async function loadPayouts() {
+  const [balance, { payouts }] = await Promise.all([
+    api('/accounting/payout-balance'),
+    api('/accounting/payouts')
+  ]);
+  document.getElementById('payoutBalanceBox').innerHTML = [
+    statBox('Collected', 'GH₵' + balance.collected_ghs),
+    statBox('Paid out', 'GH₵' + balance.paid_out_ghs),
+    statBox('Balance owed', 'GH₵' + balance.balance_ghs)
+  ].join('');
+  const tbody = document.querySelector('#payoutTable tbody');
+  tbody.innerHTML = payouts.map(p => `
+    <tr>
+      <td class="muted">${new Date(p.created_at).toLocaleDateString('en-GH')}</td>
+      <td>${money(p.amount_ghs)}</td>
+      <td class="muted">${esc(p.momo_number || '')} ${esc(p.momo_network || '')}</td>
+      <td class="muted">${esc(p.reference || '')}</td>
+      <td class="muted">${esc(p.note || '')}</td>
+    </tr>
+  `).join('') || '<tr><td colspan="5" class="muted">No payouts recorded yet.</td></tr>';
+}
+
+async function loadExpenses() {
+  const { expenses } = await api('/accounting/expenses');
+  const tbody = document.querySelector('#expenseTable tbody');
+  tbody.innerHTML = expenses.map(e => `
+    <tr>
+      <td class="muted">${e.expense_date}</td>
+      <td>${esc(e.category)}</td>
+      <td>${money(e.amount_ghs)}</td>
+      <td class="muted">${esc(e.description || '')}</td>
+    </tr>
+  `).join('') || '<tr><td colspan="4" class="muted">No expenses recorded yet.</td></tr>';
+}
+
+async function loadReconciliation() {
+  const data = await api('/accounting/reconciliation');
+  document.getElementById('reconSummary').innerHTML = [
+    statBox('Paid orders', data.total_paid_orders),
+    statBox('Unmatched', data.unmatched_count)
+  ].join('');
+  const tbody = document.querySelector('#reconTable tbody');
+  tbody.innerHTML = data.unmatched.map(o => `
+    <tr>
+      <td>${esc(o.order_number)}</td>
+      <td class="muted">${new Date(o.updated_at).toLocaleDateString('en-GH')}</td>
+      <td>${money(o.total_ghs)}</td>
+      <td class="muted">${esc(o.payment_method || '')}</td>
+      <td class="muted">${esc(o.payment_ref || '')}</td>
+    </tr>
+  `).join('') || '<tr><td colspan="5" class="muted">Every paid order has a matching gateway event. ✅</td></tr>';
+}
+
+async function boot() {
+  const errEl = document.getElementById('keyError');
+  errEl.style.display = 'none';
+  try {
+    await Promise.all([
+      loadDailySales(), loadProfitLoss(), loadPayouts(), loadExpenses(), loadReconciliation()
+    ]);
+    document.getElementById('keyCard').style.display = 'none';
+    document.getElementById('app').style.display = '';
+  } catch (err) {
+    errEl.textContent = 'Could not authenticate: ' + err.message;
+    errEl.style.display = '';
+  }
+}
+
+function saveKeyAndLoad() {
+  const key = document.getElementById('acctKey').value.trim();
+  if (!key) return;
+  localStorage.setItem('wab_accountant_key', key);
+  boot();
+}
+
+function signOut() {
+  localStorage.removeItem('wab_accountant_key');
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('keyCard').style.display = '';
+  document.getElementById('acctKey').value = '';
+}
+
+if (getKey()) boot();
+</script>
+</body>
+</html>

@@ -9,6 +9,8 @@ const VERIFY_TOKEN = process.env.WA_VERIFY_TOKEN;
 const APP_SECRET = process.env.WA_APP_SECRET;
 const IG_VERIFY_TOKEN = process.env.IG_VERIFY_TOKEN || process.env.WA_VERIFY_TOKEN;
 const IG_APP_SECRET = process.env.IG_APP_SECRET;
+const MESSENGER_VERIFY_TOKEN = process.env.MESSENGER_VERIFY_TOKEN || process.env.WA_VERIFY_TOKEN;
+const MESSENGER_APP_SECRET = process.env.MESSENGER_APP_SECRET || process.env.IG_APP_SECRET;
 
 function verifyHmacSignature(rawBody, signature, secret, label) {
   if (!secret) {
@@ -99,7 +101,8 @@ router.post('/whatsapp', async (req, res) => {
       source: 'whatsapp',
       externalId,
       payload,
-      signatureValid: true
+      signatureValid: true,
+      signatureHeader: signature
     });
     if (duplicate) {
       logger.info('WhatsApp webhook duplicate ignored: %s', externalId);
@@ -187,7 +190,8 @@ router.post('/instagram', async (req, res) => {
       source: 'instagram',
       externalId,
       payload,
-      signatureValid: true
+      signatureValid: true,
+      signatureHeader: signature
     });
     if (duplicate) {
       logger.info('Instagram webhook duplicate ignored: %s', externalId);
@@ -195,6 +199,86 @@ router.post('/instagram', async (req, res) => {
     return res.status(200).send('EVENT_RECEIVED');
   } catch (err) {
     logger.error('Instagram enqueue failed: %s', err.message);
+    // 5xx tells Meta to retry — exactly what we want when persistence failed.
+    return res.status(500).send('enqueue failed');
+  }
+});
+
+/**
+ * GET /api/webhooks/messenger
+ * Standard Meta webhook verification handshake (same hub.challenge echo as
+ * the WhatsApp/Instagram routes), gated on MESSENGER_VERIFY_TOKEN.
+ */
+router.get('/messenger', (req, res) => {
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+
+  if (mode === 'subscribe' && token && token === MESSENGER_VERIFY_TOKEN) {
+    logger.info('Messenger webhook verified.');
+    return res.status(200).send(challenge);
+  }
+  logger.warn('Messenger webhook verification failed: mode=%s tokenMatch=%s', mode, token === MESSENGER_VERIFY_TOKEN);
+  return res.sendStatus(403);
+});
+
+/**
+ * Extract a stable identifier from a Messenger webhook payload — same shape
+ * and same defensive fallback as igExternalIdFor (Messenger and Instagram
+ * share the entry[].messaging[].message.mid envelope).
+ */
+function messengerExternalIdFor(payload) {
+  try {
+    const messaging = payload?.entry?.[0]?.messaging?.[0];
+    const mid = messaging?.message?.mid;
+    if (mid) return `msg:${mid}`;
+  } catch (_e) { /* fall through */ }
+
+  return 'sha256:' + crypto
+    .createHash('sha256')
+    .update(JSON.stringify(payload || {}))
+    .digest('hex');
+}
+
+/**
+ * POST /api/webhooks/messenger
+ * Same verify-signature-then-enqueue pattern as /whatsapp and /instagram:
+ * HMAC check on the raw body, persist to webhook_events (idempotent on
+ * (source, external_id)) BEFORE responding, worker drains durably.
+ */
+router.post('/messenger', async (req, res) => {
+  const rawBody = req.body; // Buffer from express.raw() mounted in server.js
+  const signature = req.headers['x-hub-signature-256'];
+
+  if (!verifyHmacSignature(rawBody, signature, MESSENGER_APP_SECRET, 'MESSENGER_APP_SECRET')) {
+    logger.warn('Messenger webhook signature invalid — dropping request');
+    return res.status(401).send('invalid signature');
+  }
+
+  let payload;
+  try {
+    payload = JSON.parse(rawBody.toString('utf8'));
+  } catch (err) {
+    logger.error('Messenger webhook: invalid JSON body: %s', err.message);
+    return res.status(400).send('invalid json');
+  }
+
+  const externalId = messengerExternalIdFor(payload);
+
+  try {
+    const { duplicate } = await queue.enqueue({
+      source: 'messenger',
+      externalId,
+      payload,
+      signatureValid: true,
+      signatureHeader: signature
+    });
+    if (duplicate) {
+      logger.info('Messenger webhook duplicate ignored: %s', externalId);
+    }
+    return res.status(200).send('EVENT_RECEIVED');
+  } catch (err) {
+    logger.error('Messenger enqueue failed: %s', err.message);
     // 5xx tells Meta to retry — exactly what we want when persistence failed.
     return res.status(500).send('enqueue failed');
   }

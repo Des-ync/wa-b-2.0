@@ -2,16 +2,11 @@ const express = require('express');
 const logger = require('../utils/logger');
 const { query } = require('../config/database');
 const { requireAuth } = require('../middleware/auth');
+const { tenantBlocksBusinessId } = require('../middleware/tenantAccess');
 
 const router = express.Router();
 
 router.use(requireAuth('any'));
-
-function tenantBlocksBusinessId(req, businessId) {
-  if (req.auth?.scope === 'admin') return false;
-  if (!req.auth?.businessId) return true;
-  return businessId && businessId !== req.auth.businessId;
-}
 
 /**
  * GET /api/analytics?business_id=&days=7|30
@@ -176,6 +171,94 @@ router.get('/', async (req, res) => {
     });
   } catch (err) {
     logger.error('GET /analytics failed: %s', err.message, { stack: err.stack });
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+/**
+ * GET /api/analytics/delivery-sla?business_id=&days=7|30
+ * Time-to-deliver computed from the order_status_history events assignDelivery
+ * and updateDeliveryStatus already write ('delivery:assigned' → 'delivery:delivered')
+ * — no new tracking table needed. "Late" means delivered after the
+ * merchant's own estimated_delivery_at; orders with no ETA set are excluded
+ * from the late count (nothing to be late against) but still count toward
+ * the average delivery time.
+ */
+router.get('/delivery-sla', async (req, res) => {
+  try {
+    const { business_id } = req.query;
+    if (!business_id) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (tenantBlocksBusinessId(req, business_id)) {
+      return res.status(403).json({ success: false, error: 'Key does not match business' });
+    }
+    const days = [7, 30, 90].includes(parseInt(req.query.days, 10)) ? parseInt(req.query.days, 10) : 30;
+
+    const deliveries = await query(
+      `WITH assign_evt AS (
+         SELECT order_id, MIN(created_at) AS assigned_at
+           FROM order_status_history WHERE event = 'delivery:assigned' GROUP BY order_id
+       ),
+       delivered_evt AS (
+         SELECT order_id, MIN(created_at) AS delivered_at
+           FROM order_status_history WHERE event = 'delivery:delivered' GROUP BY order_id
+       )
+       SELECT o.id, o.order_number, o.rider_name, o.estimated_delivery_at,
+              a.assigned_at, d.delivered_at,
+              EXTRACT(EPOCH FROM (d.delivered_at - a.assigned_at)) / 60 AS minutes_to_deliver,
+              (o.estimated_delivery_at IS NOT NULL AND d.delivered_at > o.estimated_delivery_at) AS late
+         FROM orders o
+         JOIN assign_evt a ON a.order_id = o.id
+         JOIN delivered_evt d ON d.order_id = o.id
+        WHERE o.business_id = $1 AND o.created_at >= NOW() - ($2 || ' days')::interval
+        ORDER BY d.delivered_at DESC`,
+      [business_id, days]
+    );
+
+    const rows = deliveries.rows;
+    const withEta = rows.filter(r => r.estimated_delivery_at !== null);
+    const lateCount = withEta.filter(r => r.late).length;
+    const avgMinutes = rows.length
+      ? rows.reduce((sum, r) => sum + Number(r.minutes_to_deliver), 0) / rows.length
+      : null;
+
+    const byRiderMap = new Map();
+    for (const r of rows) {
+      const key = r.rider_name || '(unassigned)';
+      if (!byRiderMap.has(key)) byRiderMap.set(key, { rider_name: key, deliveries: 0, total_minutes: 0, late: 0, with_eta: 0 });
+      const bucket = byRiderMap.get(key);
+      bucket.deliveries++;
+      bucket.total_minutes += Number(r.minutes_to_deliver);
+      if (r.estimated_delivery_at !== null) {
+        bucket.with_eta++;
+        if (r.late) bucket.late++;
+      }
+    }
+    const byRider = [...byRiderMap.values()].map(b => ({
+      rider_name: b.rider_name,
+      deliveries: b.deliveries,
+      avg_minutes: Math.round(b.total_minutes / b.deliveries),
+      late_count: b.late,
+      late_rate_pct: b.with_eta > 0 ? Math.round((b.late / b.with_eta) * 100) : null
+    })).sort((a, b) => b.deliveries - a.deliveries);
+
+    res.json({
+      success: true,
+      delivery_sla: {
+        completed_deliveries: rows.length,
+        avg_minutes_to_deliver: avgMinutes !== null ? Math.round(avgMinutes) : null,
+        late_count: lateCount,
+        late_rate_pct: withEta.length > 0 ? Math.round((lateCount / withEta.length) * 100) : null,
+        by_rider: byRider,
+        recent: rows.slice(0, 20).map(r => ({
+          order_number: r.order_number,
+          rider_name: r.rider_name,
+          minutes_to_deliver: Math.round(Number(r.minutes_to_deliver)),
+          late: r.late
+        }))
+      }
+    });
+  } catch (err) {
+    logger.error('GET /analytics/delivery-sla failed: %s', err.message, { stack: err.stack });
     res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });

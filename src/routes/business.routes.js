@@ -1,7 +1,8 @@
 const express = require('express');
 const logger = require('../utils/logger');
 const { query } = require('../config/database');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, requirePermission } = require('../middleware/auth');
+const { resolveBusinessId } = require('../middleware/tenantAccess');
 const { normalizeGhanaPhone } = require('../utils/helpers');
 const { recordAudit } = require('../utils/auditLog');
 
@@ -10,7 +11,7 @@ const router = express.Router();
 router.use(requireAuth('any'));
 
 const SETTINGS_COLUMNS =
-  'id, name, owner_name, welcome_message, support_phone, delivery_fee_ghs, delivery_zones, open_time, close_time, ' +
+  'id, name, owner_name, slug, vat_rate_pct, welcome_message, support_phone, delivery_fee_ghs, delivery_zones, open_time, close_time, ' +
   'bot_language, payout_momo_number, payout_momo_network, ' +
   'cart_nudge_enabled, cart_nudge_delay_minutes, cart_nudge_max_per_cart, ' +
   'cart_nudge_message_template, cart_nudge_template_b, cart_nudge_coupon_code, ' +
@@ -20,12 +21,8 @@ const SETTINGS_COLUMNS =
 
 const MOMO_NETWORKS = ['mtn', 'vodafone', 'airteltigo'];
 
-function resolveBusinessId(req) {
-  if (req.auth?.scope === 'admin') return req.query.business_id || req.body?.business_id || null;
-  return req.auth?.businessId || null;
-}
-
 const TIME_RE = /^([01]?\d|2[0-3]):[0-5]\d$/;
+const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{1,58}[a-z0-9])?$/;
 
 /** GET /api/business/settings — bot settings for the caller's business. */
 router.get('/settings', async (req, res) => {
@@ -47,7 +44,7 @@ router.get('/settings', async (req, res) => {
  * delivery_zones [{name, fee_ghs}], open_time 'HH:MM', close_time 'HH:MM'.
  * Empty string / null clears a field.
  */
-router.patch('/settings', async (req, res) => {
+router.patch('/settings', requirePermission('settings'), async (req, res) => {
   try {
     const businessId = resolveBusinessId(req);
     if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
@@ -115,6 +112,23 @@ router.patch('/settings', async (req, res) => {
       const v = String(body.owner_name || '').trim();
       if (v.length > 200) return res.status(400).json({ success: false, error: 'owner_name too long (max 200 chars)' });
       set('owner_name', v || null);
+    }
+    if ('vat_rate_pct' in body) {
+      const n = Number(body.vat_rate_pct);
+      if (!Number.isFinite(n) || n < 0 || n > 100) {
+        return res.status(400).json({ success: false, error: 'vat_rate_pct must be a number between 0 and 100' });
+      }
+      set('vat_rate_pct', n);
+    }
+    if ('slug' in body) {
+      const v = String(body.slug || '').trim().toLowerCase();
+      if (!v || !SLUG_RE.test(v)) {
+        return res.status(400).json({
+          success: false,
+          error: 'slug must be 3-60 lowercase letters/numbers/hyphens, no leading/trailing hyphen'
+        });
+      }
+      set('slug', v);
     }
     if ('payout_momo_number' in body) {
       const raw = String(body.payout_momo_number || '').trim();
@@ -235,6 +249,9 @@ router.patch('/settings', async (req, res) => {
     });
     res.json({ success: true, settings: r.rows[0] });
   } catch (err) {
+    if (err.code === '23505' && /slug/.test(err.constraint || '')) {
+      return res.status(409).json({ success: false, error: 'That storefront handle is already taken' });
+    }
     logger.error('PATCH /business/settings failed: %s', err.message);
     res.status(500).json({ success: false, error: 'Internal server error' });
   }

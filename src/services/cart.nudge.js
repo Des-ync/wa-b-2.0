@@ -2,6 +2,7 @@ const logger = require('../utils/logger');
 const lock = require('./worker.lock');
 const { query } = require('../config/database');
 const { getAdapter, destOf } = require('./channel.adapter');
+const sms = require('./sms.service');
 const { t, langOf } = require('../utils/i18n');
 
 /**
@@ -102,7 +103,7 @@ async function runCartNudgeJob() {
           body += t(lang, 'cart_nudge_coupon', { code: row.cart_nudge_coupon_code });
         }
 
-        await getAdapter(row.channel).sendButtons(
+        const nudgeResult = await getAdapter(row.channel).sendButtons(
           destOf(customer),
           body,
           [
@@ -112,6 +113,16 @@ async function runCartNudgeJob() {
           ],
           { businessId: row.business_id, customerId: row.customer_id }
         );
+
+        // SMS fallback: same constraint as the receipt fallback in
+        // notification.service — only WhatsApp customers have a real phone
+        // number on file. IG/Messenger customers' whatsapp_number column
+        // holds their platform user id, not something we can text.
+        if (nudgeResult?.success === false && row.channel === 'whatsapp' && row.whatsapp_number) {
+          await sms.sendSms(row.whatsapp_number, t(lang, 'sms_cart_nudge', {
+            shop: row.business_name, count
+          }), { businessId: row.business_id, customerId: row.customer_id });
+        }
 
         await query(
           `INSERT INTO cart_nudges (business_id, customer_id, nudge_number, variant, coupon_code, cart_value_ghs)
