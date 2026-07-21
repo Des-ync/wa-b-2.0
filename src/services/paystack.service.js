@@ -2,7 +2,7 @@ require('dotenv').config();
 const axios = require('axios');
 const crypto = require('crypto');
 const logger = require('../utils/logger');
-const { paystackMomoProvider, detectNetwork, normalizeGhanaPhone } = require('../utils/helpers');
+const { paystackMomoProvider, detectNetwork, normalizeGhanaPhone, syntheticEmail } = require('../utils/helpers');
 const metrics = require('../utils/metrics');
 
 const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY;
@@ -23,6 +23,20 @@ function ensureConfigured() {
 }
 
 /**
+ * A transport-level failure (timeout, connection reset, 5xx) does NOT mean
+ * the charge didn't happen — Paystack may have accepted it and just failed to
+ * answer us. Callers that can leave a charge 'pending' for reconciliation
+ * (rather than immediately marking it failed) should check this first.
+ */
+function isTransientError(err) {
+  const status = err.response?.status;
+  return !err.response
+    || err.code === 'ECONNABORTED'
+    || err.code === 'ETIMEDOUT'
+    || (typeof status === 'number' && status >= 500);
+}
+
+/**
  * Convert GHS to pesewas (Paystack expects integer minor units).
  */
 function toPesewas(ghs) {
@@ -35,6 +49,9 @@ function toPesewas(ghs) {
  *
  * Returns: { success, status, reference, display_text, raw }
  *   - status: pending | send_otp | success | failed
+ *   - on failure: { success: false, transient, error, raw } — transient=true means
+ *     a transport/5xx error, NOT a confirmed decline; callers should not treat it
+ *     as a final failure (see isTransientError).
  */
 async function initializeMoMoCharge({ email, amountGhs, phoneNumber, reference, metadata = {} }) {
   ensureConfigured();
@@ -46,7 +63,7 @@ async function initializeMoMoCharge({ email, amountGhs, phoneNumber, reference, 
 
   try {
     const res = await http.post('/charge', {
-      email: email || `customer+${reference}@whatsapp-saas.local`,
+      email: email || syntheticEmail('customer', reference),
       amount: toPesewas(amountGhs),
       currency: 'GHS',
       reference,
@@ -69,6 +86,7 @@ async function initializeMoMoCharge({ email, amountGhs, phoneNumber, reference, 
     logger.error('Paystack MoMo charge failed: %s | %j', err.message, err.response?.data);
     return {
       success: false,
+      transient: isTransientError(err),
       error: err.response?.data?.message || err.message,
       raw: err.response?.data
     };
@@ -83,7 +101,7 @@ async function createPaymentLink({ email, amountGhs, reference, callbackUrl, met
   ensureConfigured();
   try {
     const res = await http.post('/transaction/initialize', {
-      email: email || `customer+${reference}@whatsapp-saas.local`,
+      email: email || syntheticEmail('customer', reference),
       amount: toPesewas(amountGhs),
       currency: 'GHS',
       reference,
@@ -126,6 +144,7 @@ async function verifyTransaction(reference) {
       success: true,
       status: data.status,
       amount_ghs: (data.amount || 0) / 100,
+      currency: data.currency || null,
       reference: data.reference,
       gateway_ref: data.id ? String(data.id) : null,
       raw: res.data

@@ -832,7 +832,7 @@ ALTER TABLE billing_transactions ADD CONSTRAINT billing_transactions_gateway_che
 -- Pin the plan a charge was raised for AT INITIATION. Previously the plan was
 -- resolved dynamically at payment time from subscriptions.pending_plan_id, so a
 -- plan change landing between charge and callback would apply the wrong tier.
-ALTER TABLE billing_transactions ADD COLUMN IF NOT EXISTS plan_id UUID REFERENCES plans(id);
+ALTER TABLE billing_transactions ADD COLUMN IF NOT EXISTS plan_id INT REFERENCES plans(id);
 ALTER TABLE webhook_events DROP CONSTRAINT IF EXISTS webhook_events_source_check;
 ALTER TABLE webhook_events ADD CONSTRAINT webhook_events_source_check
   CHECK (source IN ('whatsapp','paystack','hubtel','pawapay','instagram','messenger'));

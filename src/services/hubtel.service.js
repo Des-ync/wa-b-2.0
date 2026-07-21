@@ -2,7 +2,7 @@ require('dotenv').config();
 const axios = require('axios');
 const crypto = require('crypto');
 const logger = require('../utils/logger');
-const { detectNetwork, normalizeGhanaPhone, toMsisdn } = require('../utils/helpers');
+const { detectNetwork, normalizeGhanaPhone, toMsisdn, syntheticEmail } = require('../utils/helpers');
 
 const HUBTEL_CLIENT_ID = process.env.HUBTEL_CLIENT_ID;
 const HUBTEL_CLIENT_SECRET = process.env.HUBTEL_CLIENT_SECRET;

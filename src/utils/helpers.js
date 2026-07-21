@@ -101,6 +101,21 @@ function generateReference(prefix = 'PAY') {
 }
 
 /**
+ * Build a synthetic email for gateways (Paystack, Hubtel) that require an
+ * email field even though the actual payer is identified by phone number.
+ *
+ * MUST use a real, registrable domain: Paystack's backend rejects reserved/
+ * non-routable TLDs like `.local` (RFC 6762) with "Invalid email address
+ * passed" — this broke every card AND MoMo charge, since both call sites
+ * built the email from the same fake `@whatsapp-saas.local` domain.
+ * Override via PAYSTACK_EMAIL_DOMAIN for other deployments/environments.
+ */
+function syntheticEmail(localPrefix, reference) {
+  const domain = process.env.PAYSTACK_EMAIL_DOMAIN || 'skes.tech';
+  return `${localPrefix}+${reference}@${domain}`;
+}
+
+/**
  * Strip the leading + from an E.164 number (WhatsApp Cloud API expects no +).
  */
 function toWaRecipient(e164) {
@@ -320,6 +335,7 @@ module.exports = {
   generateOrderNumber,
   generateOtp,
   generateReference,
+  syntheticEmail,
   toWaRecipient,
   toMsisdn,
   addDays,
