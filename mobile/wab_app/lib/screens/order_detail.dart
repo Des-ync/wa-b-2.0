@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../api/client.dart';
+import '../services/offline_cache.dart';
+import '../services/offline_queue.dart';
 import '../state/session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
@@ -38,16 +40,36 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
 
   Future<void> _setStatus(String status) async {
     setState(() => _updating = true);
+    final body = {'status': status};
     try {
-      final res = await context.read<Session>().api.patch(
-          '/api/orders/${widget.orderId}/status',
-          body: {'status': status});
+      final res = await context
+          .read<Session>()
+          .api
+          .patch('/api/orders/${widget.orderId}/status', body: body);
       if (!mounted) return;
       setState(() => _order = res['order'] as Map<String, dynamic>?);
+      await OfflineCache.patchCachedOrder(widget.orderId, body);
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Order marked $status — customer notified')));
     } on ApiException catch (e) {
-      if (mounted) {
+      if (e.status == 0) {
+        // No connection — queue it and reflect the change locally so the
+        // merchant isn't left staring at a stale status.
+        await OfflineQueue.enqueue(QueuedAction(
+          id: 'order-status-${widget.orderId}-${DateTime.now().microsecondsSinceEpoch}',
+          method: 'PATCH',
+          path: '/api/orders/${widget.orderId}/status',
+          body: body,
+          description: 'Mark order #${_order?['order_number']} $status',
+        ));
+        await OfflineCache.patchCachedOrder(widget.orderId, body);
+        if (mounted) {
+          setState(() => _order = {...?_order, 'status': status});
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('Offline — queued, will sync when back online')));
+        }
+      } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
             content: Text(e.message), backgroundColor: WabColors.danger));
       }

@@ -142,7 +142,7 @@ router.get('/:id/profile', async (req, res) => {
 });
 
 /** PATCH /api/customers/:id/tags — body: { tags: string[] } — replaces the full tag set. */
-router.patch('/:id/tags', async (req, res) => {
+router.patch('/:id/tags', requirePermission('customers', 'write'), async (req, res) => {
   try {
     const existing = await query('SELECT * FROM customers WHERE id = $1', [req.params.id]);
     const customer = existing.rows[0];
@@ -254,7 +254,7 @@ router.post('/:id/loyalty/redeem-points', requirePermission('financial'), async 
 });
 
 /** PATCH /api/customers/:id/birthday — body: { date_of_birth: 'YYYY-MM-DD' | null } */
-router.patch('/:id/birthday', async (req, res) => {
+router.patch('/:id/birthday', requirePermission('customers', 'write'), async (req, res) => {
   try {
     const existing = await query('SELECT * FROM customers WHERE id = $1', [req.params.id]);
     const customer = existing.rows[0];

@@ -53,7 +53,16 @@ test('every non-owner role denies staff management (only the owner can manage st
   }
 });
 
-test('CAPABILITIES defines exactly the four expected roles', () => {
-  assert.deepEqual(Object.keys(CAPABILITIES).sort(), ['accountant', 'manager', 'owner', 'support']);
-  assert.deepEqual(ROLES.slice().sort(), ['accountant', 'manager', 'owner', 'support']);
+test('CAPABILITIES defines exactly the five expected roles', () => {
+  assert.deepEqual(Object.keys(CAPABILITIES).sort(), ['accountant', 'manager', 'owner', 'readonly', 'support']);
+  assert.deepEqual(ROLES.slice().sort(), ['accountant', 'manager', 'owner', 'readonly', 'support']);
+});
+
+test('readonly role (admin impersonation only) reads broadly but writes nowhere', () => {
+  for (const cap of ['orders', 'customers', 'products', 'promos', 'broadcasts', 'conversations', 'financial', 'billing']) {
+    assert.equal(can('readonly', cap, 'read'), true, `readonly should read ${cap}`);
+    assert.equal(can('readonly', cap, 'write'), false, `readonly should not write ${cap}`);
+  }
+  assert.equal(can('readonly', 'settings', 'write'), false);
+  assert.equal(can('readonly', 'staff', 'write'), false);
 });

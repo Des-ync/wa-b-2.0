@@ -124,7 +124,7 @@ router.get('/export', async (req, res) => {
  * POST /api/orders
  * Body: { business_id, customer_whatsapp, customer_name?, items: [{product_id, quantity}], delivery_address, delivery_fee?, payment_method?, notes? }
  */
-router.post('/', async (req, res) => {
+router.post('/', requirePermission('orders', 'write'), async (req, res) => {
   try {
     const {
       business_id,
@@ -244,7 +244,7 @@ router.post('/', async (req, res) => {
 });
 
 /** PATCH /api/orders/:id/status — body: { status, reason? } (reason only used for 'cancelled') */
-router.patch('/:id/status', async (req, res) => {
+router.patch('/:id/status', requirePermission('orders', 'write'), async (req, res) => {
   try {
     const { status, reason } = req.body || {};
     if (!orderService.VALID_STATUSES.includes(status)) {
@@ -306,7 +306,7 @@ router.get('/:id', async (req, res) => {
 });
 
 /** PATCH /api/orders/:id/notes — body: { note } — appends a merchant-only note. */
-router.patch('/:id/notes', async (req, res) => {
+router.patch('/:id/notes', requirePermission('orders', 'write'), async (req, res) => {
   try {
     const existing = await orderService.getOrderById(req.params.id);
     if (!existing) return res.status(404).json({ success: false, error: 'Order not found' });
@@ -324,7 +324,7 @@ router.patch('/:id/notes', async (req, res) => {
 });
 
 /** PATCH /api/orders/:id/delivery — body: { rider_name, rider_phone?, delivery_status?, delivery_proof_url? } */
-router.patch('/:id/delivery', async (req, res) => {
+router.patch('/:id/delivery', requirePermission('orders', 'write'), async (req, res) => {
   try {
     const existing = await orderService.getOrderById(req.params.id);
     if (!existing) return res.status(404).json({ success: false, error: 'Order not found' });
@@ -372,7 +372,7 @@ router.patch('/:id/delivery', async (req, res) => {
 });
 
 /** PATCH /api/orders/:id/estimates — body: { estimated_ready_at?, estimated_delivery_at? } (ISO timestamps, or null to clear) */
-router.patch('/:id/estimates', async (req, res) => {
+router.patch('/:id/estimates', requirePermission('orders', 'write'), async (req, res) => {
   try {
     const existing = await orderService.getOrderById(req.params.id);
     if (!existing) return res.status(404).json({ success: false, error: 'Order not found' });

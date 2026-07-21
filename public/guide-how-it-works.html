@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>How WA-B works · WA-B Solutions</title>
+<meta name="description" content="The end-to-end merchant journey on WA-B: connect your WhatsApp number, add products, take orders, get paid via MoMo, and fulfill from your dashboard or app." />
+<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png" />
+<link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16.png" />
+<link rel="apple-touch-icon" sizes="180x180" href="assets/favicon-180.png" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap nav-row">
+    <a href="index.html" class="brand"><img class="brand-logo brand-logo-light" src="assets/logo-light.jpg" alt="WA-B Solutions" /><img class="brand-logo brand-logo-dark" src="assets/logo-dark.jpg" alt="WA-B Solutions" /></a>
+    <nav><ul class="nav-links">
+      <li><a href="features.html">Features</a></li>
+      <li><a href="pricing.html">Pricing</a></li>
+      <li><a href="docs.html">Docs</a></li>
+      <li><a href="blog.html">Blog</a></li>
+      <li><a href="guide-how-it-works.html" aria-current="page">Guides</a></li>
+    </ul></nav>
+    <div class="nav-cta">
+      <a href="login.html" class="btn btn-ghost btn-sm hide-on-mobile">Sign in</a>
+      <a href="signup.html" class="btn btn-primary btn-sm">Book a demo <span class="arr">→</span></a>
+    </div>
+  </div>
+</header>
+
+<section class="page-hero">
+  <div class="wrap">
+    <span class="eyebrow">Merchant guide</span>
+    <h1 style="margin-top:18px">How WA-B works, <em>start to finish</em>.</h1>
+    <p>From your first WhatsApp message to money landing in your MoMo wallet. Here's the whole journey, one step at a time — no jargon, no missing pieces.</p>
+  </div>
+</section>
+
+<section class="section section--tight">
+  <div class="wrap docs-grid">
+    <aside class="docs-side">
+      <h4>The journey</h4>
+      <ul>
+        <li><a href="#overview" class="active">The short version</a></li>
+        <li><a href="#connect">1. Connect WhatsApp</a></li>
+        <li><a href="#catalog">2. Add your products</a></li>
+        <li><a href="#ordering">3. A customer orders</a></li>
+        <li><a href="#payment">4. Getting paid</a></li>
+        <li><a href="#fulfillment">5. Fulfilling the order</a></li>
+      </ul>
+      <h4>Running the shop</h4>
+      <ul>
+        <li><a href="#dashboard-app">Dashboard &amp; mobile app</a></li>
+        <li><a href="#promos">Promos &amp; broadcasts</a></li>
+        <li><a href="#subscription">Your subscription</a></li>
+      </ul>
+      <h4>Next steps</h4>
+      <ul>
+        <li><a href="#go-live">Ready to launch</a></li>
+        <li><a href="#support">Getting help</a></li>
+      </ul>
+    </aside>
+
+    <article class="docs-content">
+      <h2 id="overview">The short version</h2>
+      <p>WhatsApp is the storefront, the checkout, and the receipt — all in one thread your customer already has open. Your dashboard (and mobile app) is the back office: where products live, where orders queue up, and where you see the money.</p>
+      <p>Everything below happens without your customer ever leaving WhatsApp, and without you needing a website, a POS terminal, or a card machine.</p>
+
+      <div class="callout">
+        <b>New to WA-B?</b> This page explains how the pieces fit together. For a literal step-by-step launch checklist, see the <a href="guide-go-live-checklist.html" style="color:var(--accent-ink);border-bottom:1px solid var(--line-2)">go-live checklist</a>.
+      </div>
+
+      <h2 id="connect">1. Connect your WhatsApp Business number</h2>
+      <p>You link the WhatsApp number your customers already message (or a new one you set up for the business) through Meta's WhatsApp Cloud API. Once it's verified, WA-B answers on your behalf — instantly, and around the clock — using the greeting, hours, and menu you set.</p>
+      <p>This is a one-time setup step. After that, every inbound "Hi" or "Menu" routes straight into your shop's ordering flow.</p>
+
+      <h2 id="catalog">2. Add your products</h2>
+      <p>From the dashboard's Products page (or the mobile app, right from your phone), add items with a photo, a price, and a category. Ghanaian SMEs move fast — you can add one item in the middle of a lunch rush or bulk-import a whole catalog from a CSV.</p>
+      <p>Changes are live immediately: edit a price at 11:59 and the next customer sees it at 12:00.</p>
+
+      <h2 id="ordering">3. A customer orders on WhatsApp</h2>
+      <p>Customers drive the conversation with short, forgiving text commands. No app to download, no account to create.</p>
+      <table>
+        <thead><tr><th>Customer sends</th><th>What happens</th></tr></thead>
+        <tbody>
+          <tr><td><code>Hi</code> / <code>Menu</code></td><td>Welcome message with an Order Now button</td></tr>
+          <tr><td><code>Order</code></td><td>Browse the product list by category</td></tr>
+          <tr><td>Adds items</td><td>Cart builds up in the same thread</td></tr>
+          <tr><td><code>Cancel</code></td><td>Clears the current cart, no harm done</td></tr>
+        </tbody>
+      </table>
+      <p>When they're ready, they confirm the order and move straight to payment — still inside WhatsApp.</p>
+
+      <h2 id="payment">4. Getting paid</h2>
+      <p>WA-B sends a MoMo payment prompt to the customer's phone for the order total. They approve it the way they already approve any MoMo transaction. Customers without MoMo can pay by card instead, processed through Paystack.</p>
+      <p>The moment payment is confirmed, the order flips to <b>paid</b> automatically — no manual reconciliation, no "let me check if it came through."</p>
+      <div class="callout">
+        Curious about the technical side — webhooks, signatures, retries? That detail lives in the <a href="docs.html#momo" style="color:var(--accent-ink);border-bottom:1px solid var(--line-2)">developer docs</a>.
+      </div>
+
+      <h2 id="fulfillment">5. Fulfilling the order</h2>
+      <p>Paid orders land in your dashboard's order queue with one shared status: pending → paid → preparing → on-the-way → delivered. Move it forward as you go, and your customer gets an automatic WhatsApp update at each step — so "where's my order?" stops being a message you have to answer.</p>
+
+      <h2 id="dashboard-app">Your dashboard and mobile app</h2>
+      <p>The dashboard is where the rest of the business lives: orders, customers, products, promos, broadcasts, inventory, a lightweight accounting view, and analytics on what's actually selling. The companion mobile app mirrors the parts you need on the move — new orders, quick status updates, a glance at today's numbers.</p>
+
+      <h2 id="promos">Promos &amp; broadcasts</h2>
+      <p>Once you have customers in the system, you can message them — a restock alert, a weekend promo code, a new-arrivals broadcast. Customers only hear from you if they've messaged you first, and every broadcast should give them an easy way to stop hearing from you if they'd rather not.</p>
+
+      <h2 id="subscription">Your subscription</h2>
+      <p>WA-B itself runs on a monthly plan billed via MoMo — see <a href="pricing.html" style="color:var(--accent-ink);border-bottom:1px solid var(--line-2)">Pricing</a> for the current tiers. It renews automatically each month; if a renewal ever fails, you'll get a WhatsApp reminder before anything is interrupted.</p>
+
+      <h2 id="go-live">Ready to launch?</h2>
+      <p>Once your number is connected and your catalog has a handful of items, you're closer to live than it feels. Run through the <a href="guide-go-live-checklist.html" style="color:var(--accent-ink);border-bottom:1px solid var(--line-2)">go-live checklist</a>, then read the <a href="guide-whatsapp-commerce-playbook.html" style="color:var(--accent-ink);border-bottom:1px solid var(--line-2)">WhatsApp commerce playbook</a> for how to sell well once you're live.</p>
+
+      <h2 id="support">Getting help</h2>
+      <p>Most questions are fastest answered on <a href="contact.html" style="color:var(--accent-ink);border-bottom:1px solid var(--line-2)">WhatsApp</a>. For anything technical, the <a href="docs.html" style="color:var(--accent-ink);border-bottom:1px solid var(--line-2)">docs</a> have the full API and webhook reference.</p>
+    </article>
+  </div>
+</section>
+
+<section class="section">
+  <div class="wrap">
+    <div class="cta-banner">
+      <div><h2 class="h-section">Free for 14 days.<br/>Live in 10 minutes.</h2><p>Connect your WhatsApp number, paste your menu, and watch your first order land.</p></div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap"><a href="signup.html" class="btn btn-primary btn-lg">Start free trial <span class="arr">→</span></a><a href="guide-go-live-checklist.html" class="btn btn-ghost btn-lg">See the go-live checklist</a></div>
+    </div>
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a href="index.html" class="brand"><img class="brand-logo brand-logo-light" src="assets/logo-light.jpg" alt="WA-B Solutions" /><img class="brand-logo brand-logo-dark" src="assets/logo-dark.jpg" alt="WA-B Solutions" /></a>
+        <p style="margin-top:14px;max-width:32ch;color:var(--muted);font-size:14px">
+          The automated WhatsApp B2P sales bot for Ghanaian SMEs. Built in Accra, made for Africa.
+        </p>
+      </div>
+      <div>
+        <h4>Product</h4>
+        <ul>
+          <li><a href="features.html">Features</a></li>
+          <li><a href="pricing.html">Pricing</a></li>
+          <li><a href="integrations.html">Integrations</a></li>
+          <li><a href="docs.html">Documentation</a></li>
+          <li><a href="guide-how-it-works.html">Guides</a></li>
+          <li><a href="changelog.html">Changelog</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Company</h4>
+        <ul>
+          <li><a href="about.html">About</a></li>
+          <li><a href="blog.html">Blog</a></li>
+          <li><a href="careers.html">Careers</a></li>
+          <li><a href="press.html">Press kit</a></li>
+          <li><a href="contact.html">Contact</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Legal</h4>
+        <ul>
+          <li><a href="privacy.html">Privacy policy</a></li>
+          <li><a href="terms.html">Terms of service</a></li>
+          <li><a href="data-processing.html">Data processing</a></li>
+          <li><a href="cookies.html">Cookies</a></li>
+          <li><a href="security.html">Security</a></li>
+          <li><a href="status.html">Status</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Contact</h4>
+        <ul>
+          <li>Osu, Accra &middot; GH</li>
+          <li><a href="contact.html">+233 30 000 0000</a></li>
+          <li><a href="mailto:hello@wa-b.com">hello@wa-b.com</a></li>
+          <li><a href="contact.html">WhatsApp us &rarr;</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>&copy; 2026 WA-B Solutions Ltd. All rights reserved.</span>
+      <span class="footer-tag">Built in Accra, Ghana</span>
+    </div>
+  </div>
+</footer>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="tweaks.jsx"></script>
+<script src="script.js"></script>
+</body>
+</html>

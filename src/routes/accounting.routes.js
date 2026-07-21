@@ -4,6 +4,7 @@ const { query } = require('../config/database');
 const { requireAuth, requirePermission } = require('../middleware/auth');
 const { tenantBlocksBusinessId, resolveBusinessId } = require('../middleware/tenantAccess');
 const { toCsv } = require('../utils/csv');
+const { pdfResponse } = require('../utils/pdf');
 const { recordAudit } = require('../utils/auditLog');
 
 const router = express.Router();
@@ -71,7 +72,42 @@ router.get('/daily-sales', requirePermission('financial', 'read'), async (req, r
        WHERE (paid_at AT TIME ZONE 'Africa/Accra')::date = COALESCE($2::date, (NOW() AT TIME ZONE 'Africa/Accra')::date)`,
       [businessId, date]
     );
-    res.json({ success: true, date: date || null, report: result.rows[0] });
+    const report = result.rows[0];
+    const format = String(req.query.format || 'json').toLowerCase();
+    const dateLabel = date || 'today';
+
+    if (format === 'csv') {
+      const rows = [
+        ['Orders', report.order_count],
+        ['Subtotal (GHS)', report.subtotal_ghs],
+        ['Delivery fees (GHS)', report.delivery_fee_ghs],
+        ['Discounts (GHS)', report.discount_ghs],
+        ['Total (GHS)', report.total_ghs],
+        ['MoMo (GHS)', report.momo_ghs],
+        ['Card (GHS)', report.card_ghs],
+        ['Cash (GHS)', report.cash_ghs]
+      ];
+      return csvResponse(res, `daily-sales-${dateLabel}.csv`, ['metric', 'value'], rows);
+    }
+    if (format === 'pdf') {
+      const rows = [
+        ['Orders', report.order_count],
+        ['Subtotal', `GH¢${report.subtotal_ghs}`],
+        ['Delivery fees', `GH¢${report.delivery_fee_ghs}`],
+        ['Discounts', `GH¢${report.discount_ghs}`],
+        ['Total', `GH¢${report.total_ghs}`],
+        ['MoMo', `GH¢${report.momo_ghs}`],
+        ['Card', `GH¢${report.card_ghs}`],
+        ['Cash', `GH¢${report.cash_ghs}`]
+      ];
+      return pdfResponse(res, `daily-sales-${dateLabel}.pdf`, {
+        title: 'Daily sales report',
+        subtitle: `Date: ${dateLabel} · Generated ${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC`,
+        columns: ['Metric', 'Value'],
+        rows
+      });
+    }
+    res.json({ success: true, date: date || null, report });
   } catch (err) {
     logger.error('GET /accounting/daily-sales failed: %s', err.message);
     res.status(500).json({ success: false, error: 'Internal server error' });
@@ -128,12 +164,17 @@ router.get('/vat-export', requirePermission('financial', 'read'), async (req, re
       net: a.net + Number(r[3]), vat: a.vat + Number(r[4]), gross: a.gross + Number(r[5])
     }), { net: 0, vat: 0, gross: 0 });
     rows.push(['TOTAL', '', '', totals.net.toFixed(2), totals.vat.toFixed(2), totals.gross.toFixed(2)]);
+    const columns = ['order_number', 'date', 'payment_method', 'net_ghs', `vat_ghs_(${rate}%)`, 'gross_ghs'];
 
-    csvResponse(
-      res, `vat-export-${req.query.month}.csv`,
-      ['order_number', 'date', 'payment_method', 'net_ghs', `vat_ghs_(${rate}%)`, 'gross_ghs'],
-      rows
-    );
+    if (String(req.query.format || 'csv').toLowerCase() === 'pdf') {
+      return pdfResponse(res, `vat-export-${req.query.month}.pdf`, {
+        title: `VAT export — ${req.query.month}`,
+        subtitle: `VAT rate: ${rate}% · Generated ${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC`,
+        columns,
+        rows
+      });
+    }
+    csvResponse(res, `vat-export-${req.query.month}.csv`, columns, rows);
   } catch (err) {
     logger.error('GET /accounting/vat-export failed: %s', err.message);
     res.status(500).json({ success: false, error: 'Internal server error' });
@@ -181,6 +222,23 @@ router.get('/reconciliation', requirePermission('financial', 'read'), async (req
       [businessId, from, to]
     );
     const unmatched = result.rows.filter(r => !r.gateway_event_found);
+    const format = String(req.query.format || 'json').toLowerCase();
+    if (format === 'csv' || format === 'pdf') {
+      const columns = ['order_number', 'date', 'payment_method', 'total_ghs', 'payment_ref', 'gateway_event_found'];
+      const rows = result.rows.map(r => [
+        r.order_number, r.updated_at.toISOString().slice(0, 10), r.payment_method || '',
+        r.total_ghs, r.payment_ref || '', r.gateway_event_found ? 'yes' : 'NO — unmatched'
+      ]);
+      const label = `${from || 'all'}_to_${to || 'all'}`;
+      if (format === 'pdf') {
+        return pdfResponse(res, `payout-reconciliation-${label}.pdf`, {
+          title: 'Payout reconciliation',
+          subtitle: `${from || 'all time'} to ${to || 'now'} · ${unmatched.length} unmatched of ${result.rows.length} paid orders`,
+          columns, rows
+        });
+      }
+      return csvResponse(res, `payout-reconciliation-${label}.csv`, columns, rows);
+    }
     res.json({
       success: true,
       total_paid_orders: result.rows.length,
@@ -423,6 +481,78 @@ router.get('/profit-loss', requirePermission('financial', 'read'), async (req, r
     });
   } catch (err) {
     logger.error('GET /accounting/profit-loss failed: %s', err.message);
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+/* =================================================================
+   Inventory valuation
+   ================================================================= */
+
+/**
+ * GET /api/accounting/inventory-valuation?business_id=&format=json|csv|pdf
+ * "What is the stock currently sitting on the shelf worth" — stock_qty ×
+ * cost_price_ghs per product where both are tracked (NULL stock_qty means
+ * untracked/unlimited, matching every other stock_qty convention in this
+ * app; NULL cost_price_ghs means the merchant hasn't priced that product's
+ * cost yet). Both are called out explicitly rather than silently valued at
+ * zero, same honesty rule as /api/analytics/profit.
+ */
+router.get('/inventory-valuation', requirePermission('financial', 'read'), async (req, res) => {
+  try {
+    const businessId = resolveBusinessId(req);
+    if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (tenantBlocksBusinessId(req, businessId)) {
+      return res.status(403).json({ success: false, error: 'Key does not match business' });
+    }
+    const result = await query(
+      `SELECT name, category, stock_qty, cost_price_ghs, price_ghs
+         FROM products
+        WHERE business_id = $1 AND hidden = FALSE
+        ORDER BY category ASC, name ASC`,
+      [businessId]
+    );
+
+    let totalValueGhs = 0;
+    let untrackedCount = 0;
+    let uncostedCount = 0;
+    const items = result.rows.map(p => {
+      const tracked = p.stock_qty != null;
+      const costed = p.cost_price_ghs != null;
+      if (!tracked) untrackedCount++;
+      if (!costed) uncostedCount++;
+      const value = tracked && costed ? Number(p.stock_qty) * Number(p.cost_price_ghs) : null;
+      if (value != null) totalValueGhs += value;
+      return {
+        name: p.name, category: p.category,
+        stock_qty: p.stock_qty, cost_price_ghs: p.cost_price_ghs,
+        value_ghs: value != null ? Number(value.toFixed(2)) : null
+      };
+    });
+
+    const format = String(req.query.format || 'json').toLowerCase();
+    if (format === 'csv' || format === 'pdf') {
+      const columns = ['name', 'category', 'stock_qty', 'cost_price_ghs', 'value_ghs'];
+      const rows = items.map(i => [i.name, i.category, i.stock_qty ?? 'untracked', i.cost_price_ghs ?? '', i.value_ghs ?? '']);
+      rows.push(['TOTAL', '', '', '', totalValueGhs.toFixed(2)]);
+      if (format === 'pdf') {
+        return pdfResponse(res, `inventory-valuation-${new Date().toISOString().slice(0, 10)}.pdf`, {
+          title: 'Inventory valuation',
+          subtitle: `Total: GH¢${totalValueGhs.toFixed(2)} · ${untrackedCount} untracked, ${uncostedCount} without a cost price`,
+          columns, rows
+        });
+      }
+      return csvResponse(res, `inventory-valuation-${new Date().toISOString().slice(0, 10)}.csv`, columns, rows);
+    }
+    res.json({
+      success: true,
+      total_value_ghs: Number(totalValueGhs.toFixed(2)),
+      untracked_count: untrackedCount,
+      uncosted_count: uncostedCount,
+      items
+    });
+  } catch (err) {
+    logger.error('GET /accounting/inventory-valuation failed: %s', err.message);
     res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });

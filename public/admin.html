@@ -23,6 +23,16 @@
   .pill-off { background: var(--bg-2); color: var(--muted); }
   .muted { color: var(--muted); }
   .btn-xs { padding: 5px 10px; font-size: 12px; }
+  .test-mode-banner {
+    background: color-mix(in srgb, var(--warning) 15%, transparent); color: var(--warning);
+    border: 1px solid color-mix(in srgb, var(--warning) 40%, transparent);
+    border-radius: var(--r-md, 8px); padding: 10px 16px; margin-bottom: 20px; font-size: 13px; font-weight: 600;
+  }
+  .factor-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .factor-bar .label { width: 160px; font-size: 12px; color: var(--muted); flex-shrink: 0; }
+  .factor-bar .track { flex: 1; height: 8px; border-radius: 999px; background: var(--bg-2); overflow: hidden; }
+  .factor-bar .fill { height: 100%; background: var(--accent, #2e7d32); }
+  .factor-bar .detail { font-size: 11px; color: var(--muted); width: 160px; flex-shrink: 0; text-align: right; }
 </style>
 </head>
 <body>
@@ -41,6 +51,10 @@
   </div>
 
   <div id="app" style="display:none">
+    <div id="testModeBanner" class="test-mode-banner" style="display:none">
+      ⚠️ Platform is running on Paystack <strong>TEST</strong> keys — no real money is moving. Switch PAYSTACK_SECRET_KEY to a live key before onboarding paying merchants.
+    </div>
+
     <div class="dash-card">
       <h2>Platform stats</h2>
       <div id="statsBox" class="muted">Loading…</div>
@@ -97,6 +111,28 @@
     </div>
 
     <div class="dash-card">
+      <h2>All businesses <span class="muted" id="allBizCount" style="font-size:13px;font-weight:400"></span></h2>
+      <p class="muted" style="margin-bottom:14px;font-size:13px">Click a business for its health score, usage, and a read-only support-mode (impersonation) link.</p>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr><th>Business</th><th>WhatsApp</th><th>Status</th><th>Plan</th><th>Signed up</th><th></th></tr></thead>
+          <tbody id="allBizTable"><tr><td colspan="6" class="muted">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="dash-card">
+      <h2>Risk flags <span class="muted" id="riskFlagCount" style="font-size:13px;font-weight:400"></span></h2>
+      <p class="muted" style="margin-bottom:14px;font-size:13px">Unusual API key IPs, and per-business spikes in failed payments or message volume (vs. that shop's own 7-day baseline).</p>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr><th>Kind</th><th>Business</th><th>Detail</th><th>When</th></tr></thead>
+          <tbody id="riskFlagsTable"><tr><td colspan="4" class="muted">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="dash-card">
       <h2>Alert history</h2>
       <div style="overflow-x:auto">
         <table>
@@ -130,13 +166,21 @@
   </div>
 </div>
 
+<div id="bizModalOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:100;align-items:flex-start;justify-content:center;overflow-y:auto;padding:40px 16px" onclick="if(event.target===this) closeBizModal()">
+  <div style="background:var(--bg);border-radius:var(--r-lg,12px);max-width:640px;width:100%;padding:24px;box-shadow:0 8px 32px rgba(0,0,0,0.2)">
+    <button class="btn btn-ghost btn-xs" style="float:right" onclick="closeBizModal()">✕ Close</button>
+    <div id="bizModalBody"><p class="muted">Loading…</p></div>
+  </div>
+</div>
+
 <script>
 const STEP_LABELS = {
   business_profile: 'Business profile',
   whatsapp_number: 'WhatsApp number',
   payment_provider: 'Payment settings',
   first_products: 'First products',
-  test_message: 'Test message'
+  test_message: 'Test message',
+  invite_staff: 'Invite staff'
 };
 
 function getKey() { return localStorage.getItem('wab_admin_key') || ''; }
@@ -302,6 +346,131 @@ async function loadOps() {
   }
 }
 
+async function loadTestModeBanner() {
+  try {
+    const { health } = await api('/admin/health');
+    document.getElementById('testModeBanner').style.display = health.paystack_mode === 'test' ? 'block' : 'none';
+  } catch (err) { /* non-critical — health card below already shows its own error */ }
+}
+
+async function loadAllBusinesses() {
+  const tbody = document.getElementById('allBizTable');
+  try {
+    const { businesses } = await api('/admin/businesses?limit=200');
+    document.getElementById('allBizCount').textContent = businesses.length + (businesses.length === 1 ? ' business' : ' businesses');
+    tbody.innerHTML = businesses.map(b => `
+      <tr>
+        <td><strong>${esc(b.name)}</strong>${b.owner_name ? `<div class="muted" style="font-size:12px">${esc(b.owner_name)}</div>` : ''}</td>
+        <td>${esc(b.whatsapp_number || '—')}</td>
+        <td><span class="pill ${b.status === 'active' || b.status === 'trial' ? 'pill-ok' : (b.status === 'grace' ? 'pill-warn' : 'pill-off')}">${esc(b.status)}</span></td>
+        <td>${esc(b.plan_name || '—')}</td>
+        <td class="muted">${fmtDate(b.created_at)}</td>
+        <td><button class="btn btn-ghost btn-xs" onclick="openBizModal('${b.id}')">Details</button></td>
+      </tr>
+    `).join('') || '<tr><td colspan="6" class="muted">No businesses yet.</td></tr>';
+  } catch (err) {
+    tbody.innerHTML = '<tr><td colspan="6" class="muted">Could not load: ' + esc(err.message) + '</td></tr>';
+  }
+}
+
+function closeBizModal() { document.getElementById('bizModalOverlay').style.display = 'none'; }
+
+function factorBar(label, points, max, detail) {
+  const pct = max > 0 ? Math.round((points / max) * 100) : 0;
+  return `<div class="factor-bar">
+    <div class="label">${esc(label)}</div>
+    <div class="track"><div class="fill" style="width:${pct}%"></div></div>
+    <div class="detail">${points}/${max} · ${esc(detail)}</div>
+  </div>`;
+}
+
+async function openBizModal(id) {
+  document.getElementById('bizModalOverlay').style.display = 'flex';
+  const body = document.getElementById('bizModalBody');
+  body.innerHTML = '<p class="muted">Loading…</p>';
+  try {
+    const [{ health_score, factors }, { usage }] = await Promise.all([
+      api('/admin/businesses/' + id + '/health-score'),
+      api('/admin/businesses/' + id + '/usage')
+    ]);
+    const factorLabels = {
+      whatsapp_connected: 'WhatsApp connected', whatsapp_activity: 'WhatsApp activity',
+      payment_failures: 'Payment reliability', subscription_status: 'Subscription',
+      quota_headroom: 'Message quota headroom'
+    };
+    body.innerHTML = `
+      <h2 style="margin-bottom:2px">Business health</h2>
+      <span class="muted" style="font-size:12px">${esc(id)}</span>
+      <div style="display:flex;align-items:center;gap:14px;margin:16px 0">
+        <div style="font-size:36px;font-weight:800">${health_score}</div>
+        <div class="muted" style="font-size:13px">/ 100 health score</div>
+      </div>
+      ${Object.entries(factors).map(([k, f]) => factorBar(factorLabels[k] || k, f.points, f.max, f.detail)).join('')}
+      <h3 style="font-size:14px;margin:20px 0 10px">Usage this month</h3>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:20px">
+        <div style="border:1px solid var(--line);border-radius:8px;padding:10px 12px">
+          <div style="font-size:11px;color:var(--muted)">Plan</div>
+          <div style="font-size:15px;font-weight:700;margin-top:2px">${esc(usage.plan_name || '—')}</div>
+        </div>
+        <div style="border:1px solid var(--line);border-radius:8px;padding:10px 12px">
+          <div style="font-size:11px;color:var(--muted)">Messages sent</div>
+          <div style="font-size:15px;font-weight:700;margin-top:2px">${usage.messages_sent_this_month}${usage.message_cap != null ? ' / ' + usage.message_cap : ''}</div>
+        </div>
+        <div style="border:1px solid var(--line);border-radius:8px;padding:10px 12px">
+          <div style="font-size:11px;color:var(--muted)">Broadcasts sent</div>
+          <div style="font-size:15px;font-weight:700;margin-top:2px">${usage.broadcasts_sent_this_month}</div>
+        </div>
+      </div>
+      <h3 style="font-size:14px;margin-bottom:10px">Support-mode access (read-only)</h3>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <input id="impReason" placeholder="Reason (required, e.g. support ticket #123)" style="flex:1;min-width:220px" />
+        <button class="btn btn-primary btn-sm" onclick="startImpersonation('${id}')">Start read-only session</button>
+      </div>
+      <div id="impResult" style="margin-top:10px"></div>
+    `;
+  } catch (err) {
+    body.innerHTML = '<p class="muted">Could not load: ' + esc(err.message) + '</p>';
+  }
+}
+
+async function startImpersonation(businessId) {
+  const reason = document.getElementById('impReason').value.trim();
+  const resultEl = document.getElementById('impResult');
+  if (!reason) { resultEl.innerHTML = '<p class="muted" style="color:var(--danger,#c0392b)">A reason is required.</p>'; return; }
+  try {
+    const { session } = await api('/admin/businesses/' + businessId + '/impersonate', {
+      method: 'POST', body: JSON.stringify({ reason, ttl_minutes: 30 })
+    });
+    resultEl.innerHTML = `
+      <p class="muted" style="font-size:12px;margin-bottom:6px">Expires ${fmtDateTime(session.expires_at)}. Read-only everywhere — paste as the API key in the dashboard.</p>
+      <code style="display:block;background:var(--bg-2);border-radius:6px;padding:8px 10px;font-size:12px;word-break:break-all">${esc(session.plaintext)}</code>
+    `;
+  } catch (err) {
+    resultEl.innerHTML = '<p class="muted" style="color:var(--danger,#c0392b)">' + esc(err.message) + '</p>';
+  }
+}
+
+async function loadRiskFlags() {
+  const tbody = document.getElementById('riskFlagsTable');
+  const KIND_LABELS = {
+    suspicious_ip: 'New IP', failed_payment_spike: 'Payment spike', message_spike: 'Message spike'
+  };
+  try {
+    const { flags } = await api('/admin/risk-flags');
+    document.getElementById('riskFlagCount').textContent = flags.length + (flags.length === 1 ? ' flag' : ' flags');
+    tbody.innerHTML = flags.map(f => `
+      <tr>
+        <td><span class="pill pill-warn">${esc(KIND_LABELS[f.kind] || f.kind)}</span></td>
+        <td>${esc(f.business_name || '—')}</td>
+        <td class="muted" style="font-size:12px;max-width:320px">${esc(f.title)}${f.detail ? ' — ' + esc(JSON.stringify(f.detail)) : ''}</td>
+        <td class="muted">${fmtDateTime(f.at)}</td>
+      </tr>
+    `).join('') || '<tr><td colspan="4" class="muted">Nothing flagged right now.</td></tr>';
+  } catch (err) {
+    tbody.innerHTML = '<tr><td colspan="4" class="muted">Could not load: ' + esc(err.message) + '</td></tr>';
+  }
+}
+
 async function loadAuditLog() {
   const tbody = document.getElementById('auditTable');
   try {
@@ -407,7 +576,10 @@ async function boot() {
   const errEl = document.getElementById('keyError');
   errEl.style.display = 'none';
   try {
-    await Promise.all([loadStats(), loadIncomplete(), loadOps(), loadWebhooks(), loadAuditLog()]);
+    await Promise.all([
+      loadStats(), loadIncomplete(), loadOps(), loadWebhooks(), loadAuditLog(),
+      loadTestModeBanner(), loadAllBusinesses(), loadRiskFlags()
+    ]);
     document.getElementById('keyCard').style.display = 'none';
     document.getElementById('app').style.display = '';
   } catch (err) {

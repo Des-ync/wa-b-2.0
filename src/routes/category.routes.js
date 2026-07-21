@@ -1,7 +1,7 @@
 const express = require('express');
 const logger = require('../utils/logger');
 const { query, transaction } = require('../config/database');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, requirePermission } = require('../middleware/auth');
 const { tenantBlocksBusinessId } = require('../middleware/tenantAccess');
 
 const router = express.Router();
@@ -38,7 +38,7 @@ router.get('/', async (req, res) => {
 });
 
 /** POST /api/categories — { business_id?, name, sort_order?, hidden? } */
-router.post('/', async (req, res) => {
+router.post('/', requirePermission('products', 'write'), async (req, res) => {
   try {
     const businessId = req.body?.business_id || req.auth?.businessId;
     if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
@@ -65,7 +65,7 @@ router.post('/', async (req, res) => {
 });
 
 /** PATCH /api/categories/:id — { name?, sort_order?, hidden? } */
-router.patch('/:id', async (req, res) => {
+router.patch('/:id', requirePermission('products', 'write'), async (req, res) => {
   try {
     const existing = await query('SELECT * FROM categories WHERE id = $1', [req.params.id]);
     const category = existing.rows[0];
@@ -102,7 +102,7 @@ router.patch('/:id', async (req, res) => {
 });
 
 /** DELETE /api/categories/:id — removes display metadata only; products keep their category text. */
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requirePermission('products', 'write'), async (req, res) => {
   try {
     const existing = await query('SELECT * FROM categories WHERE id = $1', [req.params.id]);
     const category = existing.rows[0];
@@ -122,7 +122,7 @@ router.delete('/:id', async (req, res) => {
  * POST /api/categories/reorder — { business_id?, order: [name, name, ...] }
  * Bulk-sets sort_order to each name's index; upserts any name not yet tracked.
  */
-router.post('/reorder', async (req, res) => {
+router.post('/reorder', requirePermission('products', 'write'), async (req, res) => {
   try {
     const businessId = req.body?.business_id || req.auth?.businessId;
     if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });

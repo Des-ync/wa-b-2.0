@@ -212,6 +212,33 @@ class ErrorRetry extends StatelessWidget {
   }
 }
 
+/// Shown above a list when it's serving cached data because the last fetch
+/// failed — keeps the merchant informed instead of silently showing stale
+/// numbers as if they were live.
+class OfflineBanner extends StatelessWidget {
+  const OfflineBanner({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      color: WabColors.warning.withValues(alpha: 0.12),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: const Row(
+        children: [
+          Icon(Icons.cloud_off_rounded, size: 16, color: WabColors.warning),
+          SizedBox(width: 8),
+          Expanded(
+            child: Text('Showing cached data — you\'re offline',
+                style: TextStyle(
+                    color: WabColors.warning, fontSize: 13, fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// Colored status chip for orders / subscriptions / broadcasts.
 class StatusChip extends StatelessWidget {
   final String status;

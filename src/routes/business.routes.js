@@ -12,6 +12,7 @@ router.use(requireAuth('any'));
 
 const SETTINGS_COLUMNS =
   'id, name, owner_name, slug, vat_rate_pct, welcome_message, support_phone, delivery_fee_ghs, delivery_zones, open_time, close_time, ' +
+  'logo_url, banner_url, ' +
   'bot_language, payout_momo_number, payout_momo_network, ' +
   'cart_nudge_enabled, cart_nudge_delay_minutes, cart_nudge_max_per_cart, ' +
   'cart_nudge_message_template, cart_nudge_template_b, cart_nudge_coupon_code, ' +
@@ -119,6 +120,12 @@ router.patch('/settings', requirePermission('settings'), async (req, res) => {
         return res.status(400).json({ success: false, error: 'vat_rate_pct must be a number between 0 and 100' });
       }
       set('vat_rate_pct', n);
+    }
+    for (const col of ['logo_url', 'banner_url']) {
+      if (col in body) {
+        const v = body[col] == null ? null : String(body[col]).trim().slice(0, 500);
+        set(col, v || null);
+      }
     }
     if ('slug' in body) {
       const v = String(body.slug || '').trim().toLowerCase();
@@ -253,6 +260,125 @@ router.patch('/settings', requirePermission('settings'), async (req, res) => {
       return res.status(409).json({ success: false, error: 'That storefront handle is already taken' });
     }
     logger.error('PATCH /business/settings failed: %s', err.message);
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+/* =================================================================
+   Data export — merchant self-serve, owner-only
+   ================================================================= */
+
+/**
+ * GET /api/business/export?business_id= — a single downloadable JSON bundle
+ * of everything this business's account holds: profile/settings, products,
+ * customers (with consent_at/consent_source), orders (with items), and the
+ * message log. Owner-only (requirePermission('settings') — the same gate as
+ * changing account settings, since exporting the full customer/message
+ * record is at least as sensitive). This is a plain JSON file rather than a
+ * CSV-per-entity zip — there's no zip dependency in this app and adding one
+ * for a single, infrequently-used export button isn't worth it; the JSON is
+ * still fully usable (any spreadsheet tool or script can consume it).
+ */
+router.get('/export', requirePermission('settings'), async (req, res) => {
+  try {
+    const businessId = resolveBusinessId(req);
+    if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
+
+    const [businessRes, productsRes, customersRes, ordersRes, messagesRes] = await Promise.all([
+      query(
+        `SELECT id, name, owner_name, whatsapp_number, industry, status, slug,
+                welcome_message, support_phone, payout_momo_number, payout_momo_network,
+                created_at
+           FROM businesses WHERE id = $1`,
+        [businessId]
+      ),
+      query('SELECT * FROM products WHERE business_id = $1 ORDER BY created_at ASC', [businessId]),
+      query(
+        `SELECT id, whatsapp_number, display_name, channel, total_orders, total_spent_ghs,
+                opted_out, consent_at, consent_source, tags, created_at
+           FROM customers WHERE business_id = $1 ORDER BY created_at ASC`,
+        [businessId]
+      ),
+      query('SELECT * FROM orders WHERE business_id = $1 ORDER BY created_at ASC', [businessId]),
+      query(
+        `SELECT direction, message_type, content, status, created_at, customer_id
+           FROM message_log WHERE business_id = $1 ORDER BY created_at ASC`,
+        [businessId]
+      )
+    ]);
+    const business = businessRes.rows[0];
+    if (!business) return res.status(404).json({ success: false, error: 'Business not found' });
+
+    recordAudit({
+      actorType: req.auth?.scope === 'admin' ? 'admin' : 'merchant',
+      actorId: req.auth?.clerkUserId || req.auth?.keyId, businessId,
+      action: 'business.data_export',
+      detail: {
+        products: productsRes.rowCount, customers: customersRes.rowCount,
+        orders: ordersRes.rowCount, messages: messagesRes.rowCount
+      }
+    });
+
+    const bundle = {
+      exported_at: new Date().toISOString(),
+      business,
+      products: productsRes.rows,
+      customers: customersRes.rows,
+      orders: ordersRes.rows,
+      messages: messagesRes.rows
+    };
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="wa-b-export-${businessId}-${new Date().toISOString().slice(0, 10)}.json"`);
+    res.send(JSON.stringify(bundle, null, 2));
+  } catch (err) {
+    logger.error('GET /business/export failed: %s', err.message);
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+/* =================================================================
+   Account closure — merchant self-serve, owner-only
+   ================================================================= */
+
+/**
+ * POST /api/business/close — body: { reason?, confirm: true }
+ * A STATUS transition, not a delete: sets closed_at + closure_reason. The
+ * storefront (storefront.routes.js findPublicBusiness) and dashboard onboarding
+ * treat closed_at as "not publicly visible" but every order/customer/message
+ * record is retained exactly as-is for the legal/accounting record — the
+ * merchant's own data export above still works after closing. `confirm: true`
+ * is required so this can't fire from a stray/duplicate request; the caller
+ * (dashboard) is expected to show the retention warning BEFORE the user
+ * reaches this call, not after.
+ */
+router.post('/close', requirePermission('settings'), async (req, res) => {
+  try {
+    const businessId = resolveBusinessId(req);
+    if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (req.body?.confirm !== true) {
+      return res.status(400).json({
+        success: false,
+        error: 'Pass { "confirm": true } to close the account. This does not delete your data — ' +
+               'orders, customers and messages are retained; your storefront and bot stop being reachable.'
+      });
+    }
+    const reason = req.body?.reason ? String(req.body.reason).trim().slice(0, 500) : null;
+    const result = await query(
+      `UPDATE businesses SET closed_at = NOW(), closure_reason = $2, updated_at = NOW()
+        WHERE id = $1 AND closed_at IS NULL RETURNING id, name, closed_at`,
+      [businessId, reason]
+    );
+    if (!result.rows[0]) {
+      return res.status(409).json({ success: false, error: 'This account is already closed.' });
+    }
+    recordAudit({
+      actorType: req.auth?.scope === 'admin' ? 'admin' : 'merchant',
+      actorId: req.auth?.clerkUserId || req.auth?.keyId, businessId,
+      action: 'business.closed', detail: { reason }
+    });
+    res.json({ success: true, closed_at: result.rows[0].closed_at });
+  } catch (err) {
+    logger.error('POST /business/close failed: %s', err.message);
     res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });

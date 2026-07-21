@@ -51,6 +51,9 @@ class _MainShellState extends State<MainShell> {
           setState(() => _index = 1);
         }
       case 'message':
+      case 'handoff':
+        // 'handoff' is a customer asking for a human — same destination as
+        // a plain message tap: open the chat thread with that customer.
         final customerId = data['customer_id'];
         if (customerId != null) {
           Navigator.of(context).push(

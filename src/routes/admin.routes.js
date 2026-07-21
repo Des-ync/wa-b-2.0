@@ -3,15 +3,22 @@ const fs = require('fs');
 const path = require('path');
 const logger = require('../utils/logger');
 const { query } = require('../config/database');
-const { requireAuth, issueKey } = require('../middleware/auth');
+const { requireAuth, issueKey, issueImpersonationToken, revokeImpersonationToken } = require('../middleware/auth');
 const { normalizeGhanaPhone } = require('../utils/helpers');
 const wa = require('../services/whatsapp.service');
 const { computeOnboardingSteps } = require('./onboarding.routes');
 const { getLatencyStats } = require('../middleware/latency');
 const { getMetricsSnapshot } = require('../utils/metrics');
 const { recordAudit } = require('../utils/auditLog');
+const { toCsv } = require('../utils/csv');
 
 const router = express.Router();
+
+function csvResponse(res, filename, header, rows) {
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.send(toCsv(header, rows));
+}
 
 // All admin routes require an admin-scoped API key.
 router.use(requireAuth('admin'));
@@ -311,7 +318,11 @@ const EDITABLE_BUSINESS_FIELDS = [
   'name', 'owner_name', 'industry', 'status', 'whatsapp_number',
   'wa_phone_number_id', 'welcome_message', 'support_phone', 'bot_language',
   'delivery_fee_ghs', 'open_time', 'close_time', 'trial_ends_at',
-  'payout_momo_number', 'payout_momo_network', 'slug', 'vat_rate_pct'
+  'payout_momo_number', 'payout_momo_network', 'slug', 'vat_rate_pct',
+  'logo_url', 'banner_url',
+  // Reopen-only here — CLOSING an account goes through POST /api/business/close,
+  // which pairs closed_at with a closure_reason and its own audit entry.
+  'closed_at'
 ];
 const BUSINESS_STATUSES = ['trial', 'active', 'grace', 'suspended', 'cancelled'];
 const MOMO_NETWORKS = ['mtn', 'vodafone', 'airteltigo'];
@@ -361,6 +372,15 @@ router.patch('/businesses/:id', async (req, res) => {
             error: 'slug must be 3-60 lowercase letters/numbers/hyphens, no leading/trailing hyphen'
           });
         }
+      }
+      if (field === 'closed_at' && value) {
+        return res.status(400).json({
+          success: false,
+          error: 'closed_at can only be cleared (reopen) here — pass null. To close an account, use POST /api/business/close.'
+        });
+      }
+      for (const col of ['logo_url', 'banner_url']) {
+        if (field === col) value = value == null ? null : String(value).trim().slice(0, 500) || null;
       }
       params.push(value === '' ? null : value);
       sets.push(`${field} = $${params.length}`);
@@ -578,7 +598,12 @@ router.get('/health', async (_req, res) => {
         uptime_seconds: Math.round(process.uptime()),
         memory_rss_mb: Math.round(mem.rss / 1024 / 1024),
         node_version: process.version,
-        env: process.env.NODE_ENV || 'development'
+        env: process.env.NODE_ENV || 'development',
+        // Platform-wide, not per-tenant — see onboarding.routes.js's
+        // webhook-health note: Paystack is one shared account for every shop.
+        paystack_mode: process.env.PAYSTACK_SECRET_KEY
+          ? (/^(sk|pk)_test_/.test(process.env.PAYSTACK_SECRET_KEY) ? 'test' : 'live')
+          : 'unconfigured'
       }
     });
   } catch (err) {
@@ -665,6 +690,14 @@ router.get('/audit-log', async (req, res) => {
       `SELECT * FROM audit_log ${where} ORDER BY created_at DESC LIMIT $${params.length}`,
       params
     );
+    if (String(req.query.format || 'json').toLowerCase() === 'csv') {
+      const columns = ['id', 'actor_type', 'actor_id', 'business_id', 'action', 'detail', 'created_at'];
+      const rows = result.rows.map(r => [
+        r.id, r.actor_type, r.actor_id || '', r.business_id || '', r.action,
+        JSON.stringify(r.detail || {}), r.created_at.toISOString()
+      ]);
+      return csvResponse(res, `audit-log-${new Date().toISOString().slice(0, 10)}.csv`, columns, rows);
+    }
     res.json({ success: true, audit_log: result.rows });
   } catch (err) {
     logger.error('GET /admin/audit-log failed: %s', err.message);
@@ -756,6 +789,320 @@ router.post('/webhooks/:id/retry', async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     logger.error('POST /admin/webhooks/:id/retry failed: %s', err.message);
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+/* =================================================================
+   Merchant impersonation (audited, read-only support mode)
+   ================================================================= */
+
+/**
+ * POST /api/admin/businesses/:id/impersonate — body: { reason, ttl_minutes? }
+ * Issues a short-lived (default 30 min), strictly read-only token an admin
+ * can use exactly like a tenant API key (Authorization: Bearer <token>)
+ * against every existing tenant-scoped route — requireAuth() resolves it to
+ * role='readonly' (utils/permissions.js), so any write attempt 403s the
+ * same way an accountant-role key would. Every issuance is audited with the
+ * admin's own key id and the stated reason; every use bumps last_used_at.
+ */
+router.post('/businesses/:id/impersonate', async (req, res) => {
+  try {
+    const bizRes = await query('SELECT id, name FROM businesses WHERE id = $1', [req.params.id]);
+    if (!bizRes.rows[0]) return res.status(404).json({ success: false, error: 'Business not found' });
+
+    const ttl = Math.min(Math.max(parseInt(req.body?.ttl_minutes, 10) || 30, 5), 120);
+    const session = await issueImpersonationToken({
+      businessId: req.params.id,
+      adminKeyId: req.auth?.keyId || null,
+      reason: req.body?.reason,
+      ttlMinutes: ttl
+    });
+    recordAudit({
+      actorType: 'admin', actorId: req.auth?.keyId, businessId: req.params.id,
+      action: 'admin.impersonate_start',
+      detail: { session_id: session.id, reason: req.body?.reason, ttl_minutes: ttl }
+    });
+    res.status(201).json({ success: true, session });
+  } catch (err) {
+    logger.error('POST /admin/businesses/:id/impersonate failed: %s', err.message);
+    res.status(400).json({ success: false, error: err.message || 'Internal server error' });
+  }
+});
+
+/** POST /api/admin/impersonation/:id/revoke — end a support session early. */
+router.post('/impersonation/:id/revoke', async (req, res) => {
+  try {
+    const ok = await revokeImpersonationToken(req.params.id);
+    if (!ok) return res.status(404).json({ success: false, error: 'Session not found or already revoked' });
+    recordAudit({
+      actorType: 'admin', actorId: req.auth?.keyId, businessId: null,
+      action: 'admin.impersonate_end', detail: { session_id: req.params.id }
+    });
+    res.json({ success: true });
+  } catch (err) {
+    logger.error('POST /admin/impersonation/:id/revoke failed: %s', err.message);
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+/** GET /api/admin/businesses/:id/impersonation-history — audit trail of support-mode access. */
+router.get('/businesses/:id/impersonation-history', async (req, res) => {
+  try {
+    const result = await query(
+      `SELECT id, admin_key_id, reason, expires_at, revoked_at, last_used_at, created_at
+         FROM impersonation_sessions WHERE business_id = $1
+        ORDER BY created_at DESC LIMIT 50`,
+      [req.params.id]
+    );
+    res.json({ success: true, sessions: result.rows });
+  } catch (err) {
+    logger.error('GET /admin/businesses/:id/impersonation-history failed: %s', err.message);
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+/* =================================================================
+   Tenant health score
+   ================================================================= */
+
+/**
+ * GET /api/admin/businesses/:id/health-score — a single composite number
+ * (0-100) plus its factor breakdown, so support can triage "which shops need
+ * attention" without opening five different screens. Every factor is a real,
+ * already-instrumented signal — nothing here is fabricated:
+ *   - WhatsApp connected (wa_phone_number_id set)                    25 pts
+ *   - Inbound WhatsApp activity in the last 30d (or too new to judge) 25 pts
+ *   - Payment failures in the last 30d (orders.payment_status)       20 pts
+ *   - Subscription status                                           20 pts
+ *   - Message quota headroom this month vs. plan cap                10 pts
+ */
+router.get('/businesses/:id/health-score', async (req, res) => {
+  try {
+    const bizRes = await query(
+      `SELECT id, name, wa_phone_number_id, created_at FROM businesses WHERE id = $1`,
+      [req.params.id]
+    );
+    const business = bizRes.rows[0];
+    if (!business) return res.status(404).json({ success: false, error: 'Business not found' });
+
+    const [msgRes, failedRes, subRes, quotaRes] = await Promise.all([
+      query(
+        `SELECT COUNT(*)::int AS n FROM message_log
+          WHERE business_id = $1 AND direction = 'inbound' AND created_at >= NOW() - INTERVAL '30 days'`,
+        [business.id]
+      ),
+      query(
+        `SELECT COUNT(*)::int AS n FROM orders
+          WHERE business_id = $1 AND payment_status = 'failed' AND created_at >= NOW() - INTERVAL '30 days'`,
+        [business.id]
+      ),
+      query(
+        `SELECT s.status FROM subscriptions s WHERE s.business_id = $1 ORDER BY s.created_at DESC LIMIT 1`,
+        [business.id]
+      ),
+      query(
+        `SELECT p.max_msgs_month,
+                (SELECT COUNT(*)::int FROM message_log m
+                  WHERE m.business_id = $1 AND m.direction = 'outbound'
+                    AND m.created_at >= date_trunc('month', NOW())) AS sent_this_month
+           FROM subscriptions s JOIN plans p ON p.id = s.plan_id
+          WHERE s.business_id = $1 ORDER BY s.created_at DESC LIMIT 1`,
+        [business.id]
+      )
+    ]);
+
+    const ageDays = (Date.now() - new Date(business.created_at).getTime()) / 86_400_000;
+    const inboundCount = msgRes.rows[0].n;
+    const failedCount = failedRes.rows[0].n;
+    const subStatus = subRes.rows[0]?.status || 'none';
+    const quota = quotaRes.rows[0] || null;
+
+    const factors = {
+      whatsapp_connected: {
+        points: business.wa_phone_number_id ? 25 : 0, max: 25,
+        detail: business.wa_phone_number_id ? 'Connected' : 'No wa_phone_number_id set'
+      },
+      whatsapp_activity: {
+        points: !business.wa_phone_number_id ? 0 : (inboundCount > 0 ? 25 : (ageDays < 3 ? 15 : 0)),
+        max: 25,
+        detail: inboundCount > 0
+          ? `${inboundCount} inbound message(s) in 30d`
+          : (ageDays < 3 ? 'Too new to judge (< 3 days old)' : 'No inbound messages in 30d')
+      },
+      payment_failures: {
+        points: Math.max(0, 20 - failedCount * 4), max: 20,
+        detail: `${failedCount} failed payment(s) in 30d`
+      },
+      subscription_status: {
+        points: { active: 20, trial: 20, grace: 10, suspended: 0, cancelled: 0, pending: 10, none: 0 }[subStatus] ?? 0,
+        max: 20,
+        detail: subStatus
+      },
+      quota_headroom: {
+        points: (() => {
+          if (!quota || quota.max_msgs_month == null || quota.max_msgs_month === -1) return 10;
+          const usedPct = quota.sent_this_month / quota.max_msgs_month;
+          return usedPct >= 1 ? 0 : usedPct >= 0.9 ? 4 : 10;
+        })(),
+        max: 10,
+        detail: quota && quota.max_msgs_month != null && quota.max_msgs_month !== -1
+          ? `${quota.sent_this_month}/${quota.max_msgs_month} messages this month`
+          : 'Unlimited plan or no active subscription'
+      }
+    };
+    const score = Object.values(factors).reduce((sum, f) => sum + f.points, 0);
+
+    res.json({ success: true, health_score: score, factors });
+  } catch (err) {
+    logger.error('GET /admin/businesses/:id/health-score failed: %s', err.message, { stack: err.stack });
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+/* =================================================================
+   Per-tenant usage dashboard
+   ================================================================= */
+
+/**
+ * GET /api/admin/businesses/:id/usage — messages, broadcasts, and webhook
+ * volume this billing month, against the plan's message cap. Deliberately
+ * does NOT report "API calls" or "storage/media usage" — this codebase has
+ * no per-request counter (adding one would mean a DB write on every single
+ * API call, a real latency/cost tradeoff not worth taking for an ops nicety)
+ * and no media storage of its own (image_url values are external links) —
+ * reporting a made-up number for either would be worse than omitting them.
+ */
+router.get('/businesses/:id/usage', async (req, res) => {
+  try {
+    const bizRes = await query('SELECT id, name FROM businesses WHERE id = $1', [req.params.id]);
+    if (!bizRes.rows[0]) return res.status(404).json({ success: false, error: 'Business not found' });
+    const businessId = req.params.id;
+
+    const [msgRes, broadcastRes, planRes] = await Promise.all([
+      query(
+        `SELECT
+           COUNT(*) FILTER (WHERE direction = 'outbound')::int AS sent_this_month,
+           COUNT(*) FILTER (WHERE direction = 'inbound')::int  AS received_this_month
+         FROM message_log
+        WHERE business_id = $1 AND created_at >= date_trunc('month', NOW())`,
+        [businessId]
+      ),
+      query(
+        `SELECT COUNT(*)::int AS broadcasts_sent,
+                COALESCE(SUM(sent_count), 0)::int AS recipients_sent
+           FROM broadcasts
+          WHERE business_id = $1 AND created_at >= date_trunc('month', NOW())`,
+        [businessId]
+      ),
+      query(
+        `SELECT p.display_name, p.max_msgs_month, p.max_numbers
+           FROM subscriptions s JOIN plans p ON p.id = s.plan_id
+          WHERE s.business_id = $1 ORDER BY s.created_at DESC LIMIT 1`,
+        [businessId]
+      )
+    ]);
+
+    const plan = planRes.rows[0] || null;
+    const sent = msgRes.rows[0].sent_this_month;
+    res.json({
+      success: true,
+      usage: {
+        plan_name: plan?.display_name || null,
+        messages_sent_this_month: sent,
+        messages_received_this_month: msgRes.rows[0].received_this_month,
+        message_cap: plan && plan.max_msgs_month !== -1 ? plan.max_msgs_month : null,
+        message_cap_used_pct: plan && plan.max_msgs_month && plan.max_msgs_month !== -1
+          ? Math.round((sent / plan.max_msgs_month) * 100) : null,
+        broadcasts_sent_this_month: broadcastRes.rows[0].broadcasts_sent,
+        broadcast_recipients_sent_this_month: broadcastRes.rows[0].recipients_sent
+      }
+    });
+  } catch (err) {
+    logger.error('GET /admin/businesses/:id/usage failed: %s', err.message);
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+/* =================================================================
+   Risk flags
+   ================================================================= */
+
+/**
+ * GET /api/admin/risk-flags — platform-wide feed of things worth a human
+ * look: API keys used from a new IP (already logged by lookupKey() as
+ * audit_log action='auth.suspicious_new_ip'), and per-business spikes in
+ * failed payments or inbound message volume (today vs. that business's own
+ * trailing 7-day daily average) — a spike is relative to each shop's own
+ * baseline, not a fixed platform-wide threshold, so a naturally busy shop
+ * doesn't get flagged just for being busy.
+ */
+router.get('/risk-flags', async (_req, res) => {
+  try {
+    const [suspiciousIps, paymentSpikes, messageSpikes] = await Promise.all([
+      query(
+        `SELECT al.id, al.actor_id, al.business_id, b.name AS business_name, al.detail, al.created_at
+           FROM audit_log al LEFT JOIN businesses b ON b.id = al.business_id
+          WHERE al.action = 'auth.suspicious_new_ip' AND al.created_at >= NOW() - INTERVAL '7 days'
+          ORDER BY al.created_at DESC LIMIT 50`
+      ),
+      query(
+        `WITH daily AS (
+           SELECT business_id, (created_at AT TIME ZONE 'Africa/Accra')::date AS day, COUNT(*) AS n
+             FROM orders WHERE payment_status = 'failed' AND created_at >= NOW() - INTERVAL '8 days'
+             GROUP BY business_id, day
+         ),
+         baseline AS (
+           SELECT business_id, AVG(n) AS avg_n FROM daily
+            WHERE day < (NOW() AT TIME ZONE 'Africa/Accra')::date GROUP BY business_id
+         )
+         SELECT d.business_id, b.name AS business_name, d.n AS today_count, COALESCE(bl.avg_n, 0) AS baseline_avg
+           FROM daily d JOIN businesses b ON b.id = d.business_id
+           LEFT JOIN baseline bl ON bl.business_id = d.business_id
+          WHERE d.day = (NOW() AT TIME ZONE 'Africa/Accra')::date
+            AND d.n >= 3 AND d.n > GREATEST(COALESCE(bl.avg_n, 0) * 3, 2)
+          ORDER BY d.n DESC`
+      ),
+      query(
+        `WITH daily AS (
+           SELECT business_id, (created_at AT TIME ZONE 'Africa/Accra')::date AS day, COUNT(*) AS n
+             FROM message_log WHERE created_at >= NOW() - INTERVAL '8 days'
+             GROUP BY business_id, day
+         ),
+         baseline AS (
+           SELECT business_id, AVG(n) AS avg_n FROM daily
+            WHERE day < (NOW() AT TIME ZONE 'Africa/Accra')::date GROUP BY business_id
+         )
+         SELECT d.business_id, b.name AS business_name, d.n AS today_count, COALESCE(bl.avg_n, 0) AS baseline_avg
+           FROM daily d JOIN businesses b ON b.id = d.business_id
+           LEFT JOIN baseline bl ON bl.business_id = d.business_id
+          WHERE d.day = (NOW() AT TIME ZONE 'Africa/Accra')::date
+            AND d.n >= 20 AND d.n > GREATEST(COALESCE(bl.avg_n, 0) * 3, 20)
+          ORDER BY d.n DESC`
+      )
+    ]);
+
+    const flags = [
+      ...suspiciousIps.rows.map(r => ({
+        kind: 'suspicious_ip', at: r.created_at, business_id: r.business_id, business_name: r.business_name,
+        title: `API key used from a new IP${r.business_name ? ' — ' + r.business_name : ''}`,
+        detail: r.detail
+      })),
+      ...paymentSpikes.rows.map(r => ({
+        kind: 'failed_payment_spike', at: new Date(), business_id: r.business_id, business_name: r.business_name,
+        title: `Failed-payment spike — ${r.business_name}`,
+        detail: { today: r.today_count, baseline_avg: Number(Number(r.baseline_avg).toFixed(1)) }
+      })),
+      ...messageSpikes.rows.map(r => ({
+        kind: 'message_spike', at: new Date(), business_id: r.business_id, business_name: r.business_name,
+        title: `Message-volume spike — ${r.business_name}`,
+        detail: { today: r.today_count, baseline_avg: Number(Number(r.baseline_avg).toFixed(1)) }
+      }))
+    ].sort((a, b) => new Date(b.at) - new Date(a.at));
+
+    res.json({ success: true, flags });
+  } catch (err) {
+    logger.error('GET /admin/risk-flags failed: %s', err.message, { stack: err.stack });
     res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });

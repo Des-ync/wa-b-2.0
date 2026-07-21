@@ -1,7 +1,7 @@
 const express = require('express');
 const logger = require('../utils/logger');
 const { query } = require('../config/database');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, requirePermission } = require('../middleware/auth');
 const { tenantBlocksBusinessId } = require('../middleware/tenantAccess');
 const { getAdapter, destOf } = require('../services/channel.adapter');
 const { summarizeConversation } = require('../utils/conversationSummary');
@@ -84,7 +84,7 @@ router.get('/:customerId/messages', async (req, res) => {
  * pauses the bot for them — a human is in the conversation now, the state
  * machine must not talk over the merchant's reply.
  */
-router.post('/:customerId/reply', async (req, res) => {
+router.post('/:customerId/reply', requirePermission('conversations', 'write'), async (req, res) => {
   try {
     const customer = await loadCustomer(req.params.customerId);
     if (!customer) return res.status(404).json({ success: false, error: 'Customer not found' });
@@ -149,7 +149,7 @@ router.get('/:customerId/summary', async (req, res) => {
 });
 
 /** POST /api/conversations/:customerId/pause — merchant takes over manually. */
-router.post('/:customerId/pause', async (req, res) => {
+router.post('/:customerId/pause', requirePermission('conversations', 'write'), async (req, res) => {
   try {
     const customer = await loadCustomer(req.params.customerId);
     if (!customer) return res.status(404).json({ success: false, error: 'Customer not found' });
@@ -165,7 +165,7 @@ router.post('/:customerId/pause', async (req, res) => {
 });
 
 /** POST /api/conversations/:customerId/resume — hand the customer back to the bot. */
-router.post('/:customerId/resume', async (req, res) => {
+router.post('/:customerId/resume', requirePermission('conversations', 'write'), async (req, res) => {
   try {
     const customer = await loadCustomer(req.params.customerId);
     if (!customer) return res.status(404).json({ success: false, error: 'Customer not found' });

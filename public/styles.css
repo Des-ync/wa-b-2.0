@@ -1493,6 +1493,41 @@ h1, h2, h3, h4 {
   .role { grid-template-columns: 1fr; gap: 4px; }
 }
 
+/* ============== Checklist (guides) ============== */
+.checklist { border-top: 1px solid var(--line); }
+.checklist-item {
+  display: grid;
+  grid-template-columns: 40px 1fr;
+  gap: 20px;
+  padding: 26px 0;
+  border-bottom: 1px solid var(--line);
+  align-items: start;
+}
+.checklist-num {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 1.5px solid var(--line-2);
+  display: grid;
+  place-items: center;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+  background: var(--paper);
+}
+.checklist-item h3 { font-size: 18px; letter-spacing: -0.015em; margin: 0 0 6px; }
+.checklist-item p { color: var(--muted); font-size: 14.5px; margin: 0; max-width: 62ch; }
+.checklist-item .field-hint { margin-top: 8px; }
+.checklist-item .field-hint code {
+  font-family: var(--font-mono);
+  background: var(--bg-2);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12.5px;
+  color: var(--accent-ink);
+}
+
 /* ============== 404 ============== */
 .notfound {
   min-height: 70vh;

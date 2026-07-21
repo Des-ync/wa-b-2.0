@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ROI calculator · WA-B Solutions</title>
+<meta name="description" content="Estimate what WhatsApp checkout and cart recovery could be worth to your shop — a transparent, illustrative calculator with the math shown." />
+<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png" />
+<link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16.png" />
+<link rel="apple-touch-icon" sizes="180x180" href="assets/favicon-180.png" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap nav-row">
+    <a href="index.html" class="brand"><img class="brand-logo brand-logo-light" src="assets/logo-light.jpg" alt="WA-B Solutions" /><img class="brand-logo brand-logo-dark" src="assets/logo-dark.jpg" alt="WA-B Solutions" /></a>
+    <nav><ul class="nav-links">
+      <li><a href="features.html">Features</a></li>
+      <li><a href="pricing.html">Pricing</a></li>
+      <li><a href="docs.html">Docs</a></li>
+      <li><a href="blog.html">Blog</a></li>
+      <li><a href="guide-how-it-works.html" aria-current="page">Guides</a></li>
+    </ul></nav>
+    <div class="nav-cta">
+      <a href="login.html" class="btn btn-ghost btn-sm hide-on-mobile">Sign in</a>
+      <a href="signup.html" class="btn btn-primary btn-sm">Book a demo <span class="arr">→</span></a>
+    </div>
+  </div>
+</header>
+
+<section class="page-hero">
+  <div class="wrap">
+    <span class="eyebrow">ROI calculator</span>
+    <h1 style="margin-top:18px">What could WhatsApp checkout be <em>worth to you</em>?</h1>
+    <p>A simple, transparent estimate — plug in your own numbers and see the math, not a black box. This is illustrative, not a guarantee: your real results depend on your product mix and customers.</p>
+  </div>
+</section>
+
+<section class="section section--tight">
+  <div class="wrap split" style="align-items:start">
+
+    <div>
+      <h2 class="h-card" style="font-size:22px;margin-bottom:20px">Your numbers</h2>
+      <form class="form" onsubmit="event.preventDefault()">
+        <div class="field">
+          <label for="roiOrders">Orders per month</label>
+          <input id="roiOrders" type="number" min="0" step="1" value="300" />
+          <span class="field-hint">Completed orders you currently take, from any channel.</span>
+        </div>
+        <div class="field">
+          <label for="roiAov">Average order value (GH¢)</label>
+          <input id="roiAov" type="number" min="0" step="1" value="85" />
+          <span class="field-hint">Typical cedi value of one order.</span>
+        </div>
+        <div class="field">
+          <label for="roiRecovery">Estimated cart-recovery uplift (%)</label>
+          <input id="roiRecovery" type="number" min="0" max="100" step="1" value="12" />
+          <span class="field-hint">Extra orders you estimate WhatsApp reminders recover, as a % of your current volume. Illustrative default — adjust to your own experience.</span>
+        </div>
+        <div class="field">
+          <label for="roiPlan">Subscription plan</label>
+          <select id="roiPlan">
+            <option value="kiosk">Kiosk — GH¢49/month (up to 500 orders)</option>
+            <option value="shop" selected>Shop — GH¢149/month (up to 5,000 orders)</option>
+            <option value="market">Market — GH¢499/month (unlimited orders)</option>
+          </select>
+          <span class="field-hint">Prices as listed on <a href="pricing.html" style="color:var(--accent-ink);border-bottom:1px solid var(--line-2)">Pricing</a>.</span>
+        </div>
+      </form>
+      <div id="capNote" class="callout" style="display:none;margin-top:20px"></div>
+    </div>
+
+    <div class="dash">
+      <div class="dash-bar"><div class="dash-dots"><span></span><span></span><span></span></div><div class="dash-url">app.wa-b.com / roi-estimate</div></div>
+      <div class="dash-body">
+        <div class="dash-row">
+          <div class="dash-stat"><div class="dash-stat-label">Recovered orders / mo</div><div class="dash-stat-val" id="outRecoveredOrders">—</div></div>
+          <div class="dash-stat"><div class="dash-stat-label">Recovered revenue</div><div class="dash-stat-val" id="outRecoveredRevenue">—</div></div>
+          <div class="dash-stat"><div class="dash-stat-label">Net value / mo</div><div class="dash-stat-val" id="outNet">—</div></div>
+        </div>
+
+        <div class="dash-table" style="font-size:14px">
+          <div class="dash-tr head" style="grid-template-columns:1fr 1.4fr 100px"><span>Line item</span><span>Formula</span><span style="text-align:right">Value</span></div>
+          <div class="dash-tr" style="grid-template-columns:1fr 1.4fr 100px">
+            <span>Gross monthly revenue</span>
+            <span class="mono" style="color:var(--muted)">orders &times; avg order value</span>
+            <span class="mono" id="outGross" style="text-align:right">—</span>
+          </div>
+          <div class="dash-tr" style="grid-template-columns:1fr 1.4fr 100px">
+            <span>Recovered orders</span>
+            <span class="mono" style="color:var(--muted)">orders &times; recovery %</span>
+            <span class="mono" id="outRecoveredOrders2" style="text-align:right">—</span>
+          </div>
+          <div class="dash-tr" style="grid-template-columns:1fr 1.4fr 100px">
+            <span>Recovered revenue</span>
+            <span class="mono" style="color:var(--muted)">recovered orders &times; AOV</span>
+            <span class="mono" id="outRecoveredRevenue2" style="text-align:right">—</span>
+          </div>
+          <div class="dash-tr" style="grid-template-columns:1fr 1.4fr 100px">
+            <span>Plan cost</span>
+            <span class="mono" style="color:var(--muted)" id="outPlanName">—</span>
+            <span class="mono" id="outPlanCost" style="text-align:right">—</span>
+          </div>
+          <div class="dash-tr" style="grid-template-columns:1fr 1.4fr 100px;border-bottom:none">
+            <span><b>Net value / month</b></span>
+            <span class="mono" style="color:var(--muted)">recovered revenue &minus; plan cost</span>
+            <span class="mono" id="outNet2" style="text-align:right;font-weight:600">—</span>
+          </div>
+        </div>
+
+        <div class="dash-stat" style="margin-top:14px">
+          <div class="dash-stat-label">Return on plan spend</div>
+          <div class="dash-stat-val" id="outRoi" style="font-size:26px">—</div>
+          <div class="dash-stat-delta" style="color:var(--muted)">recovered revenue &divide; plan cost</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<section class="section section--tight">
+  <div class="wrap" style="max-width:820px">
+    <div class="callout">
+      <b>How to read this.</b> "Recovered revenue" only counts the extra orders you estimate would not have happened without WhatsApp ordering and cart-recovery reminders — not your existing order volume, which you'd have anyway. Every number above updates live from the fields you enter; there's no hidden multiplier. Treat it as a way to reason about the math, not a forecast.
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="wrap">
+    <div class="cta-banner">
+      <div><h2 class="h-section">See it for real,<br/>not just estimated.</h2><p>14 days free. Connect your WhatsApp number and watch your own numbers move.</p></div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap"><a href="signup.html" class="btn btn-primary btn-lg">Start free trial <span class="arr">→</span></a><a href="pricing.html" class="btn btn-ghost btn-lg">Compare plans</a></div>
+    </div>
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <a href="index.html" class="brand"><img class="brand-logo brand-logo-light" src="assets/logo-light.jpg" alt="WA-B Solutions" /><img class="brand-logo brand-logo-dark" src="assets/logo-dark.jpg" alt="WA-B Solutions" /></a>
+        <p style="margin-top:14px;max-width:32ch;color:var(--muted);font-size:14px">
+          The automated WhatsApp B2P sales bot for Ghanaian SMEs. Built in Accra, made for Africa.
+        </p>
+      </div>
+      <div>
+        <h4>Product</h4>
+        <ul>
+          <li><a href="features.html">Features</a></li>
+          <li><a href="pricing.html">Pricing</a></li>
+          <li><a href="integrations.html">Integrations</a></li>
+          <li><a href="docs.html">Documentation</a></li>
+          <li><a href="guide-how-it-works.html">Guides</a></li>
+          <li><a href="changelog.html">Changelog</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Company</h4>
+        <ul>
+          <li><a href="about.html">About</a></li>
+          <li><a href="blog.html">Blog</a></li>
+          <li><a href="careers.html">Careers</a></li>
+          <li><a href="press.html">Press kit</a></li>
+          <li><a href="contact.html">Contact</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Legal</h4>
+        <ul>
+          <li><a href="privacy.html">Privacy policy</a></li>
+          <li><a href="terms.html">Terms of service</a></li>
+          <li><a href="data-processing.html">Data processing</a></li>
+          <li><a href="cookies.html">Cookies</a></li>
+          <li><a href="security.html">Security</a></li>
+          <li><a href="status.html">Status</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Contact</h4>
+        <ul>
+          <li>Osu, Accra &middot; GH</li>
+          <li><a href="contact.html">+233 30 000 0000</a></li>
+          <li><a href="mailto:hello@wa-b.com">hello@wa-b.com</a></li>
+          <li><a href="contact.html">WhatsApp us &rarr;</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>&copy; 2026 WA-B Solutions Ltd. All rights reserved.</span>
+      <span class="footer-tag">Built in Accra, Ghana</span>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function () {
+  var PLANS = {
+    kiosk:  { name: 'Kiosk',  price: 49,  cap: 500,      capLabel: '500 orders / month' },
+    shop:   { name: 'Shop',   price: 149, cap: 5000,     capLabel: '5,000 orders / month' },
+    market: { name: 'Market', price: 499, cap: Infinity, capLabel: 'unlimited orders' }
+  };
+
+  var els = {
+    orders: document.getElementById('roiOrders'),
+    aov: document.getElementById('roiAov'),
+    recovery: document.getElementById('roiRecovery'),
+    plan: document.getElementById('roiPlan')
+  };
+
+  function money(n) {
+    var v = Number(n) || 0;
+    return 'GH¢' + v.toLocaleString('en-GH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  function setText(id, val) {
+    var el = document.getElementById(id);
+    if (el) el.textContent = val;
+  }
+
+  function calc() {
+    var orders = Math.max(0, Number(els.orders.value) || 0);
+    var aov = Math.max(0, Number(els.aov.value) || 0);
+    var recoveryPct = Math.min(100, Math.max(0, Number(els.recovery.value) || 0));
+    var plan = PLANS[els.plan.value] || PLANS.shop;
+
+    var grossRevenue = orders * aov;
+    var recoveredOrders = orders * (recoveryPct / 100);
+    var recoveredRevenue = recoveredOrders * aov;
+    var netValue = recoveredRevenue - plan.price;
+    var roiMultiple = plan.price > 0 ? (recoveredRevenue / plan.price) : 0;
+
+    setText('outGross', money(grossRevenue));
+    setText('outRecoveredOrders', recoveredOrders.toLocaleString('en-GH', { maximumFractionDigits: 1 }));
+    setText('outRecoveredOrders2', recoveredOrders.toLocaleString('en-GH', { maximumFractionDigits: 1 }));
+    setText('outRecoveredRevenue', money(recoveredRevenue));
+    setText('outRecoveredRevenue2', money(recoveredRevenue));
+    setText('outPlanName', plan.name + ' plan');
+    setText('outPlanCost', money(plan.price));
+
+    var netEl = document.getElementById('outNet');
+    var net2El = document.getElementById('outNet2');
+    var netText = (netValue >= 0 ? '+' : '−') + money(Math.abs(netValue));
+    if (netEl) { netEl.textContent = netText; netEl.style.color = netValue >= 0 ? 'var(--accent-ink)' : 'var(--danger)'; }
+    if (net2El) { net2El.textContent = netText; net2El.style.color = netValue >= 0 ? 'var(--accent-ink)' : 'var(--danger)'; }
+
+    setText('outRoi', roiMultiple.toFixed(1) + '×');
+
+    var capNote = document.getElementById('capNote');
+    if (orders > plan.cap) {
+      capNote.style.display = '';
+      capNote.innerHTML = '<b>Heads up.</b> The ' + plan.name + ' plan covers ' + plan.capLabel + '. At ' + orders.toLocaleString('en-GH') + ' orders/month you would likely want a higher plan — see the full breakdown on <a href="pricing.html" style="color:var(--accent-ink);border-bottom:1px solid var(--line-2)">Pricing</a>.';
+    } else {
+      capNote.style.display = 'none';
+    }
+  }
+
+  ['input', 'change'].forEach(function (evt) {
+    [els.orders, els.aov, els.recovery, els.plan].forEach(function (el) {
+      el.addEventListener(evt, calc);
+    });
+  });
+
+  calc();
+})();
+</script>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="tweaks.jsx"></script>
+<script src="script.js"></script>
+</body>
+</html>

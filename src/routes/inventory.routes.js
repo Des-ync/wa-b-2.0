@@ -1,7 +1,7 @@
 const express = require('express');
 const logger = require('../utils/logger');
 const { query, transaction } = require('../config/database');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, requirePermission } = require('../middleware/auth');
 const { tenantBlocksBusinessId, resolveBusinessId } = require('../middleware/tenantAccess');
 const { recordAudit } = require('../utils/auditLog');
 
@@ -37,7 +37,7 @@ router.get('/suppliers', async (req, res) => {
 });
 
 /** POST /api/inventory/suppliers — { business_id?, name, contact_name?, contact_phone?, notes? } */
-router.post('/suppliers', async (req, res) => {
+router.post('/suppliers', requirePermission('products', 'write'), async (req, res) => {
   try {
     const businessId = resolveBusinessId(req);
     if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
@@ -66,7 +66,7 @@ router.post('/suppliers', async (req, res) => {
 });
 
 /** PATCH /api/inventory/suppliers/:id */
-router.patch('/suppliers/:id', async (req, res) => {
+router.patch('/suppliers/:id', requirePermission('products', 'write'), async (req, res) => {
   try {
     const existing = await query('SELECT business_id FROM suppliers WHERE id = $1', [req.params.id]);
     const supplier = existing.rows[0];
@@ -106,7 +106,7 @@ router.patch('/suppliers/:id', async (req, res) => {
  * vendor record itself, not their purchase history in stock_movements
  * (which also SET NULLs — the audit trail keeps the row, loses the label).
  */
-router.delete('/suppliers/:id', async (req, res) => {
+router.delete('/suppliers/:id', requirePermission('products', 'write'), async (req, res) => {
   try {
     const existing = await query('SELECT business_id FROM suppliers WHERE id = $1', [req.params.id]);
     const supplier = existing.rows[0];
@@ -134,7 +134,7 @@ router.delete('/suppliers/:id', async (req, res) => {
  * always writes a stock_movements row — this is the "purchase stock intake"
  * feature: a merchant restocking is an auditable event, not a silent number bump.
  */
-router.post('/restock', async (req, res) => {
+router.post('/restock', requirePermission('products', 'write'), async (req, res) => {
   try {
     const businessId = resolveBusinessId(req);
     if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
@@ -216,7 +216,7 @@ router.post('/restock', async (req, res) => {
  * product_id, new_quantity (>=0), note? }. Sets stock_qty to an exact value
  * rather than a delta — matches how a merchant actually counts a shelf.
  */
-router.post('/adjust', async (req, res) => {
+router.post('/adjust', requirePermission('products', 'write'), async (req, res) => {
   try {
     const businessId = resolveBusinessId(req);
     if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });

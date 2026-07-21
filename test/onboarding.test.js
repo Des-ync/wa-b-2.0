@@ -16,11 +16,21 @@ function baseBusiness(overrides = {}) {
 }
 
 test('computeOnboardingSteps reports all steps complete for a fully set up business', () => {
-  const result = computeOnboardingSteps(baseBusiness(), 3);
+  const result = computeOnboardingSteps(baseBusiness(), 3, 1);
   assert.equal(result.all_complete, true);
-  assert.equal(result.completed_count, 5);
+  assert.equal(result.completed_count, 6);
   assert.equal(result.percent, 100);
   assert.ok(result.steps.every(s => s.complete));
+});
+
+test('computeOnboardingSteps: inviting staff is optional and never blocks all_complete', () => {
+  const result = computeOnboardingSteps(baseBusiness(), 3, 0);
+  assert.equal(result.all_complete, true, 'all required steps are done, staff invite is optional');
+  const step = result.steps.find(s => s.key === 'invite_staff');
+  assert.equal(step.complete, false);
+  assert.equal(step.optional, true);
+  assert.equal(result.completed_count, 5);
+  assert.equal(result.total_count, 6);
 });
 
 test('computeOnboardingSteps flags missing WhatsApp number', () => {
@@ -58,5 +68,6 @@ test('computeOnboardingSteps flags an unset test message', () => {
 test('computeOnboardingSteps percent rounds to nearest whole number', () => {
   const result = computeOnboardingSteps(baseBusiness({ onboarding_test_message_sent_at: null }), 3);
   assert.equal(result.completed_count, 4);
-  assert.equal(result.percent, 80);
+  assert.equal(result.total_count, 6);
+  assert.equal(result.percent, 67);
 });

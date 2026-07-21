@@ -1,7 +1,7 @@
 const express = require('express');
 const logger = require('../utils/logger');
 const { query } = require('../config/database');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, requirePermission } = require('../middleware/auth');
 const { tenantBlocksBusinessId } = require('../middleware/tenantAccess');
 const { toCsv, parseCsv } = require('../utils/csv');
 const orderService = require('../services/order.service');
@@ -166,7 +166,7 @@ router.get('/', async (req, res) => {
  * category?, in_stock?, image_url?, stock_qty?, low_stock_threshold?, featured?,
  * hidden?, sort_order?, available_from?, available_to? }
  */
-router.post('/', async (req, res) => {
+router.post('/', requirePermission('products', 'write'), async (req, res) => {
   try {
     const businessId = req.body?.business_id || req.auth?.businessId;
     if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
@@ -198,7 +198,7 @@ router.post('/', async (req, res) => {
 });
 
 /** PATCH /api/products/:id — update any subset of fields. */
-router.patch('/:id', async (req, res) => {
+router.patch('/:id', requirePermission('products', 'write'), async (req, res) => {
   try {
     const existing = await query('SELECT * FROM products WHERE id = $1', [req.params.id]);
     const product = existing.rows[0];
@@ -231,7 +231,7 @@ router.patch('/:id', async (req, res) => {
 });
 
 /** DELETE /api/products/:id — remove a product (order history keeps its own snapshot). */
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requirePermission('products', 'write'), async (req, res) => {
   try {
     const existing = await query('SELECT * FROM products WHERE id = $1', [req.params.id]);
     const product = existing.rows[0];
@@ -290,7 +290,7 @@ router.get('/:id/variants', async (req, res) => {
 });
 
 /** POST /api/products/:id/variants — { name, price_delta_ghs?, stock_qty?, sort_order? } */
-router.post('/:id/variants', async (req, res) => {
+router.post('/:id/variants', requirePermission('products', 'write'), async (req, res) => {
   try {
     const productRes = await query('SELECT id, business_id FROM products WHERE id = $1', [req.params.id]);
     const product = productRes.rows[0];
@@ -314,7 +314,7 @@ router.post('/:id/variants', async (req, res) => {
 });
 
 /** PATCH /api/products/variants/:variantId */
-router.patch('/variants/:variantId', async (req, res) => {
+router.patch('/variants/:variantId', requirePermission('products', 'write'), async (req, res) => {
   try {
     const existing = await query('SELECT * FROM product_variants WHERE id = $1', [req.params.variantId]);
     const variant = existing.rows[0];
@@ -341,7 +341,7 @@ router.patch('/variants/:variantId', async (req, res) => {
 });
 
 /** DELETE /api/products/variants/:variantId */
-router.delete('/variants/:variantId', async (req, res) => {
+router.delete('/variants/:variantId', requirePermission('products', 'write'), async (req, res) => {
   try {
     const existing = await query('SELECT * FROM product_variants WHERE id = $1', [req.params.variantId]);
     const variant = existing.rows[0];
@@ -380,7 +380,7 @@ router.get('/:id/addons', async (req, res) => {
 });
 
 /** POST /api/products/:id/addons — { name, price_ghs, sort_order? } */
-router.post('/:id/addons', async (req, res) => {
+router.post('/:id/addons', requirePermission('products', 'write'), async (req, res) => {
   try {
     const productRes = await query('SELECT id, business_id FROM products WHERE id = $1', [req.params.id]);
     const product = productRes.rows[0];
@@ -404,7 +404,7 @@ router.post('/:id/addons', async (req, res) => {
 });
 
 /** PATCH /api/products/addons/:addonId */
-router.patch('/addons/:addonId', async (req, res) => {
+router.patch('/addons/:addonId', requirePermission('products', 'write'), async (req, res) => {
   try {
     const existing = await query('SELECT * FROM product_addons WHERE id = $1', [req.params.addonId]);
     const addon = existing.rows[0];
@@ -431,7 +431,7 @@ router.patch('/addons/:addonId', async (req, res) => {
 });
 
 /** DELETE /api/products/addons/:addonId */
-router.delete('/addons/:addonId', async (req, res) => {
+router.delete('/addons/:addonId', requirePermission('products', 'write'), async (req, res) => {
   try {
     const existing = await query('SELECT * FROM product_addons WHERE id = $1', [req.params.addonId]);
     const addon = existing.rows[0];
@@ -483,7 +483,7 @@ router.get('/export', async (req, res) => {
  * business) are updated in place; all other rows are inserted. Malformed
  * rows are skipped and reported back rather than aborting the whole import.
  */
-router.post('/import', async (req, res) => {
+router.post('/import', requirePermission('products', 'write'), async (req, res) => {
   try {
     const businessId = req.body?.business_id || req.auth?.businessId;
     if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
@@ -573,6 +573,185 @@ router.post('/import', async (req, res) => {
     res.json({ success: true, created, updated, skipped_count: skipped.length, skipped });
   } catch (err) {
     logger.error('POST /products/import failed: %s', err.message);
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+/* ============================== Bundles ================================= */
+// Fixed-price groupings of existing products ("Lunch combo: Jollof + drink").
+// Sold on the storefront and reorderable in WhatsApp as ONE line item priced
+// at the bundle's own price_ghs — components are display-only metadata, not
+// separately inventory-tracked (see migrate.js note on product_bundles).
+
+function validateBundleBody(body, { partial = false } = {}) {
+  const errors = [];
+  const out = {};
+  if (!partial || body.name !== undefined) {
+    const name = String(body.name || '').trim();
+    if (!name || name.length > 200) errors.push('name is required (max 200 chars)');
+    out.name = name;
+  }
+  if (!partial || body.price_ghs !== undefined) {
+    const price = Number(body.price_ghs);
+    if (!Number.isFinite(price) || price < 0) errors.push('price_ghs must be a non-negative number');
+    out.price_ghs = Math.round(price * 100) / 100;
+  }
+  if (body.description !== undefined) {
+    out.description = body.description == null ? null : String(body.description).slice(0, 1000);
+  }
+  if (body.image_url !== undefined) {
+    out.image_url = body.image_url == null ? null : String(body.image_url).slice(0, 500);
+  }
+  if (body.active !== undefined) out.active = !!body.active;
+  if (body.sort_order !== undefined) {
+    const n = Number(body.sort_order);
+    if (!Number.isInteger(n)) errors.push('sort_order must be an integer');
+    out.sort_order = n;
+  }
+  if (body.items !== undefined) {
+    if (!Array.isArray(body.items) || !body.items.length) {
+      errors.push('items must be a non-empty array of { product_id, quantity? }');
+    } else if (body.items.some(it => !it || !it.product_id)) {
+      errors.push('every item needs a product_id');
+    } else {
+      out.items = body.items.map(it => ({
+        product_id: it.product_id,
+        quantity: Number.isInteger(Number(it.quantity)) && Number(it.quantity) > 0 ? Number(it.quantity) : 1
+      }));
+    }
+  }
+  return { errors, out };
+}
+
+async function loadBundle(id) {
+  const bundleRes = await query('SELECT * FROM product_bundles WHERE id = $1', [id]);
+  const bundle = bundleRes.rows[0];
+  if (!bundle) return null;
+  const itemsRes = await query(
+    `SELECT bi.product_id, bi.quantity, p.name, p.price_ghs, p.image_url
+       FROM product_bundle_items bi JOIN products p ON p.id = bi.product_id
+      WHERE bi.bundle_id = $1
+      ORDER BY p.name ASC`,
+    [id]
+  );
+  return { ...bundle, items: itemsRes.rows };
+}
+
+async function replaceBundleItems(bundleId, businessId, items) {
+  const ownedRes = await query('SELECT id FROM products WHERE business_id = $1', [businessId]);
+  const owned = new Set(ownedRes.rows.map(r => r.id));
+  for (const it of items) {
+    if (!owned.has(it.product_id)) throw Object.assign(new Error('One or more products do not belong to this business'), { status: 400 });
+  }
+  await query('DELETE FROM product_bundle_items WHERE bundle_id = $1', [bundleId]);
+  for (const it of items) {
+    await query(
+      'INSERT INTO product_bundle_items (bundle_id, product_id, quantity) VALUES ($1,$2,$3)',
+      [bundleId, it.product_id, it.quantity]
+    );
+  }
+}
+
+/** GET /api/products/bundles?business_id= */
+router.get('/bundles', async (req, res) => {
+  try {
+    const businessId = req.query.business_id || req.auth?.businessId;
+    if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (tenantBlocksBusinessId(req, businessId)) {
+      return res.status(403).json({ success: false, error: 'Key does not match business' });
+    }
+    const bundlesRes = await query(
+      'SELECT * FROM product_bundles WHERE business_id = $1 ORDER BY sort_order ASC, name ASC',
+      [businessId]
+    );
+    const itemsRes = await query(
+      `SELECT bi.bundle_id, bi.product_id, bi.quantity, p.name, p.price_ghs
+         FROM product_bundle_items bi JOIN products p ON p.id = bi.product_id
+        WHERE bi.bundle_id = ANY($1::uuid[])`,
+      [bundlesRes.rows.map(b => b.id)]
+    );
+    const byBundle = new Map();
+    for (const it of itemsRes.rows) {
+      if (!byBundle.has(it.bundle_id)) byBundle.set(it.bundle_id, []);
+      byBundle.get(it.bundle_id).push(it);
+    }
+    const bundles = bundlesRes.rows.map(b => ({ ...b, items: byBundle.get(b.id) || [] }));
+    res.json({ success: true, bundles });
+  } catch (err) {
+    logger.error('GET /products/bundles failed: %s', err.message);
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+/** POST /api/products/bundles — { business_id?, name, price_ghs, description?, image_url?, items: [{product_id, quantity?}] } */
+router.post('/bundles', requirePermission('products', 'write'), async (req, res) => {
+  try {
+    const businessId = req.body?.business_id || req.auth?.businessId;
+    if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (tenantBlocksBusinessId(req, businessId)) {
+      return res.status(403).json({ success: false, error: 'Key does not match business' });
+    }
+    const { errors, out } = validateBundleBody(req.body || {});
+    if (!out.items) errors.push('items is required');
+    if (errors.length) return res.status(400).json({ success: false, error: errors.join('; ') });
+
+    const inserted = await query(
+      `INSERT INTO product_bundles (business_id, name, description, price_ghs, image_url, active, sort_order)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [businessId, out.name, out.description ?? null, out.price_ghs, out.image_url ?? null, out.active ?? true, out.sort_order ?? 0]
+    );
+    const bundle = inserted.rows[0];
+    await replaceBundleItems(bundle.id, businessId, out.items);
+    res.status(201).json({ success: true, bundle: await loadBundle(bundle.id) });
+  } catch (err) {
+    logger.error('POST /products/bundles failed: %s', err.message);
+    res.status(err.status || 500).json({ success: false, error: err.status ? err.message : 'Internal server error' });
+  }
+});
+
+/** PATCH /api/products/bundles/:id */
+router.patch('/bundles/:id', requirePermission('products', 'write'), async (req, res) => {
+  try {
+    const existing = await query('SELECT * FROM product_bundles WHERE id = $1', [req.params.id]);
+    const bundle = existing.rows[0];
+    if (!bundle) return res.status(404).json({ success: false, error: 'Bundle not found' });
+    if (tenantBlocksBusinessId(req, bundle.business_id)) {
+      return res.status(403).json({ success: false, error: 'Key does not match business' });
+    }
+    const { errors, out } = validateBundleBody(req.body || {}, { partial: true });
+    if (errors.length) return res.status(400).json({ success: false, error: errors.join('; ') });
+
+    const { items, ...columns } = out;
+    if (Object.keys(columns).length) {
+      const sets = [];
+      const params = [bundle.id];
+      for (const [col, val] of Object.entries(columns)) {
+        params.push(val);
+        sets.push(`${col} = $${params.length}`);
+      }
+      await query(`UPDATE product_bundles SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $1`, params);
+    }
+    if (items) await replaceBundleItems(bundle.id, bundle.business_id, items);
+    res.json({ success: true, bundle: await loadBundle(bundle.id) });
+  } catch (err) {
+    logger.error('PATCH /products/bundles/:id failed: %s', err.message);
+    res.status(err.status || 500).json({ success: false, error: err.status ? err.message : 'Internal server error' });
+  }
+});
+
+/** DELETE /api/products/bundles/:id */
+router.delete('/bundles/:id', requirePermission('products', 'write'), async (req, res) => {
+  try {
+    const existing = await query('SELECT * FROM product_bundles WHERE id = $1', [req.params.id]);
+    const bundle = existing.rows[0];
+    if (!bundle) return res.status(404).json({ success: false, error: 'Bundle not found' });
+    if (tenantBlocksBusinessId(req, bundle.business_id)) {
+      return res.status(403).json({ success: false, error: 'Key does not match business' });
+    }
+    await query('DELETE FROM product_bundles WHERE id = $1', [req.params.id]);
+    res.json({ success: true });
+  } catch (err) {
+    logger.error('DELETE /products/bundles/:id failed: %s', err.message);
     res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });

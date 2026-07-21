@@ -1,7 +1,7 @@
 const express = require('express');
 const logger = require('../utils/logger');
 const { query, transaction } = require('../config/database');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, requirePermission } = require('../middleware/auth');
 const { tenantBlocksBusinessId } = require('../middleware/tenantAccess');
 const { buildAudienceClauses, describeAudience } = require('../utils/audience');
 
@@ -46,7 +46,7 @@ router.get('/', async (req, res) => {
  * rate-limited cron drain, not here, so a merchant blasting 5,000 customers
  * never ties up this request or blows through Meta's per-second send limits.
  */
-router.post('/', async (req, res) => {
+router.post('/', requirePermission('broadcasts', 'write'), async (req, res) => {
   try {
     const { business_id, audience } = req.body || {};
     const body = String(req.body?.body || '').trim();

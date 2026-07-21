@@ -1108,6 +1108,15 @@ async function customerOrderStatus({ business, customer, orderNumber }) {
       status: statusKey ? t(lang, statusKey) : order.status
     }),
     { businessId: business.id, customerId: customer.id });
+
+  // Unpaid orders (guest storefront checkouts land here, but so does any
+  // WhatsApp order abandoned before payment) get the same pay-now buttons
+  // retryOrderPayment already offers from the "retry payment" button — this
+  // is what lets a storefront guest checkout's wa.me link, once tapped and
+  // sent, drop the shopper straight into payment on this order.
+  if (['unpaid', 'pending', 'failed'].includes(order.payment_status) && order.status !== 'cancelled') {
+    await retryOrderPayment({ business, customer, orderId: order.id });
+  }
 }
 
 /**

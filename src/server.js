@@ -1,5 +1,6 @@
 require('dotenv').config();
 const path = require('path');
+const fs = require('fs');
 const express = require('express');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
@@ -13,6 +14,7 @@ const cartNudge = require('./services/cart.nudge');
 const broadcastSender = require('./services/broadcast.sender');
 const { alertOps } = require('./services/alert.service');
 const dbBackup = require('./jobs/db.backup');
+const dailySummary = require('./jobs/daily.summary');
 const { requireAuth } = require('./middleware/auth');
 const { latencyMiddleware } = require('./middleware/latency');
 const { requestIdMiddleware } = require('./middleware/requestId');
@@ -115,6 +117,75 @@ app.use(
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(latencyMiddleware);
+
+/* -------------------------------------------------------------------------
+   Storefront OG/SEO server-render — mounted BEFORE the static middleware so
+   a request for storefront.html?shop=<slug> gets real <title>/og:* tags in
+   the initial HTML response (link-preview crawlers on WhatsApp/Facebook/
+   Twitter never execute the page's client-side fetch). Any other request
+   for this path (no ?shop, unknown shop) falls through to the static file
+   unchanged via next(). The template is read once and cached — only the
+   per-shop meta values are interpolated per request.
+   ------------------------------------------------------------------------- */
+const STOREFRONT_TEMPLATE_PATH = path.join(__dirname, '..', 'public', 'storefront.html');
+let storefrontTemplateCache = null;
+function loadStorefrontTemplate() {
+  if (!storefrontTemplateCache) {
+    storefrontTemplateCache = fs.readFileSync(STOREFRONT_TEMPLATE_PATH, 'utf8');
+  }
+  return storefrontTemplateCache;
+}
+function escapeHtmlAttr(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
+}
+
+app.get('/wa-b/storefront.html', async (req, res, next) => {
+  const slug = String(req.query.shop || '').toLowerCase();
+  if (!slug) return next();
+  try {
+    const bizRes = await query(
+      `SELECT name, welcome_message, logo_url, banner_url, status, closed_at
+         FROM businesses WHERE slug = $1`,
+      [slug]
+    );
+    const business = bizRes.rows[0];
+    if (!business || business.closed_at || ['suspended', 'cancelled'].includes(business.status)) {
+      return next();
+    }
+
+    const base = (process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '');
+    const pageUrl = `${base}/wa-b/storefront.html?shop=${encodeURIComponent(slug)}`;
+    const title = escapeHtmlAttr(`${business.name} · WA-B Solutions`);
+    const description = escapeHtmlAttr(
+      (business.welcome_message || `Browse ${business.name}'s catalog and order on WhatsApp.`).slice(0, 200)
+    );
+    const image = escapeHtmlAttr(business.banner_url || business.logo_url || `${base}/wa-b/assets/logo-light.jpg`);
+    const ogTags = [
+      '<meta property="og:type" content="website" />',
+      `<meta property="og:title" content="${title}" />`,
+      `<meta property="og:description" content="${description}" />`,
+      `<meta property="og:url" content="${escapeHtmlAttr(pageUrl)}" />`,
+      `<meta property="og:image" content="${image}" />`,
+      '<meta name="twitter:card" content="summary_large_image" />',
+      `<meta name="twitter:title" content="${title}" />`,
+      `<meta name="twitter:description" content="${description}" />`,
+      `<meta name="twitter:image" content="${image}" />`
+    ].join('\n');
+
+    const html = loadStorefrontTemplate()
+      .replace(/<title>[\s\S]*?<\/title>/, `<title>${title}</title>`)
+      .replace(/<meta name="description"[^>]*\/>/, `<meta name="description" content="${description}" />`)
+      .replace('<!--OG:TAGS-->', ogTags);
+
+    res.set('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch (err) {
+    logger.error('Storefront SSR failed for slug=%s: %s', slug, err.message);
+    next();
+  }
+});
 
 // Marketing site (public/) — mounted at /wa-b so this app can live alongside
 // other projects on the same domain instead of owning the domain root.
@@ -308,7 +379,15 @@ function startCronJobs() {
     );
   }, { timezone: 'Africa/Accra' });
 
-  logger.info('Cron jobs scheduled (Africa/Accra) — 08:00 renewals, 09:00 reminders, 10:00 suspensions, 5-min payment sweeper, 15-min cart nudges, 1-min broadcast drain, 03:15 db backup, weekly prune.');
+  // End-of-day merchant summary (20:30 Africa/Accra) — orders, revenue, top
+  // product, low stock, failed payments, via WhatsApp + mobile push.
+  cron.schedule('30 20 * * *', () => {
+    dailySummary.runDailySummaryJob().catch(err =>
+      logger.error('dailySummaryJob crashed: %s', err.message, { stack: err.stack })
+    );
+  }, { timezone: 'Africa/Accra' });
+
+  logger.info('Cron jobs scheduled (Africa/Accra) — 08:00 renewals, 09:00 reminders, 10:00 suspensions, 5-min payment sweeper, 15-min cart nudges, 1-min broadcast drain, 20:30 daily summary, 03:15 db backup, weekly prune.');
 }
 
 /* -------------------------------------------------------------------------

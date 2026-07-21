@@ -1,10 +1,18 @@
+import 'dart:async';
+
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../api/client.dart';
+import '../services/offline_cache.dart';
+import '../services/offline_queue.dart';
 import '../state/session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import '../widgets/product_quick_edit.dart';
+import '../widgets/voice_update_button.dart';
+import 'barcode_scanner.dart';
 
 class ProductsScreen extends StatefulWidget {
   const ProductsScreen({super.key});
@@ -15,12 +23,53 @@ class ProductsScreen extends StatefulWidget {
 
 class _ProductsScreenState extends State<ProductsScreen> {
   int _reloadKey = 0;
+  bool _offline = false;
+  List<Map<String, dynamic>> _products = [];
+  StreamSubscription<List<ConnectivityResult>>? _connSub;
+
+  @override
+  void initState() {
+    super.initState();
+    // Pick up anything queued from a previous offline session as soon as
+    // we're back, and keep watching for reconnects while this screen lives.
+    _tryFlush();
+    _connSub = Connectivity().onConnectivityChanged.listen((results) {
+      if (results.any((r) => r != ConnectivityResult.none)) _tryFlush();
+    });
+  }
+
+  @override
+  void dispose() {
+    _connSub?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _tryFlush() async {
+    if (!mounted) return;
+    final session = context.read<Session>();
+    await OfflineQueue.flush(session.api);
+    if (mounted) setState(() => _reloadKey++);
+  }
 
   Future<List<Map<String, dynamic>>> _load() async {
     final session = context.read<Session>();
-    final res = await session.api
-        .get('/api/products', query: {'business_id': session.businessId});
-    return ((res['products'] as List?) ?? []).cast<Map<String, dynamic>>();
+    try {
+      final res = await session.api
+          .get('/api/products', query: {'business_id': session.businessId});
+      final products = ((res['products'] as List?) ?? []).cast<Map<String, dynamic>>();
+      unawaited(OfflineCache.saveProducts(products));
+      _products = products;
+      if (mounted) setState(() => _offline = false);
+      return products;
+    } catch (e) {
+      final cached = await OfflineCache.loadProducts();
+      if (cached != null) {
+        _products = cached;
+        if (mounted) setState(() => _offline = true);
+        return cached;
+      }
+      rethrow;
+    }
   }
 
   Future<void> _editSheet([Map<String, dynamic>? product]) async {
@@ -35,10 +84,66 @@ class _ProductsScreenState extends State<ProductsScreen> {
     if (changed == true) setState(() => _reloadKey++);
   }
 
+  Future<void> _quickEdit(Map<String, dynamic> product) async {
+    final changed = await showProductQuickEdit(context, product);
+    if (changed == true) setState(() => _reloadKey++);
+  }
+
+  Future<void> _toggleStock(Map<String, dynamic> product) async {
+    final id = '${product['id']}';
+    final newValue = !(product['in_stock'] == true);
+    final body = {'in_stock': newValue};
+    final session = context.read<Session>();
+    try {
+      await session.api.patch('/api/products/$id', body: body);
+      await OfflineCache.patchCachedProduct(id, body);
+      if (mounted) setState(() => _reloadKey++);
+    } on ApiException catch (e) {
+      if (e.status == 0) {
+        await OfflineQueue.enqueue(QueuedAction(
+          id: 'product-stock-$id-${DateTime.now().microsecondsSinceEpoch}',
+          method: 'PATCH',
+          path: '/api/products/$id',
+          body: body,
+          description:
+              'Mark "${product['name']}" ${newValue ? 'in stock' : 'out of stock'}',
+        ));
+        await OfflineCache.patchCachedProduct(id, body);
+        if (mounted) {
+          setState(() => _reloadKey++);
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('Offline — queued, will sync when back online')));
+        }
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(e.message), backgroundColor: WabColors.danger));
+      }
+    }
+  }
+
+  Future<void> _openScanner() async {
+    await Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => BarcodeScannerScreen(products: _products)));
+    if (mounted) setState(() => _reloadKey++);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Products')),
+      appBar: AppBar(
+        title: const Text('Products'),
+        actions: [
+          VoiceUpdateButton(
+            productsProvider: () => _products,
+            onUpdated: () => setState(() => _reloadKey++),
+          ),
+          IconButton(
+            tooltip: 'Scan barcode / QR',
+            onPressed: _openScanner,
+            icon: const Icon(Icons.qr_code_scanner_rounded),
+          ),
+        ],
+      ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => _editSheet(),
         backgroundColor: WabColors.accent,
@@ -46,40 +151,52 @@ class _ProductsScreenState extends State<ProductsScreen> {
         icon: const Icon(Icons.add_rounded),
         label: const Text('Add product'),
       ),
-      body: AsyncList<Map<String, dynamic>>(
-        key: ValueKey(_reloadKey),
-        load: _load,
-        emptyTitle: 'No products yet',
-        emptySubtitle: 'Add products so customers can browse and order them on WhatsApp.',
-        emptyIcon: Icons.inventory_2_rounded,
-        itemBuilder: (ctx, p) {
-          final inStock = p['in_stock'] == true;
-          final qty = p['stock_qty'];
-          return Card(
-            child: ListTile(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-              title: Text('${p['name']}',
-                  style: const TextStyle(fontWeight: FontWeight.w700)),
-              subtitle: Text(
-                  [
-                    '${p['category'] ?? 'general'}',
-                    if (qty != null) '$qty in stock',
-                  ].join(' · '),
-                  style: const TextStyle(color: WabColors.muted)),
-              trailing: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(ghs(p['price_ghs']),
-                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
-                  const SizedBox(height: 4),
-                  StatusChip(inStock ? 'active' : 'out of stock'),
-                ],
-              ),
-              onTap: () => _editSheet(p),
+      body: Column(
+        children: [
+          if (_offline) const OfflineBanner(),
+          Expanded(
+            child: AsyncList<Map<String, dynamic>>(
+              key: ValueKey(_reloadKey),
+              load: _load,
+              emptyTitle: 'No products yet',
+              emptySubtitle: 'Add products so customers can browse and order them on WhatsApp.',
+              emptyIcon: Icons.inventory_2_rounded,
+              itemBuilder: (ctx, p) {
+                final inStock = p['in_stock'] == true;
+                final qty = p['stock_qty'];
+                return Card(
+                  child: ListTile(
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    title: Text('${p['name']}',
+                        style: const TextStyle(fontWeight: FontWeight.w700)),
+                    subtitle: Text(
+                        [
+                          '${p['category'] ?? 'general'}',
+                          if (qty != null) '$qty in stock',
+                        ].join(' · '),
+                        style: const TextStyle(color: WabColors.muted)),
+                    trailing: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(ghs(p['price_ghs']),
+                            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                        const SizedBox(height: 4),
+                        GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () => _toggleStock(p),
+                          child: StatusChip(inStock ? 'active' : 'out of stock'),
+                        ),
+                      ],
+                    ),
+                    onTap: () => _editSheet(p),
+                    onLongPress: () => _quickEdit(p),
+                  ),
+                );
+              },
             ),
-          );
-        },
+          ),
+        ],
       ),
     );
   }

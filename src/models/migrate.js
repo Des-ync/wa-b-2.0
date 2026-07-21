@@ -842,6 +842,101 @@ ALTER TABLE webhook_events ADD CONSTRAINT webhook_events_source_check
   CHECK (source IN ('whatsapp','paystack','hubtel','pawapay','instagram','messenger'));
 
 -- =========================================================================
+-- Storefront branding + product bundles. logo_url/banner_url power the
+-- shareable storefront landing page (OG image + header); bundles are a
+-- fixed-price grouping of existing products ("Lunch combo: Jollof + drink"),
+-- sold as ONE line item on checkout (bundle name/price), not exploded into
+-- per-component inventory tracking — components stay display-only metadata.
+-- =========================================================================
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS logo_url TEXT;
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS banner_url TEXT;
+
+CREATE TABLE IF NOT EXISTS product_bundles (
+  id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  business_id  UUID NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  name         TEXT NOT NULL,
+  description  TEXT,
+  price_ghs    NUMERIC(10,2) NOT NULL CHECK (price_ghs >= 0),
+  image_url    TEXT,
+  active       BOOLEAN NOT NULL DEFAULT TRUE,
+  sort_order   INT NOT NULL DEFAULT 0,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_product_bundles_business ON product_bundles(business_id);
+
+CREATE TABLE IF NOT EXISTS product_bundle_items (
+  id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  bundle_id   UUID NOT NULL REFERENCES product_bundles(id) ON DELETE CASCADE,
+  product_id  UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  quantity    INT NOT NULL DEFAULT 1 CHECK (quantity > 0),
+  UNIQUE (bundle_id, product_id)
+);
+CREATE INDEX IF NOT EXISTS idx_bundle_items_bundle ON product_bundle_items(bundle_id);
+
+-- =========================================================================
+-- orders.channel: where the order originated. Distinct from customers.channel
+-- (a customer's PRIMARY identity channel) because one WhatsApp-identified
+-- customer can also check out as a guest on the public storefront — this is
+-- what "channel performance" analytics groups by, and what lets a storefront
+-- guest checkout hand off into the SAME WhatsApp conversation/customer record
+-- (see storefront guest checkout: it resolves the customer via the normal
+-- WhatsApp getOrCreateCustomer path, then tags just the order 'storefront').
+-- =========================================================================
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS channel TEXT NOT NULL DEFAULT 'whatsapp'
+  CHECK (channel IN ('whatsapp','instagram','messenger','storefront'));
+CREATE INDEX IF NOT EXISTS idx_orders_channel ON orders(business_id, channel);
+
+-- =========================================================================
+-- Customer consent records: when/how a customer first consented to be
+-- messaged (Ghana Data Protection Act) — separate from opted_out (the
+-- REVOCATION event). Backfilled from created_at for existing rows: every
+-- existing customer reached us by messaging first, which is itself the
+-- consenting act on that channel.
+-- =========================================================================
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS consent_at TIMESTAMPTZ;
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS consent_source TEXT
+  CHECK (consent_source IS NULL OR consent_source IN
+    ('whatsapp_first_message','instagram_first_message','messenger_first_message',
+     'storefront_checkout','dashboard_manual_add'));
+UPDATE customers SET
+  consent_at = COALESCE(consent_at, created_at),
+  consent_source = COALESCE(consent_source, channel || '_first_message')
+WHERE consent_at IS NULL;
+
+-- =========================================================================
+-- Account closure (self-serve, with retention warning shown before confirm —
+-- see business.routes.js POST /close). This is a STATUS transition, not a
+-- data-destroying delete: orders/customers/messages are retained for the
+-- legal/accounting record exactly as an 'cancelled' business today, closed_at
+-- just marks it as merchant-initiated rather than an ops suspension.
+-- =========================================================================
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ;
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS closure_reason TEXT;
+
+-- =========================================================================
+-- impersonation_sessions: time-boxed, read-only admin support-mode access to
+-- a merchant's dashboard. Modeled on api_keys (hashed token, shown once) but
+-- deliberately separate — an impersonation token is NEVER merchant-issuable
+-- (VALID_ROLES in middleware/auth.js excludes 'readonly'), always expires
+-- fast, and every issuance/use is written to audit_log for a full trail of
+-- which admin looked at which shop's data and why.
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS impersonation_sessions (
+  id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  business_id   UUID NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  admin_key_id  UUID REFERENCES api_keys(id) ON DELETE SET NULL,
+  reason        TEXT NOT NULL,
+  token_hash    TEXT NOT NULL UNIQUE,
+  expires_at    TIMESTAMPTZ NOT NULL,
+  revoked_at    TIMESTAMPTZ,
+  last_used_at  TIMESTAMPTZ,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_impersonation_business ON impersonation_sessions(business_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_impersonation_active ON impersonation_sessions(token_hash) WHERE revoked_at IS NULL;
+
+-- =========================================================================
 -- updated_at trigger
 -- =========================================================================
 CREATE OR REPLACE FUNCTION set_updated_at()

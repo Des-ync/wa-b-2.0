@@ -114,6 +114,48 @@ async function rotateKey(oldKeyId) {
   return fresh;
 }
 
+/**
+ * Admin support-mode impersonation: a time-boxed, read-only token that lets
+ * an admin view (never edit) a merchant's dashboard, with a mandatory reason
+ * and a full audit trail. Modeled on issueKey/lookupKey but deliberately
+ * separate — 'sk_imp_' tokens are NEVER accepted as a merchant-issuable role
+ * (see VALID_ROLES / POST /api/keys, which validates against that list, not
+ * this one), and always resolve to the 'readonly' capability set
+ * (utils/permissions.js), no matter what role string is stored anywhere else.
+ */
+async function issueImpersonationToken({ businessId, adminKeyId, reason, ttlMinutes = 30 }) {
+  if (!businessId) throw new Error('businessId is required');
+  if (!reason || !String(reason).trim()) throw new Error('reason is required');
+  const { plaintext, hash } = generateKey('sk_imp');
+  const res = await query(
+    `INSERT INTO impersonation_sessions (business_id, admin_key_id, reason, token_hash, expires_at)
+     VALUES ($1,$2,$3,$4, NOW() + ($5 || ' minutes')::interval)
+     RETURNING id, business_id, expires_at, created_at`,
+    [businessId, adminKeyId || null, String(reason).trim().slice(0, 500), hash, String(ttlMinutes)]
+  );
+  return { ...res.rows[0], plaintext };
+}
+
+async function lookupImpersonationToken(plaintext) {
+  const hash = hashKey(plaintext);
+  const res = await query(
+    `SELECT id, business_id, expires_at, revoked_at FROM impersonation_sessions WHERE token_hash = $1`,
+    [hash]
+  );
+  const row = res.rows[0];
+  if (!row || row.revoked_at || new Date(row.expires_at) < new Date()) return null;
+  query('UPDATE impersonation_sessions SET last_used_at = NOW() WHERE id = $1', [row.id]).catch(() => {});
+  return row;
+}
+
+async function revokeImpersonationToken(id) {
+  const res = await query(
+    `UPDATE impersonation_sessions SET revoked_at = NOW() WHERE id = $1 AND revoked_at IS NULL RETURNING id`,
+    [id]
+  );
+  return res.rowCount > 0;
+}
+
 function extractKey(req) {
   const h = req.headers['authorization'] || '';
   if (h.toLowerCase().startsWith('bearer ')) return h.slice(7).trim();
@@ -167,6 +209,28 @@ function requireAuth(requiredScope = 'any') {
       const plaintext = extractKey(req);
       if (!plaintext) {
         return res.status(401).json({ success: false, error: 'Missing API key' });
+      }
+
+      // Admin impersonation token — never valid on admin-scoped routes (an
+      // impersonation session IS a tenant-scoped, read-only view), always
+      // resolves to the 'readonly' role regardless of anything else.
+      if (plaintext.startsWith('sk_imp_')) {
+        if (requiredScope === 'admin') {
+          return res.status(403).json({ success: false, error: 'Admin scope required' });
+        }
+        const session = await lookupImpersonationToken(plaintext);
+        if (!session) {
+          return res.status(401).json({ success: false, error: 'Invalid, expired, or revoked impersonation session' });
+        }
+        if (requiredScope === 'tenant') {
+          const pathBiz = req.params.businessId;
+          if (pathBiz && pathBiz !== session.business_id) {
+            return res.status(403).json({ success: false, error: 'Session does not match business' });
+          }
+        }
+        req.auth = { keyId: null, businessId: session.business_id, scope: 'tenant', role: 'readonly', impersonating: true };
+        setBusinessId(session.business_id);
+        return next();
       }
 
       // Clerk session tokens are JWTs; our own API keys never are. Route to
@@ -267,5 +331,8 @@ module.exports = {
   lookupKey,
   verifyClerkSession,
   JWT_SHAPE_RE,
-  VALID_ROLES
+  VALID_ROLES,
+  issueImpersonationToken,
+  lookupImpersonationToken,
+  revokeImpersonationToken
 };

@@ -268,6 +268,19 @@
       </div>
     </div>
 
+    <!-- Profit, cohorts & channels -->
+    <div class="dash-card">
+      <h2>Profit &amp; growth (30 days)</h2>
+      <div class="stat-grid" style="margin-bottom:18px">
+        <div class="stat"><div class="stat-label">Best-margin product</div><div class="stat-val" id="pgBestMargin" style="font-size:16px">—</div></div>
+        <div class="stat"><div class="stat-label">Margin coverage</div><div class="stat-val" id="pgMarginCoverage">—</div></div>
+        <div class="stat"><div class="stat-label">New customers</div><div class="stat-val" id="pgNewCustomers">—</div></div>
+        <div class="stat"><div class="stat-label">30-day repeat rate</div><div class="stat-val" id="pgRepeatRate">—</div></div>
+      </div>
+      <h3 style="font-size:14px;margin-bottom:10px">Orders by channel</h3>
+      <div id="pgChannels" class="muted">Loading…</div>
+    </div>
+
     <!-- Delivery SLA -->
     <div class="dash-card">
       <h2>Delivery times</h2>
@@ -579,8 +592,13 @@
     <!-- Marketing: public storefront + QR ordering -->
     <div class="dash-card">
       <h2>Storefront &amp; QR ordering</h2>
-      <p class="muted" style="margin-bottom:14px;font-size:13px">A public web page listing your catalog, synced live from what you sell on WhatsApp. Share the link or print the QR code for your counter — customers land on the page and tap through to order on WhatsApp.</p>
+      <p class="muted" style="margin-bottom:14px;font-size:13px">A public web page listing your catalog, synced live from what you sell on WhatsApp. Share the link or print the QR code for your counter — customers land on the page and tap through to order on WhatsApp, or check out right there as a guest.</p>
       <div style="display:grid;gap:14px;max-width:640px">
+        <div class="row-form" style="grid-template-columns:1fr 1fr">
+          <div><label>Logo image URL (optional)</label><input id="sLogoUrl" placeholder="https://…/logo.jpg" /></div>
+          <div><label>Banner image URL (optional)</label><input id="sBannerUrl" placeholder="https://…/banner.jpg" /></div>
+        </div>
+        <div><button class="btn btn-ghost btn-sm" onclick="saveBranding()">Save branding</button></div>
         <div>
           <label style="font-size:12px;color:var(--muted)">Web link name (letters, numbers, hyphens)</label>
           <div style="display:flex;gap:8px;align-items:center">
@@ -677,7 +695,17 @@
 
       <div style="display:flex;gap:10px;align-items:end;margin-bottom:16px;flex-wrap:wrap">
         <div><label style="font-size:12px;color:var(--muted)">VAT export month</label><input id="acctVatMonth" type="month" /></div>
-        <button class="btn btn-ghost btn-sm" onclick="downloadVatExportFromDash()">Download VAT CSV</button>
+        <button class="btn btn-ghost btn-sm" onclick="downloadVatExportFromDash('csv')">Download VAT CSV</button>
+        <button class="btn btn-ghost btn-sm" onclick="downloadVatExportFromDash('pdf')">Download VAT PDF</button>
+      </div>
+
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px;border-top:1px solid var(--line);padding-top:16px">
+        <button class="btn btn-ghost btn-xs" onclick="downloadDailySales('csv')">Daily sales CSV</button>
+        <button class="btn btn-ghost btn-xs" onclick="downloadDailySales('pdf')">Daily sales PDF</button>
+        <button class="btn btn-ghost btn-xs" onclick="downloadInventoryValuation('csv')">Inventory valuation CSV</button>
+        <button class="btn btn-ghost btn-xs" onclick="downloadInventoryValuation('pdf')">Inventory valuation PDF</button>
+        <button class="btn btn-ghost btn-xs" onclick="downloadReconciliation('csv')">Payout reconciliation CSV</button>
+        <button class="btn btn-ghost btn-xs" onclick="downloadReconciliation('pdf')">Payout reconciliation PDF</button>
       </div>
 
       <div style="border-top:1px solid var(--line);padding-top:16px;margin-bottom:20px">
@@ -700,6 +728,16 @@
           <div><label>Description</label><input id="expDescription" placeholder="Weekly market run" /></div>
           <div><button class="btn btn-primary btn-sm" onclick="addExpense()">Add</button></div>
         </div>
+      </div>
+    </div>
+
+    <!-- Data & privacy -->
+    <div class="dash-card">
+      <h2>Data &amp; privacy</h2>
+      <p class="muted" style="margin-bottom:14px;font-size:13px">Export everything this account holds, or close your account. Closing does not delete your data — orders, customers, and messages are all retained; your storefront and bot just stop being reachable.</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn btn-ghost btn-sm" onclick="downloadAuthed('/business/export?business_id=' + BIZ.id, 'wa-b-export.json')">Export all my data (JSON)</button>
+        <button class="btn btn-ghost btn-sm" style="color:var(--danger,#c0392b)" onclick="closeAccountFlow()">Close my account</button>
       </div>
     </div>
     </div><!-- /money -->
@@ -1983,8 +2021,39 @@ async function loadAnalytics(days) {
     }).join('');
 
     await loadDeliverySla(currentAnaDays);
+    loadProfitGrowth().catch(() => {});
   } catch (err) {
     toast('Could not load analytics: ' + err.message);
+  }
+}
+
+async function loadProfitGrowth() {
+  try {
+    const [{ profit }, { cohorts }, { channels }] = await Promise.all([
+      api('/analytics/profit?business_id=' + BIZ.id + '&days=30'),
+      api('/analytics/cohorts?business_id=' + BIZ.id + '&days=30'),
+      api('/analytics/channels?business_id=' + BIZ.id + '&days=30')
+    ]);
+    document.getElementById('pgBestMargin').textContent = profit.best_margin_product
+      ? profit.best_margin_product.name + ' (GH₵' + profit.best_margin_product.margin_ghs + ')'
+      : 'Set cost prices to see this';
+    document.getElementById('pgMarginCoverage').textContent = profit.margin_known_pct == null ? '—' : profit.margin_known_pct + '%';
+    document.getElementById('pgNewCustomers').textContent = cohorts.new_customers.customers;
+    document.getElementById('pgRepeatRate').textContent = cohorts.repeat_rate_30d.repeat_rate_pct == null
+      ? 'Not enough data yet' : cohorts.repeat_rate_30d.repeat_rate_pct + '%';
+
+    const totalRevenue = channels.reduce((s, c) => s + c.revenue_ghs, 0) || 1;
+    document.getElementById('pgChannels').innerHTML = channels.length ? channels.map(c => `
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+        <div style="width:100px;font-size:13px;text-transform:capitalize">${esc(c.channel)}</div>
+        <div style="flex:1;height:8px;border-radius:999px;background:var(--bg-2);overflow:hidden">
+          <div style="height:100%;background:var(--accent,#2e7d32);width:${Math.round((c.revenue_ghs / totalRevenue) * 100)}%"></div>
+        </div>
+        <div style="width:130px;font-size:12px;color:var(--muted);text-align:right">GH₵${c.revenue_ghs.toFixed(2)} · ${c.orders} order(s)</div>
+      </div>
+    `).join('') : '<p class="muted">No orders in this window yet.</p>';
+  } catch (err) {
+    console.warn('loadProfitGrowth failed:', err.message);
   }
 }
 
@@ -2233,6 +2302,9 @@ async function loadSettings() {
   const zones = Array.isArray(settings.delivery_zones) ? settings.delivery_zones : [];
   document.getElementById('sZones').value = zones.map(z => z.name + ': ' + Number(z.fee_ghs).toFixed(2)).join('\n');
 
+  document.getElementById('sLogoUrl').value = settings.logo_url || '';
+  document.getElementById('sBannerUrl').value = settings.banner_url || '';
+
   document.getElementById('sSlug').value = settings.slug || '';
   renderStoreLink(settings.slug);
 
@@ -2343,10 +2415,57 @@ async function loadAccountingSummary() {
   ].join('');
 }
 
-function downloadVatExportFromDash() {
+/**
+ * window.open() can't attach an Authorization header, so a Clerk-session
+ * download has to go through fetch()+blob instead — plain link/window.open
+ * downloads of an authed API route just 401. Shared by every export button.
+ */
+async function downloadAuthed(path, filename) {
+  try {
+    const token = await window.Clerk.session.getToken();
+    const res = await fetch('/api' + path, { headers: { Authorization: 'Bearer ' + token } });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || ('HTTP ' + res.status));
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  } catch (err) { toast(err.message); }
+}
+
+function downloadVatExportFromDash(format) {
   const month = document.getElementById('acctVatMonth').value;
   if (!month) return toast('Pick a month first');
-  window.open('/api/accounting/vat-export?business_id=' + BIZ.id + '&month=' + encodeURIComponent(month), '_blank');
+  downloadAuthed('/accounting/vat-export?business_id=' + BIZ.id + '&month=' + encodeURIComponent(month) + '&format=' + format, `vat-export-${month}.${format}`);
+}
+
+function downloadDailySales(format) {
+  downloadAuthed('/accounting/daily-sales?business_id=' + BIZ.id + '&format=' + format, `daily-sales.${format}`);
+}
+function downloadInventoryValuation(format) {
+  downloadAuthed('/accounting/inventory-valuation?business_id=' + BIZ.id + '&format=' + format, `inventory-valuation.${format}`);
+}
+function downloadReconciliation(format) {
+  downloadAuthed('/accounting/reconciliation?business_id=' + BIZ.id + '&format=' + format, `payout-reconciliation.${format}`);
+}
+
+async function closeAccountFlow() {
+  const warned = confirm(
+    'Close your WA-B account?\n\n' +
+    'Your storefront and WhatsApp bot will stop responding to customers immediately. ' +
+    'Your orders, customers, and messages are all KEPT — nothing is deleted — but you\'ll ' +
+    'need to contact support to reopen. Continue?'
+  );
+  if (!warned) return;
+  const reason = prompt('Optional: why are you closing your account? (helps us improve)') || undefined;
+  try {
+    await api('/business/close', { method: 'POST', body: JSON.stringify({ confirm: true, reason }) });
+    toast('Account closed. Contact support if you need to reopen it.');
+  } catch (err) { toast(err.message); }
 }
 
 async function loadExpenses() {
@@ -2492,6 +2611,19 @@ async function saveSettings() {
   } catch (err) { toast(err.message); }
 }
 
+async function saveBranding() {
+  try {
+    await api('/business/settings', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        logo_url: document.getElementById('sLogoUrl').value.trim() || null,
+        banner_url: document.getElementById('sBannerUrl').value.trim() || null
+      })
+    });
+    toast('Branding saved — live on your storefront now');
+  } catch (err) { toast(err.message); }
+}
+
 /* ---------------- Storefront & QR ordering ---------------- */
 
 function renderStoreLink(slug) {
@@ -2539,6 +2671,8 @@ document.getElementById('copyStoreLinkBtn')?.addEventListener('click', () => {
 async function loadOnboarding() {
   const checklist = await api('/onboarding/status');
   const card = document.getElementById('onboardingCard');
+  // Required steps only decide all_complete (see onboarding.routes.js) — a
+  // solo shopkeeper who never invites staff still counts as fully set up.
   if (checklist.all_complete) { card.style.display = 'none'; return; }
   card.style.display = '';
   document.getElementById('onboardingPercent').textContent = checklist.percent + '% complete';
@@ -2550,15 +2684,34 @@ async function loadOnboarding() {
         <strong>${s.label}</strong>
         <div class="muted" style="font-size:13px">${s.description}</div>
         ${s.key === 'test_message' && !s.complete ? '<button class="btn btn-ghost btn-xs" style="margin-top:6px" onclick="sendTestMessage()">Send test message</button>' : ''}
+        ${s.key === 'first_products' && !s.complete ? '<button class="btn btn-ghost btn-xs" style="margin-top:6px" onclick="loadSampleCatalog()">Load a sample catalog to start</button>' : ''}
+        ${s.key === 'invite_staff' && !s.complete ? '<button class="btn btn-ghost btn-xs" style="margin-top:6px" onclick="showSection(\'account\'); showSubTab(\'account\',\'team\')">Go to Team access</button>' : ''}
       </span>
     </li>
   `).join('');
+  if (checklist.platform_test_mode) {
+    list.insertAdjacentHTML('beforeend', `
+      <li style="display:flex;align-items:flex-start;gap:10px">
+        <span style="flex-shrink:0;margin-top:2px">⚠️</span>
+        <span><strong>Test mode</strong><div class="muted" style="font-size:13px">Payments are running on Paystack test keys right now — no real money is moving yet.</div></span>
+      </li>
+    `);
+  }
 }
 
 async function sendTestMessage() {
   try {
     await api('/onboarding/test-message', { method: 'POST' });
     toast('Test message sent — check WhatsApp');
+    loadOnboarding().catch(() => {});
+  } catch (err) { toast(err.message); }
+}
+
+async function loadSampleCatalog() {
+  if (!confirm('Load a starter catalog for your industry? You can edit or delete every item afterward.')) return;
+  try {
+    const r = await api('/onboarding/sample-catalog', { method: 'POST' });
+    toast(`Added ${r.products_added} sample product(s)`);
     loadOnboarding().catch(() => {});
   } catch (err) { toast(err.message); }
 }

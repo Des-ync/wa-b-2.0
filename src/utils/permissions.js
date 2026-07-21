@@ -7,7 +7,7 @@
  * to 'owner' in the DB) keeps exactly the access it always had.
  */
 
-const ROLES = ['owner', 'manager', 'support', 'accountant'];
+const ROLES = ['owner', 'manager', 'support', 'accountant', 'readonly'];
 
 // true = full access, 'read' = read-only, false/absent = no access.
 const CAPABILITIES = {
@@ -26,6 +26,15 @@ const CAPABILITIES = {
     orders: 'read', customers: 'read', products: 'read', promos: 'read',
     billing: 'read', financial: 'read',
     broadcasts: false, conversations: false, settings: false, staff: false
+  },
+  // Admin support-mode impersonation ONLY (see impersonation_sessions /
+  // middleware/auth.js) — never assignable via POST /api/keys, whose role
+  // input is validated against auth.js's own VALID_ROLES list, which
+  // deliberately omits 'readonly'. Full read, zero write, everywhere.
+  readonly: {
+    orders: 'read', customers: 'read', products: 'read', promos: 'read',
+    broadcasts: 'read', conversations: 'read', financial: 'read', billing: 'read',
+    settings: false, staff: false
   }
 };
 

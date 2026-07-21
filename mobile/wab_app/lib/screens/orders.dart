@@ -1,6 +1,11 @@
+import 'dart:async';
+
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../services/offline_cache.dart';
+import '../services/offline_queue.dart';
 import '../state/session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
@@ -21,15 +26,55 @@ class _OrdersScreenState extends State<OrdersScreen> {
   String? _filter;
   // Bumped to force AsyncList to reload when the filter changes.
   int _reloadKey = 0;
+  bool _offline = false;
+  StreamSubscription<List<ConnectivityResult>>? _connSub;
+
+  @override
+  void initState() {
+    super.initState();
+    // Pick up anything queued from a previous offline session as soon as
+    // we're back, and keep watching for reconnects while this screen lives.
+    _tryFlush();
+    _connSub = Connectivity().onConnectivityChanged.listen((results) {
+      if (results.any((r) => r != ConnectivityResult.none)) _tryFlush();
+    });
+  }
+
+  @override
+  void dispose() {
+    _connSub?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _tryFlush() async {
+    if (!mounted) return;
+    final session = context.read<Session>();
+    await OfflineQueue.flush(session.api);
+    if (mounted) setState(() => _reloadKey++);
+  }
 
   Future<List<Map<String, dynamic>>> _load() async {
     final session = context.read<Session>();
-    final res = await session.api.get('/api/orders', query: {
-      'business_id': session.businessId,
-      'limit': 100,
-      if (_filter != null) 'status': _filter,
-    });
-    return ((res['orders'] as List?) ?? []).cast<Map<String, dynamic>>();
+    try {
+      final res = await session.api.get('/api/orders', query: {
+        'business_id': session.businessId,
+        'limit': 100,
+        if (_filter != null) 'status': _filter,
+      });
+      final orders = ((res['orders'] as List?) ?? []).cast<Map<String, dynamic>>();
+      unawaited(OfflineCache.saveOrders(orders));
+      if (mounted) setState(() => _offline = false);
+      return orders;
+    } catch (e) {
+      final cached = await OfflineCache.loadOrders();
+      if (cached != null) {
+        final filtered =
+            _filter == null ? cached : cached.where((o) => o['status'] == _filter).toList();
+        if (mounted) setState(() => _offline = true);
+        return filtered;
+      }
+      rethrow;
+    }
   }
 
   @override
@@ -65,6 +110,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
               }).toList(),
             ),
           ),
+          if (_offline) const OfflineBanner(),
           Expanded(
             child: AsyncList<Map<String, dynamic>>(
               key: ValueKey(_reloadKey),

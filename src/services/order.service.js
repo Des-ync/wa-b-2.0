@@ -44,8 +44,8 @@ async function getOrCreateCustomer({ businessId, whatsappNumber, displayName, ph
       return existing.rows[0];
     }
     const inserted = await query(
-      `INSERT INTO customers (business_id, whatsapp_number, display_name, phone_network, channel, channel_id)
-       VALUES ($1,$2,$3,$4,'whatsapp',$5) RETURNING *`,
+      `INSERT INTO customers (business_id, whatsapp_number, display_name, phone_network, channel, channel_id, consent_at, consent_source)
+       VALUES ($1,$2,$3,$4,'whatsapp',$5, NOW(), 'whatsapp_first_message') RETURNING *`,
       [businessId, whatsappNumber, displayName || null, phoneNetwork || null, channelId]
     );
     return inserted.rows[0];
@@ -63,10 +63,15 @@ async function getOrCreateCustomer({ businessId, whatsappNumber, displayName, ph
     );
     return existing.rows[0];
   }
+  // Consent is recorded at the moment a customer first messages the business
+  // on that channel — the messaging itself is the consenting act (Ghana Data
+  // Protection Act §20-ish "affirmative action" standard). Guest storefront
+  // checkout is the one path that goes through the 'whatsapp' branch above
+  // but records 'storefront_checkout' instead — see storefront.routes.js.
   const inserted = await query(
-    `INSERT INTO customers (business_id, whatsapp_number, display_name, phone_network, channel, channel_id)
-     VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-    [businessId, channelId, displayName || null, phoneNetwork || null, channel, channelId]
+    `INSERT INTO customers (business_id, whatsapp_number, display_name, phone_network, channel, channel_id, consent_at, consent_source)
+     VALUES ($1,$2,$3,$4,$5,$6, NOW(), $7) RETURNING *`,
+    [businessId, channelId, displayName || null, phoneNetwork || null, channel, channelId, `${channel}_first_message`]
   );
   return inserted.rows[0];
 }
@@ -107,9 +112,12 @@ function computeTotals(cart, deliveryFee = 0, promo = null) {
  * used_count is incremented in the SAME transaction as the order insert so
  * a max-uses cap can never be oversold under concurrent checkouts.
  */
-async function createOrder({ businessId, customerId, cart, deliveryAddress, deliveryFee = 0, paymentMethod, notes, promo }) {
+async function createOrder({ businessId, customerId, cart, deliveryAddress, deliveryFee = 0, paymentMethod, notes, promo, channel = 'whatsapp' }) {
   if (!businessId || !customerId) throw new Error('businessId and customerId are required');
   if (!Array.isArray(cart) || cart.length === 0) throw new Error('cart must be a non-empty array');
+  if (!['whatsapp', 'instagram', 'messenger', 'storefront'].includes(channel)) {
+    throw new Error(`invalid channel: ${channel}`);
+  }
 
   const totals = computeTotals(cart, deliveryFee, promo);
 
@@ -126,8 +134,8 @@ async function createOrder({ businessId, customerId, cart, deliveryAddress, deli
           `INSERT INTO orders
             (business_id, customer_id, order_number, status, items,
              subtotal_ghs, delivery_fee, discount_ghs, promo_code, total_ghs,
-             delivery_address, payment_method, payment_status, notes)
-           VALUES ($1,$2,$3,'pending',$4::jsonb,$5,$6,$7,$8,$9,$10,$11,'unpaid',$12)
+             delivery_address, payment_method, payment_status, notes, channel)
+           VALUES ($1,$2,$3,'pending',$4::jsonb,$5,$6,$7,$8,$9,$10,$11,'unpaid',$12,$13)
            RETURNING *`,
           [
             businessId, customerId, orderNumber,
@@ -136,7 +144,8 @@ async function createOrder({ businessId, customerId, cart, deliveryAddress, deli
             promo?.code || null, totals.total_ghs,
             deliveryAddress || null,
             paymentMethod || null,
-            notes || null
+            notes || null,
+            channel
           ]
         );
         break;

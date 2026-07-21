@@ -18,6 +18,9 @@ dependencies:
   firebase_core: ^3.15.0
   firebase_messaging: ^15.2.0
   flutter_local_notifications: ^18.0.1
+  connectivity_plus: ^7.3.0
+  mobile_scanner: ^7.4.0
+  speech_to_text: ^7.4.0
 
 dev_dependencies:
   flutter_test:
