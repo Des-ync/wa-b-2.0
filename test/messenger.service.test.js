@@ -71,6 +71,12 @@ test('Messenger image send uses an attachment payload and captions as follow-up 
   assert.equal(captured[1].body.message.text, 'Jollof — GH₵45.00');
 });
 
+test('Messenger text send strips WhatsApp *bold* markup (i18n templates are shared across channels)', async () => {
+  captured.length = 0;
+  await messenger.sendText('9876543210', 'Order *ORD-2026-1234* marked as *delivered*.');
+  assert.equal(captured[0].body.message.text, 'Order ORD-2026-1234 marked as delivered.');
+});
+
 test('Messenger list flattens sections into at most 13 quick replies', async () => {
   captured.length = 0;
   const rows = Array.from({ length: 15 }, (_, i) => ({ id: `row_${i}`, title: `Item ${i}` }));

@@ -75,3 +75,15 @@ test('IG list flattens sections into at most 13 quick replies', async () => {
   const qr = captured[0].body.message.quick_replies;
   assert.ok(qr.length <= 13, `got ${qr.length} quick replies`);
 });
+
+test('IG text send strips WhatsApp *bold* markup (i18n templates are shared across channels)', async () => {
+  captured.length = 0;
+  await ig.sendText('1234567890', 'Order *ORD-2026-1234* marked as *delivered*.');
+  assert.equal(captured[0].body.message.text, 'Order ORD-2026-1234 marked as delivered.');
+});
+
+test('IG quick replies strip WhatsApp *bold* markup from the body text', async () => {
+  captured.length = 0;
+  await ig.sendButtons('1234567890', 'Confirm *GH₵45.00* order?', [{ id: 'yes', title: 'Yes' }]);
+  assert.equal(captured[0].body.message.text, 'Confirm GH₵45.00 order?');
+});

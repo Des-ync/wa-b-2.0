@@ -2,7 +2,7 @@ require('dotenv').config();
 const axios = require('axios');
 const logger = require('../utils/logger');
 const { query } = require('../config/database');
-const { formatGhs, truncate } = require('../utils/helpers');
+const { formatGhs, truncate, stripWaBold } = require('../utils/helpers');
 const { t } = require('../utils/i18n');
 
 /**
@@ -101,7 +101,7 @@ function buildSendRequest({ accessToken, recipientId, message }) {
   let msg;
   if (message.type === 'quick_replies') {
     msg = {
-      text: String(message.text || '').slice(0, 2000),
+      text: stripWaBold(message.text).slice(0, 2000),
       quick_replies: (message.options || []).slice(0, 13).map(o => ({
         content_type: 'text',
         title: truncate(o.title || '', 20),
@@ -111,7 +111,7 @@ function buildSendRequest({ accessToken, recipientId, message }) {
   } else if (message.type === 'image') {
     msg = { attachment: { type: 'image', payload: { url: String(message.url || '') } } };
   } else {
-    msg = { text: String(message.text || '').slice(0, 2000) };
+    msg = { text: stripWaBold(message.text).slice(0, 2000) };
   }
   return {
     // Token travels in the Authorization header, never the query string —

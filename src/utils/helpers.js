@@ -145,6 +145,16 @@ function truncate(s, n) {
 }
 
 /**
+ * Strip WhatsApp's *bold* markup down to plain text. i18n.js's templates are
+ * shared across all three channels, but Instagram and Messenger's Send APIs
+ * render no markdown at all — left alone, a customer on those channels would
+ * see literal asterisks around every emphasized word/order number.
+ */
+function stripWaBold(text) {
+  return String(text || '').replace(/\*(\S(?:[^*]*\S)?)\*/g, '$1');
+}
+
+/**
  * Strip EVERY credential column from a business row before it leaves the API.
  * Add new secret columns here, not at call sites — this is the single place
  * that decides what a business row may expose.
@@ -315,6 +325,7 @@ module.exports = {
   addDays,
   formatDate,
   truncate,
+  stripWaBold,
   sanitizeBusiness,
   slugify,
   mapsLinkForAddress,

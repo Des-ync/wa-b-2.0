@@ -123,6 +123,18 @@
   .dash-sections { min-width: 0; order: 2; }
   .dash-section { display: none; }
   .dash-section.active { display: block; }
+  /* Sub-tabs inside an overloaded section (e.g. Account, Stock) — same idea as
+     the side-nav, one level down, so a busy section doesn't read as one long
+     unrelated scroll. */
+  .sub-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 20px; border-bottom: 1px solid var(--line); padding-bottom: 12px; }
+  .sub-tabs button {
+    padding: 7px 14px; border: none; background: none; font: inherit;
+    font-size: 13px; color: var(--muted); border-radius: 999px; cursor: pointer;
+  }
+  .sub-tabs button:hover { background: var(--bg-2); color: var(--ink); }
+  .sub-tabs button.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .sub-pane { display: none; }
+  .sub-pane.active { display: block; }
   @media (max-width: 860px) {
     #app { grid-template-columns: 1fr; }
     .side-nav { position: sticky; top: 0; order: 0; flex-direction: row; overflow-x: auto; gap: 2px;
@@ -235,9 +247,9 @@
       </div>
       <div class="stat-grid" style="margin-bottom:22px">
         <div class="stat"><div class="stat-label">Repeat customers</div><div class="stat-val" id="anaRepeat">—</div></div>
-        <div class="stat"><div class="stat-label">Cart abandonment</div><div class="stat-val" id="anaAbandon">—</div></div>
-        <div class="stat"><div class="stat-label">Nudge recovery</div><div class="stat-val" id="anaNudge">—</div></div>
-        <div class="stat"><div class="stat-label">Nudge revenue recovered</div><div class="stat-val" id="anaNudgeRevenue">—</div></div>
+        <div class="stat"><div class="stat-label">Unfinished carts</div><div class="stat-val" id="anaAbandon">—</div></div>
+        <div class="stat"><div class="stat-label">Reminder success</div><div class="stat-val" id="anaNudge">—</div></div>
+        <div class="stat"><div class="stat-label">Sales from reminders</div><div class="stat-val" id="anaNudgeRevenue">—</div></div>
       </div>
       <div id="anaNudgeVariants" style="margin-bottom:22px"></div>
       <div class="ana-grid">
@@ -258,7 +270,7 @@
 
     <!-- Delivery SLA -->
     <div class="dash-card">
-      <h2>Delivery SLA</h2>
+      <h2>Delivery times</h2>
       <p class="muted" style="margin-bottom:16px;font-size:13px">Time from rider assignment to delivered, for orders completed in the selected window above.</p>
       <div class="stat-grid" style="margin-bottom:20px">
         <div class="stat"><div class="stat-label">Completed deliveries</div><div class="stat-val" id="slaCount">—</div></div>
@@ -269,7 +281,7 @@
       <div class="scroll-x">
         <table id="slaRiderTable">
           <thead><tr><th>Rider</th><th>Deliveries</th><th>Avg. minutes</th><th>Late</th><th>Late rate</th></tr></thead>
-          <tbody></tbody>
+          <tbody><tr><td colspan="5" class="muted">Loading…</td></tr></tbody>
         </table>
       </div>
     </div>
@@ -291,7 +303,7 @@
 
     <!-- Segments -->
     <div class="dash-card">
-      <h2>Segments</h2>
+      <h2>Customer groups</h2>
       <div id="segmentSummary" class="stat-grid"><p class="muted">Loading…</p></div>
     </div>
 
@@ -303,14 +315,14 @@
           <option value="">All customers</option>
           <option value="ordered_30d">Ordered in last 30 days</option>
           <option value="inactive_60d">Inactive 60+ days</option>
-          <option value="abandoned_cart">Has an abandoned cart</option>
+          <option value="abandoned_cart">Left items without buying</option>
         </select>
         <input id="custTagFilter" placeholder="Filter by tag…" style="max-width:160px" onchange="loadCustomers()" />
       </div>
       <div class="scroll-x">
         <table id="customerTable">
-          <thead><tr><th>Customer</th><th>Channel</th><th>Orders</th><th>Total spent</th><th>Tags</th><th>Last seen</th><th></th></tr></thead>
-          <tbody></tbody>
+          <thead><tr><th>Customer</th><th>Platform</th><th>Orders</th><th>Total spent</th><th>Tags</th><th>Last seen</th><th></th></tr></thead>
+          <tbody><tr><td colspan="7" class="muted">Loading…</td></tr></tbody>
         </table>
       </div>
     </div>
@@ -318,7 +330,7 @@
     <!-- Broadcast -->
     <div class="dash-card">
       <h2>Broadcast</h2>
-      <p class="muted" style="margin-bottom:14px;font-size:13px">Message customers matching an audience at once — sent gradually and throttled to protect your WhatsApp number. Customers who reply STOP are skipped automatically.</p>
+      <p class="muted" style="margin-bottom:14px;font-size:13px">Message a group of customers at once — sent slowly and spaced out, to keep your WhatsApp number safe. Customers who reply STOP are skipped automatically.</p>
       <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px">
         <div style="flex:1;min-width:240px">
           <label style="font-size:12px;color:var(--muted)">Message</label>
@@ -326,12 +338,12 @@
         </div>
       </div>
       <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:20px">
-        <div><label style="font-size:12px;color:var(--muted)">Audience</label>
+        <div><label style="font-size:12px;color:var(--muted)">Send to</label>
           <select id="bcSegment">
             <option value="">All opted-in customers</option>
             <option value="ordered_30d">Ordered in last 30 days</option>
             <option value="inactive_60d">Inactive 60+ days</option>
-            <option value="abandoned_cart">Has an abandoned cart</option>
+            <option value="abandoned_cart">Left items without buying</option>
           </select>
         </div>
         <div><label style="font-size:12px;color:var(--muted)">Tag (optional)</label><input id="bcTag" placeholder="vip" style="max-width:120px" /></div>
@@ -340,8 +352,8 @@
       </div>
       <div class="scroll-x">
         <table id="broadcastTable">
-          <thead><tr><th>Message</th><th>Audience</th><th>Status</th><th>Sent</th><th>Failed</th><th>Target</th><th>Created</th></tr></thead>
-          <tbody></tbody>
+          <thead><tr><th>Message</th><th>Sent to</th><th>Status</th><th>Sent</th><th>Failed</th><th>Recipients</th><th>Created</th></tr></thead>
+          <tbody><tr><td colspan="7" class="muted">Loading…</td></tr></tbody>
         </table>
       </div>
     </div>
@@ -349,20 +361,27 @@
 
     <!-- ============ STOCK ============ -->
     <div class="dash-section" data-section="stock">
+    <div class="sub-tabs">
+      <button class="active" data-subtarget="catalog" onclick="showSubTab('stock','catalog')">Catalog</button>
+      <button data-subtarget="inventory" onclick="showSubTab('stock','inventory')">Inventory</button>
+      <button data-subtarget="promos" onclick="showSubTab('stock','promos')">Promotions</button>
+    </div>
+
+    <div class="sub-pane active" data-subpane="catalog">
     <!-- Products -->
     <div class="dash-card">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:16px">
         <h2 style="margin-bottom:0">Products</h2>
         <div style="display:flex;gap:8px">
-          <button class="btn btn-ghost btn-sm" onclick="exportProductsCsv()">Export CSV</button>
+          <button class="btn btn-ghost btn-sm" onclick="exportProductsCsv()">Download list</button>
           <input type="file" id="pImportFile" accept=".csv,text/csv" style="display:none" onchange="importProductsCsv(this.files[0])" />
-          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('pImportFile').click()">Import CSV</button>
+          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('pImportFile').click()">Upload list</button>
         </div>
       </div>
       <div class="scroll-x">
         <table id="productTable">
-          <thead><tr><th>Image</th><th>Name</th><th>Description</th><th>Price (GH₵)</th><th>Category</th><th>Stock</th><th>Flags</th><th></th></tr></thead>
-          <tbody></tbody>
+          <thead><tr><th>Image</th><th>Name</th><th>Description</th><th>Price (GH₵)</th><th>Category</th><th>Stock</th><th>Status</th><th></th></tr></thead>
+          <tbody><tr><td colspan="8" class="muted">Loading…</td></tr></tbody>
         </table>
       </div>
       <div style="margin-top:20px;border-top:1px solid var(--line);padding-top:16px">
@@ -378,6 +397,20 @@
       </div>
     </div>
 
+    <!-- Categories -->
+    <div class="dash-card">
+      <h2>Categories</h2>
+      <p class="muted" style="margin-bottom:14px;font-size:13px">Position and visibility here control how the WhatsApp menu is grouped. Hidden categories never show to customers, even if items are in stock.</p>
+      <div class="scroll-x">
+        <table id="categoryTable">
+          <thead><tr><th>Category</th><th>Position</th><th>Visible</th><th></th></tr></thead>
+          <tbody><tr><td colspan="4" class="muted">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+    </div><!-- /catalog -->
+
+    <div class="sub-pane" data-subpane="inventory">
     <!-- Reorder suggestions -->
     <div class="dash-card">
       <h2>Reorder suggestions</h2>
@@ -385,7 +418,7 @@
       <div class="scroll-x">
         <table id="reorderTable">
           <thead><tr><th>Product</th><th>Stock left</th><th>Suggested reorder</th><th>Supplier</th><th></th></tr></thead>
-          <tbody></tbody>
+          <tbody><tr><td colspan="5" class="muted">Loading…</td></tr></tbody>
         </table>
       </div>
     </div>
@@ -396,7 +429,7 @@
       <div class="scroll-x">
         <table id="supplierTable">
           <thead><tr><th>Name</th><th>Contact</th><th>Phone</th><th>Notes</th><th></th></tr></thead>
-          <tbody></tbody>
+          <tbody><tr><td colspan="5" class="muted">Loading…</td></tr></tbody>
         </table>
       </div>
       <div style="margin-top:20px;border-top:1px solid var(--line);padding-top:16px">
@@ -413,34 +446,24 @@
     <!-- Stock history -->
     <div class="dash-card">
       <h2>Stock history</h2>
-      <p class="muted" style="margin-bottom:14px;font-size:13px">Every sale, restock, and manual adjustment — the audit trail behind each product's current stock number.</p>
+      <p class="muted" style="margin-bottom:14px;font-size:13px">Every sale, restock, and manual change — a full history behind each product's current stock number.</p>
       <div class="scroll-x">
         <table id="movementTable">
           <thead><tr><th>When</th><th>Product</th><th>Type</th><th>Change</th><th>Stock after</th><th>Cost/unit</th><th>Supplier</th><th>Note</th></tr></thead>
-          <tbody></tbody>
+          <tbody><tr><td colspan="8" class="muted">Loading…</td></tr></tbody>
         </table>
       </div>
     </div>
+    </div><!-- /inventory -->
 
-    <!-- Categories -->
-    <div class="dash-card">
-      <h2>Categories</h2>
-      <p class="muted" style="margin-bottom:14px;font-size:13px">Order and visibility here control how the WhatsApp menu is grouped. Hidden categories never show to customers, even if items are in stock.</p>
-      <div class="scroll-x">
-        <table id="categoryTable">
-          <thead><tr><th>Category</th><th>Order</th><th>Visible</th><th></th></tr></thead>
-          <tbody></tbody>
-        </table>
-      </div>
-    </div>
-
+    <div class="sub-pane" data-subpane="promos">
     <!-- Promo codes -->
     <div class="dash-card">
       <h2>Promo codes</h2>
       <div class="scroll-x">
         <table id="promoTable">
-          <thead><tr><th>Code</th><th>Discount</th><th>Targeting</th><th>Uses</th><th>Expires</th><th>Status</th><th></th></tr></thead>
-          <tbody></tbody>
+          <thead><tr><th>Code</th><th>Discount</th><th>Applies to</th><th>Uses</th><th>Expires</th><th>Status</th><th></th></tr></thead>
+          <tbody><tr><td colspan="7" class="muted">Loading…</td></tr></tbody>
         </table>
       </div>
       <div style="margin-top:20px;border-top:1px solid var(--line);padding-top:16px">
@@ -453,17 +476,17 @@
           <div><button class="btn btn-primary btn-sm" onclick="addPromo()">Add</button></div>
         </div>
         <details style="margin-top:14px">
-          <summary style="cursor:pointer;font-size:13px;color:var(--muted)">Advanced targeting (optional)</summary>
+          <summary style="cursor:pointer;font-size:13px;color:var(--muted)">More conditions (optional)</summary>
           <div class="row-form" style="grid-template-columns:1fr 1fr 1fr 1fr;margin-top:10px">
             <div><label>Minimum order GH₵</label><input id="promoMinOrder" type="number" min="0" step="0.01" placeholder="" /></div>
             <div><label style="display:flex;align-items:center;gap:6px;margin-top:18px"><input type="checkbox" id="promoFirstOrder" style="width:auto" /> First order only</label></div>
             <div><label>Customer tag</label><input id="promoTag" placeholder="vip" /></div>
-            <div><label>Customer segment</label>
+            <div><label>Customer group</label>
               <select id="promoSegment">
                 <option value="">Any</option>
                 <option value="ordered_30d">Ordered in last 30 days</option>
                 <option value="inactive_60d">Inactive 60+ days</option>
-                <option value="abandoned_cart">Has an abandoned cart</option>
+                <option value="abandoned_cart">Left items without buying</option>
               </select>
             </div>
           </div>
@@ -473,6 +496,7 @@
         </details>
       </div>
     </div>
+    </div><!-- /promos -->
 
     </div>
 
@@ -487,12 +511,12 @@
           <option>pending</option><option>confirmed</option><option>paid</option>
           <option>preparing</option><option>ready</option><option>delivered</option><option>cancelled</option>
         </select>
-        <button class="btn btn-ghost btn-sm" onclick="exportOrdersCsv()">Export CSV</button>
+        <button class="btn btn-ghost btn-sm" onclick="exportOrdersCsv()">Download list</button>
       </div>
       <div class="scroll-x">
         <table id="orderTable">
           <thead><tr><th>Order</th><th>Items</th><th>Total</th><th>Payment</th><th>Status</th><th>Update</th></tr></thead>
-          <tbody></tbody>
+          <tbody><tr><td colspan="6" class="muted">Loading…</td></tr></tbody>
         </table>
       </div>
     </div>
@@ -501,12 +525,23 @@
 
     <!-- ============ ACCOUNT ============ -->
     <div class="dash-section" data-section="account">
+    <div class="sub-tabs">
+      <button class="active" data-subtarget="billing" onclick="showSubTab('account','billing')">Billing</button>
+      <button data-subtarget="bot" onclick="showSubTab('account','bot')">Bot &amp; storefront</button>
+      <button data-subtarget="growth" onclick="showSubTab('account','growth')">Growth</button>
+      <button data-subtarget="money" onclick="showSubTab('account','money')">Money</button>
+      <button data-subtarget="team" onclick="showSubTab('account','team')">Team</button>
+    </div>
+
+    <div class="sub-pane active" data-subpane="billing">
     <!-- Subscription -->
     <div class="dash-card">
       <h2>Subscription</h2>
       <div id="subBox" class="muted">Loading…</div>
     </div>
+    </div><!-- /billing -->
 
+    <div class="sub-pane" data-subpane="bot">
     <!-- Bot settings -->
     <div class="dash-card">
       <h2>Bot settings</h2>
@@ -522,16 +557,21 @@
           <div><label>Opens (HH:MM)</label><input id="sOpen" placeholder="08:00" /></div>
           <div><label>Closes (HH:MM)</label><input id="sClose" placeholder="21:00" /></div>
         </div>
-        <div class="row-form" style="grid-template-columns:1fr 1fr 1fr 1fr">
+        <div class="row-form" style="grid-template-columns:1fr 1fr 1fr">
           <div><label>Owner name</label><input id="sOwnerName" placeholder="Ama Boateng" /></div>
           <div><label>MoMo payout number</label><input id="sPayoutNumber" placeholder="0241234567" /></div>
           <div><label>MoMo network</label><select id="sPayoutNetwork"><option value="">Select network</option><option value="mtn">MTN</option><option value="vodafone">Vodafone/Telecel</option><option value="airteltigo">AirtelTigo</option></select></div>
-          <div><label>VAT rate % (0 if not VAT-registered)</label><input id="sVatRate" type="number" min="0" max="100" step="0.01" placeholder="0" /></div>
         </div>
-        <div>
-          <label style="font-size:12px;color:var(--muted)">Delivery zones — one per line as <code>Zone name: fee</code> (overrides the flat fee; customers pick their zone at checkout)</label>
-          <textarea id="sZones" rows="4" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-sm,6px);font:inherit;background:var(--bg);color:var(--ink)" placeholder="East Legon: 15&#10;Osu: 10&#10;Madina: 20"></textarea>
-        </div>
+        <details style="margin-top:2px">
+          <summary style="cursor:pointer;font-size:13px;color:var(--muted)">More business details (optional)</summary>
+          <div class="row-form" style="grid-template-columns:1fr;margin-top:10px">
+            <div><label>VAT rate % (0 if not VAT-registered)</label><input id="sVatRate" type="number" min="0" max="100" step="0.01" placeholder="0" /></div>
+          </div>
+          <div style="margin-top:10px">
+            <label style="font-size:12px;color:var(--muted)">Delivery zones — one per line as <code>Zone name: fee</code> (overrides the flat fee; customers pick their zone at checkout)</label>
+            <textarea id="sZones" rows="4" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-sm,6px);font:inherit;background:var(--bg);color:var(--ink)" placeholder="East Legon: 15&#10;Osu: 10&#10;Madina: 20"></textarea>
+          </div>
+        </details>
         <div><button class="btn btn-primary btn-sm" onclick="saveSettings()">Save settings</button></div>
       </div>
     </div>
@@ -542,7 +582,7 @@
       <p class="muted" style="margin-bottom:14px;font-size:13px">A public web page listing your catalog, synced live from what you sell on WhatsApp. Share the link or print the QR code for your counter — customers land on the page and tap through to order on WhatsApp.</p>
       <div style="display:grid;gap:14px;max-width:640px">
         <div>
-          <label style="font-size:12px;color:var(--muted)">Storefront handle (letters, numbers, hyphens)</label>
+          <label style="font-size:12px;color:var(--muted)">Web link name (letters, numbers, hyphens)</label>
           <div style="display:flex;gap:8px;align-items:center">
             <input id="sSlug" placeholder="mikes-shop" style="flex:1" />
             <button class="btn btn-primary btn-sm" onclick="saveSlug()">Save</button>
@@ -562,29 +602,36 @@
         </div>
       </div>
     </div>
+    </div><!-- /bot -->
 
+    <div class="sub-pane" data-subpane="growth">
     <!-- Cart recovery -->
     <div class="dash-card">
-      <h2>Cart recovery</h2>
+      <h2>Cart reminders</h2>
       <p class="muted" style="margin-bottom:14px;font-size:13px">When a customer leaves items in their cart without checking out, send them a WhatsApp reminder automatically.</p>
       <div style="display:grid;gap:14px;max-width:640px">
-        <div><label style="display:flex;align-items:center;gap:8px;font-size:13px"><input type="checkbox" id="cnEnabled" style="width:auto" /> Send abandoned-cart reminders</label></div>
-        <div class="row-form" style="grid-template-columns:1fr 1fr">
-          <div><label>Wait before first reminder (minutes)</label><input id="cnDelay" type="number" min="5" max="1440" placeholder="60" /></div>
-          <div><label>Max reminders per cart</label><input id="cnMaxPerCart" type="number" min="1" max="5" placeholder="1" /></div>
+        <div><label style="display:flex;align-items:center;gap:8px;font-size:13px"><input type="checkbox" id="cnEnabled" style="width:auto" onchange="syncCheckboxGroup('cnEnabled','cnFields')" /> Remind customers who leave items in their cart</label></div>
+        <div id="cnFields" style="display:grid;gap:14px">
+          <div class="row-form" style="grid-template-columns:1fr 1fr">
+            <div><label>Wait before first reminder (minutes)</label><input id="cnDelay" type="number" min="5" max="1440" placeholder="60" /></div>
+            <div><label>Max reminders per cart</label><input id="cnMaxPerCart" type="number" min="1" max="5" placeholder="1" /></div>
+          </div>
+          <div>
+            <label style="font-size:12px;color:var(--muted)">Custom message (optional — leave blank for the default copy). Use {shop} and {count} as placeholders.</label>
+            <textarea id="cnTemplate" rows="2" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-sm,6px);font:inherit;background:var(--bg);color:var(--ink)" placeholder="Still deciding? Your cart at {shop} with {count} items is waiting for you!"></textarea>
+          </div>
+          <details>
+            <summary style="cursor:pointer;font-size:13px;color:var(--muted)">More options (optional)</summary>
+            <div style="margin-top:10px">
+              <label style="font-size:12px;color:var(--muted)">Second message to try (optional) — half your customers will get this one instead, so you can see which message works better.</label>
+              <textarea id="cnTemplateB" rows="2" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-sm,6px);font:inherit;background:var(--bg);color:var(--ink)" placeholder="Don't miss out — your {count} items at {shop} are still saved!"></textarea>
+            </div>
+            <div class="row-form" style="grid-template-columns:1fr;margin-top:10px">
+              <div><label>Coupon code to mention (optional)</label><input id="cnCoupon" placeholder="COMEBACK10" /></div>
+            </div>
+          </details>
+          <div><button class="btn btn-primary btn-sm" onclick="saveCartNudgeSettings()">Save cart reminder settings</button></div>
         </div>
-        <div>
-          <label style="font-size:12px;color:var(--muted)">Custom message (optional — leave blank for the default copy). Use {shop} and {count} as placeholders.</label>
-          <textarea id="cnTemplate" rows="2" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-sm,6px);font:inherit;background:var(--bg);color:var(--ink)" placeholder="Still deciding? Your cart at {shop} with {count} items is waiting for you!"></textarea>
-        </div>
-        <div>
-          <label style="font-size:12px;color:var(--muted)">A/B test variant B (optional — when set, customers are split 50/50 between your message above and this one)</label>
-          <textarea id="cnTemplateB" rows="2" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-sm,6px);font:inherit;background:var(--bg);color:var(--ink)" placeholder="Don't miss out — your {count} items at {shop} are still saved!"></textarea>
-        </div>
-        <div class="row-form" style="grid-template-columns:1fr">
-          <div><label>Coupon code to mention (optional)</label><input id="cnCoupon" placeholder="COMEBACK10" /></div>
-        </div>
-        <div><button class="btn btn-primary btn-sm" onclick="saveCartNudgeSettings()">Save cart recovery settings</button></div>
       </div>
     </div>
 
@@ -593,32 +640,39 @@
       <h2>Loyalty & rewards</h2>
       <p class="muted" style="margin-bottom:14px;font-size:13px">Points, "buy N get 1 free" stamps, referral rewards, birthday coupons, and VIP tiers — all optional, all off by default.</p>
       <div style="display:grid;gap:14px;max-width:640px">
-        <div><label style="display:flex;align-items:center;gap:8px;font-size:13px"><input type="checkbox" id="loyEnabled" style="width:auto" /> Enable loyalty & rewards</label></div>
-        <div class="row-form" style="grid-template-columns:1fr 1fr">
-          <div><label>Points earned per GH₵ spent</label><input id="loyPointsPerGhs" type="number" min="0" step="0.1" placeholder="1" /></div>
-          <div><label>GH₵ value per point redeemed</label><input id="loyRedemptionRate" type="number" min="0" step="0.001" placeholder="0.05" /></div>
+        <div><label style="display:flex;align-items:center;gap:8px;font-size:13px"><input type="checkbox" id="loyEnabled" style="width:auto" onchange="syncCheckboxGroup('loyEnabled','loyFields')" /> Enable loyalty & rewards</label></div>
+        <div id="loyFields" style="display:grid;gap:14px">
+          <div class="row-form" style="grid-template-columns:1fr 1fr">
+            <div><label>Points earned per GH₵ spent</label><input id="loyPointsPerGhs" type="number" min="0" step="0.1" placeholder="1" /></div>
+            <div><label>GH₵ value per point redeemed</label><input id="loyRedemptionRate" type="number" min="0" step="0.001" placeholder="0.05" /></div>
+          </div>
+          <details>
+            <summary style="cursor:pointer;font-size:13px;color:var(--muted)">More rewards (optional)</summary>
+            <div class="row-form" style="grid-template-columns:1fr 1fr;margin-top:10px">
+              <div><label>"Buy N, get 1 free" — orders needed (0 = off)</label><input id="loyStampsTarget" type="number" min="0" max="100" placeholder="0" /></div>
+              <div><label>Free item value GH₵</label><input id="loyFreeItemValue" type="number" min="0" step="0.01" placeholder="0" /></div>
+            </div>
+            <div class="row-form" style="grid-template-columns:1fr 1fr 1fr;margin-top:10px">
+              <div><label>Referral reward GH₵</label><input id="loyReferralReward" type="number" min="0" step="0.01" placeholder="0" /></div>
+              <div><label>Birthday discount type</label><select id="loyBirthdayType"><option value="percent">Percent %</option><option value="fixed">Fixed GH₵</option></select></div>
+              <div><label>Birthday discount value</label><input id="loyBirthdayValue" type="number" min="0" step="0.01" placeholder="0" /></div>
+            </div>
+            <div style="margin-top:10px">
+              <label style="font-size:12px;color:var(--muted)">VIP tiers — one per line as <code>Name: minimum lifetime GH₵ spend</code>, e.g. Gold: 500</label>
+              <textarea id="loyVipTiers" rows="3" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-sm,6px);font:inherit;background:var(--bg);color:var(--ink)" placeholder="Silver: 200&#10;Gold: 500&#10;Platinum: 1000"></textarea>
+            </div>
+          </details>
+          <div><button class="btn btn-primary btn-sm" onclick="saveLoyaltySettings()">Save loyalty settings</button></div>
         </div>
-        <div class="row-form" style="grid-template-columns:1fr 1fr">
-          <div><label>"Buy N, get 1 free" — orders needed (0 = off)</label><input id="loyStampsTarget" type="number" min="0" max="100" placeholder="0" /></div>
-          <div><label>Free item value GH₵</label><input id="loyFreeItemValue" type="number" min="0" step="0.01" placeholder="0" /></div>
-        </div>
-        <div class="row-form" style="grid-template-columns:1fr 1fr 1fr">
-          <div><label>Referral reward GH₵</label><input id="loyReferralReward" type="number" min="0" step="0.01" placeholder="0" /></div>
-          <div><label>Birthday discount type</label><select id="loyBirthdayType"><option value="percent">Percent %</option><option value="fixed">Fixed GH₵</option></select></div>
-          <div><label>Birthday discount value</label><input id="loyBirthdayValue" type="number" min="0" step="0.01" placeholder="0" /></div>
-        </div>
-        <div>
-          <label style="font-size:12px;color:var(--muted)">VIP tiers — one per line as <code>Name: min spend</code>, lifetime GH₵ spend</label>
-          <textarea id="loyVipTiers" rows="3" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-sm,6px);font:inherit;background:var(--bg);color:var(--ink)" placeholder="Silver: 200&#10;Gold: 500&#10;Platinum: 1000"></textarea>
-        </div>
-        <div><button class="btn btn-primary btn-sm" onclick="saveLoyaltySettings()">Save loyalty settings</button></div>
       </div>
     </div>
+    </div><!-- /growth -->
 
+    <div class="sub-pane" data-subpane="money">
     <!-- Accounting -->
     <div class="dash-card">
       <h2>Accounting</h2>
-      <p class="muted" style="margin-bottom:14px;font-size:13px">Daily sales, profit &amp; loss, VAT export, payouts, and expenses. Give your accountant an "Accountant" role key from Team access below and point them at <code>/wa-b/accountant.html</code> for a read-only view of all of this.</p>
+      <p class="muted" style="margin-bottom:14px;font-size:13px">Daily sales, profit &amp; loss, VAT export, payouts, and expenses. Give your accountant their own login from Team access below — they'll see everything here but can't change any of it.</p>
       <div id="acctDailyBox" class="stat-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px;margin-bottom:20px"></div>
 
       <div style="display:flex;gap:10px;align-items:end;margin-bottom:16px;flex-wrap:wrap">
@@ -636,7 +690,7 @@
         <div class="scroll-x">
           <table id="expenseTable">
             <thead><tr><th>Date</th><th>Category</th><th>Amount (GH₵)</th><th>Description</th><th></th></tr></thead>
-            <tbody></tbody>
+            <tbody><tr><td colspan="5" class="muted">Loading…</td></tr></tbody>
           </table>
         </div>
         <div class="row-form" style="grid-template-columns:1fr 1fr 1fr 2fr auto;margin-top:16px">
@@ -648,15 +702,17 @@
         </div>
       </div>
     </div>
+    </div><!-- /money -->
 
+    <div class="sub-pane" data-subpane="team">
     <!-- Team access -->
     <div class="dash-card">
       <h2>Team access</h2>
-      <p class="muted" style="margin-bottom:14px;font-size:13px">Issue a role-scoped key for each staff member instead of sharing your own login. Owner sees everything; Manager can't touch settings; Support can't touch products/promos; Accountant is read-only.</p>
+      <p class="muted" style="margin-bottom:14px;font-size:13px">Give each staff member their own login instead of sharing yours. Owner can do everything. Manager can't change settings. Support can't change products or promo codes. Accountant can only look, not change anything.</p>
       <div class="scroll-x">
         <table id="keysTable">
           <thead><tr><th>Name</th><th>Role</th><th>Last used</th><th>Expires</th><th>Status</th><th></th></tr></thead>
-          <tbody></tbody>
+          <tbody><tr><td colspan="6" class="muted">Loading…</td></tr></tbody>
         </table>
       </div>
       <div style="margin-top:20px;border-top:1px solid var(--line);padding-top:16px">
@@ -675,6 +731,7 @@
         </div>
       </div>
     </div>
+    </div><!-- /team -->
     </div><!-- /account section -->
 
     </div><!-- /dash-sections -->
@@ -746,6 +803,16 @@ function showSection(name) {
 
 // Restore the last-viewed section from the URL hash (e.g. dashboard.html#stock)
 showSection(location.hash.replace('#', ''));
+
+/** Sub-tabs one level inside a section (e.g. Account's Billing/Bot/Growth/Money/Team). */
+function showSubTab(section, name) {
+  const scope = document.querySelector(`.dash-section[data-section="${section}"]`);
+  if (!scope) return;
+  scope.querySelectorAll(':scope > .sub-pane').forEach(el =>
+    el.classList.toggle('active', el.dataset.subpane === name));
+  scope.querySelectorAll(':scope > .sub-tabs button').forEach(btn =>
+    btn.classList.toggle('active', btn.dataset.subtarget === name));
+}
 
 async function signOut() {
   await window.Clerk.signOut();
@@ -1107,11 +1174,11 @@ async function manageOptions(productId, productName) {
       : '(not enough order history yet)';
     const choice = prompt(
       `Options for ${productName}\n\nVariants:\n${variantLines}\n\nAdd-ons:\n${addonLines}\n\nFrequently bought together:\n${frequentLines}\n\n` +
-      `Type: "variant" to add a variant, "addon" to add an add-on, "rm variant <name>" or "rm addon <name>" to remove one. Leave blank to close.`
+      `Type "add variant" to add a variant, "add addon" to add an add-on. To remove one, type "remove variant" or "remove addon" followed by its name. Leave blank to close.`
     );
     if (!choice) return;
     const cmd = choice.trim().toLowerCase();
-    if (cmd === 'variant') {
+    if (cmd === 'variant' || cmd === 'add variant') {
       const name = prompt('Variant name (e.g. Large):');
       if (!name) return;
       const delta = parseFloat(prompt('Price difference vs base price, GH₵ (can be negative, e.g. 5 or -2):', '0'));
@@ -1120,7 +1187,7 @@ async function manageOptions(productId, productName) {
       toast('Variant added');
       return manageOptions(productId, productName);
     }
-    if (cmd === 'addon') {
+    if (cmd === 'addon' || cmd === 'add addon') {
       const name = prompt('Add-on name (e.g. Extra chicken):');
       if (!name) return;
       const price = parseFloat(prompt('Price, GH₵:', '0'));
@@ -1129,16 +1196,16 @@ async function manageOptions(productId, productName) {
       toast('Add-on added');
       return manageOptions(productId, productName);
     }
-    if (cmd.startsWith('rm variant ')) {
-      const name = choice.slice(choice.toLowerCase().indexOf('rm variant ') + 11).trim().toLowerCase();
+    if (cmd.startsWith('remove variant ') || cmd.startsWith('rm variant ')) {
+      const name = choice.slice(choice.toLowerCase().indexOf('variant ') + 8).trim().toLowerCase();
       const match = variants.find(v => v.name.toLowerCase() === name);
       if (!match) return toast('Variant not found');
       await api('/products/variants/' + match.id, { method: 'DELETE' });
       toast('Variant removed');
       return manageOptions(productId, productName);
     }
-    if (cmd.startsWith('rm addon ')) {
-      const name = choice.slice(choice.toLowerCase().indexOf('rm addon ') + 9).trim().toLowerCase();
+    if (cmd.startsWith('remove addon ') || cmd.startsWith('rm addon ')) {
+      const name = choice.slice(choice.toLowerCase().indexOf('addon ') + 6).trim().toLowerCase();
       const match = addons.find(a => a.name.toLowerCase() === name);
       if (!match) return toast('Add-on not found');
       await api('/products/addons/' + match.id, { method: 'DELETE' });
@@ -1357,7 +1424,7 @@ async function addSupplier() {
 }
 
 async function deleteSupplier(id, name) {
-  if (!confirm('Delete supplier "' + name + '"? Products keep selling — this just removes the vendor record.')) return;
+  if (!confirm('Delete supplier "' + name + '"? Products keep selling — this just removes the supplier record.')) return;
   try {
     await api('/inventory/suppliers/' + id, { method: 'DELETE' });
     toast('Supplier removed');
@@ -1870,10 +1937,10 @@ async function loadAnalytics(days) {
 
     const variants = (a.nudge_recovery.by_variant || []).filter(v => v.nudges_sent > 0);
     document.getElementById('anaNudgeVariants').innerHTML = variants.length < 2 ? '' : `
-      <h3 style="font-size:14px;margin-bottom:10px">Nudge A/B test</h3>
+      <h3 style="font-size:14px;margin-bottom:10px">Reminder message test</h3>
       <div class="scroll-x">
         <table>
-          <thead><tr><th>Variant</th><th>Sent</th><th>Recovered</th><th>Rate</th><th>Revenue</th></tr></thead>
+          <thead><tr><th>Message</th><th>Sent</th><th>Bought after</th><th>Rate</th><th>Revenue</th></tr></thead>
           <tbody>
             ${variants.map(v => `<tr>
               <td>${v.variant.toUpperCase()}</td>
@@ -2175,6 +2242,14 @@ async function loadSettings() {
   document.getElementById('cnTemplate').value = settings.cart_nudge_message_template || '';
   document.getElementById('cnTemplateB').value = settings.cart_nudge_template_b || '';
   document.getElementById('cnCoupon').value = settings.cart_nudge_coupon_code || '';
+  syncCheckboxGroup('cnEnabled', 'cnFields');
+}
+
+/** Show/hide a settings block based on its enable checkbox — so a feature that's
+    off doesn't bury the page in fields nobody's using yet. */
+function syncCheckboxGroup(checkboxId, groupId) {
+  document.getElementById(groupId).style.display =
+    document.getElementById(checkboxId).checked ? '' : 'none';
 }
 
 async function saveCartNudgeSettings() {
@@ -2194,7 +2269,7 @@ async function saveCartNudgeSettings() {
         cart_nudge_coupon_code: document.getElementById('cnCoupon').value.trim() || null
       })
     });
-    toast('Cart recovery settings saved');
+    toast('Cart reminder settings saved');
   } catch (err) { toast(err.message); }
 }
 
@@ -2210,6 +2285,7 @@ async function loadLoyaltySettings() {
   document.getElementById('loyBirthdayValue').value = settings.loyalty_birthday_discount_value ?? 0;
   const tiers = Array.isArray(settings.loyalty_vip_tiers) ? settings.loyalty_vip_tiers : [];
   document.getElementById('loyVipTiers').value = tiers.map(t => `${t.name}: ${t.min_spend_ghs}`).join('\n');
+  syncCheckboxGroup('loyEnabled', 'loyFields');
 }
 
 async function saveLoyaltySettings() {
