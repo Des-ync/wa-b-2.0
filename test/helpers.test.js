@@ -10,8 +10,29 @@ const {
   ORDER_NUMBER_RE,
   slugify,
   sanitizeBusiness,
-  mapsLinkForAddress
+  mapsLinkForAddress,
+  syntheticEmail
 } = require('../src/utils/helpers');
+
+test('syntheticEmail builds a well-formed address on a real, non-reserved domain', () => {
+  const email = syntheticEmail('customer', 'ORD-ABC-123');
+  assert.match(email, /^customer\+ORD-ABC-123@[a-z0-9.-]+\.[a-z]{2,}$/i);
+  // The original bug: Paystack rejects reserved/non-routable TLDs like
+  // `.local` (RFC 6762) with "Invalid email address passed". Guard against
+  // ever regressing back to one.
+  assert.ok(!/\.(local|test|invalid|example)$/i.test(email.split('@')[1]));
+});
+
+test('syntheticEmail respects PAYSTACK_EMAIL_DOMAIN override', () => {
+  const original = process.env.PAYSTACK_EMAIL_DOMAIN;
+  process.env.PAYSTACK_EMAIL_DOMAIN = 'example.com';
+  try {
+    assert.equal(syntheticEmail('subscriber', 'SUB-1'), 'subscriber+SUB-1@example.com');
+  } finally {
+    if (original === undefined) delete process.env.PAYSTACK_EMAIL_DOMAIN;
+    else process.env.PAYSTACK_EMAIL_DOMAIN = original;
+  }
+});
 
 test('normalizeGhanaPhone accepts common Ghanaian formats', () => {
   assert.equal(normalizeGhanaPhone('0241234567'), '+233241234567');

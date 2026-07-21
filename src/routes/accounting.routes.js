@@ -147,12 +147,13 @@ router.get('/vat-export', requirePermission('financial', 'read'), async (req, re
 /**
  * GET /api/accounting/reconciliation?business_id=&from=&to=
  * Cross-checks orders we believe are PAID against the raw gateway webhook
- * log (webhook_events) for a matching Paystack/pawaPay/Hubtel event with the
- * same reference — surfaces the one failure mode that actually matters for
+ * log (webhook_events) for a matching Paystack/Hubtel event with the same
+ * reference — surfaces the one failure mode that actually matters for
  * reconciliation: an order marked paid in our DB with no corroborating
  * gateway event (a webhook that never arrived, or a manual/bugged status
- * flip). Does not call out to Paystack/pawaPay directly — reconciliation
- * against what we already logged, not a live API integration.
+ * flip). Does not call out to Paystack directly — reconciliation against
+ * what we already logged, not a live API integration. 'pawapay' stays in
+ * the source list below purely to match old webhook_events rows.
  */
 router.get('/reconciliation', requirePermission('financial', 'read'), async (req, res) => {
   try {

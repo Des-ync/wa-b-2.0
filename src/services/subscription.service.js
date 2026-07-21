@@ -1,8 +1,7 @@
-const { v4: uuidv4 } = require('uuid');
 const { query, transaction } = require('../config/database');
 const logger = require('../utils/logger');
-const { addDays, slugify } = require('../utils/helpers');
-const pawapay = require('./pawapay.service');
+const { addDays, slugify, generateReference, syntheticEmail } = require('../utils/helpers');
+const paystack = require('./paystack.service');
 
 const SUSPENSION_GRACE_DAYS = parseInt(process.env.SUSPENSION_GRACE_DAYS || '3', 10);
 const DEFAULT_TRIAL_DAYS = parseInt(process.env.DEFAULT_TRIAL_DAYS || '14', 10);
@@ -99,13 +98,15 @@ async function createPendingSubscription({ businessId, planId }) {
 }
 
 /**
- * Initiate a pawaPay MoMo deposit for a SaaS subscription. Creates a
- * billing_transactions row (status='pending') + subscription (if missing),
- * all in a single transaction.
+ * Initiate a Paystack MoMo charge (server-push: the business approves a
+ * prompt on their phone, same UX the old pawaPay integration had) for a SaaS
+ * subscription. Creates a billing_transactions row (status='pending') +
+ * subscription (if missing), all in a single transaction.
  *
- * The billing reference IS the pawaPay depositId (a UUID we generate), so
- * deposit callbacks map straight back to the billing row. The callback URL
- * is configured once in the pawaPay dashboard, not per-request.
+ * The billing reference is generated with a 'SUB-' prefix (as opposed to
+ * orders' 'ORD-' prefix) so the shared Paystack webhook/callback path can
+ * tell a subscription charge apart from a customer order charge and route
+ * it to applyBillingSuccess/applyBillingFailure instead of the order flow.
  *
  * Idempotency: at most ONE pending billing_transaction per subscription is
  * allowed (enforced by uq_billing_pending_per_subscription). If a pending
@@ -163,12 +164,11 @@ async function initiateRenewal({ business, plan }) {
       subscription = upd.rows[0];
     }
 
-    // The reference doubles as the pawaPay depositId, which must be a UUID.
-    const reference = uuidv4();
+    const reference = generateReference('SUB');
     const ins = await client.query(
       `INSERT INTO billing_transactions
          (business_id, subscription_id, amount_ghs, gateway, reference, status, plan_id)
-       VALUES ($1,$2,$3,'pawapay',$4,'pending',$5)
+       VALUES ($1,$2,$3,'paystack',$4,'pending',$5)
        RETURNING *`,
       [business.id, subscription.id, plan.price_ghs, reference, plan.id]
     );
@@ -188,18 +188,23 @@ async function initiateRenewal({ business, plan }) {
     };
   }
 
-  const charge = await pawapay.chargeSubscription({
+  const charge = await paystack.initializeMoMoCharge({
+    email: syntheticEmail('subscriber', reference),
     phoneNumber: business.whatsapp_number,
     amountGhs: plan.price_ghs,
-    depositId: reference,
-    description: `${plan.display_name} renewal`,
-    clientReferenceId: billingRow.subscription.id
+    reference,
+    metadata: {
+      subscription_id: billingRow.subscription.id,
+      business_id: business.id,
+      plan_id: plan.id,
+      description: `${plan.display_name} renewal`
+    }
   });
 
   if (!charge.success) {
     if (charge.transient) {
       // Don't mark failed — the charge may actually have gone through. Leave it
-      // 'pending' so the pawaPay callback or the billing sweeper reconciles the
+      // 'pending' so the Paystack webhook or the billing sweeper reconciles the
       // true outcome. Record the transport error for visibility only.
       await query(
         `UPDATE billing_transactions SET gateway_response = $2::jsonb WHERE reference = $1`,

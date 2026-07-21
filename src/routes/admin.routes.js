@@ -705,7 +705,7 @@ router.get('/webhooks', async (req, res) => {
  * raw payload included, so a failure can be diagnosed without SSHing in to
  * read logs. signature_header is the raw header value the provider sent
  * (present only for sources that verify one at the door — WhatsApp,
- * Instagram, Paystack, Hubtel; pawaPay re-verifies server-side instead).
+ * Instagram, Paystack, Hubtel).
  */
 router.get('/webhooks/:id', async (req, res) => {
   try {

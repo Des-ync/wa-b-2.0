@@ -16,7 +16,6 @@
 const logger = require('../utils/logger');
 const { query } = require('../config/database');
 const paystack = require('./paystack.service');
-const pawapay = require('./pawapay.service');
 const orderService = require('./order.service');
 const subService = require('./subscription.service');
 const webhookProcessor = require('./webhook.processor');
@@ -27,7 +26,7 @@ const lock = require('./worker.lock');
 const PENDING_TTL_MINUTES = parseInt(process.env.PAYMENT_PENDING_TTL_MINUTES || '15', 10);
 const HARD_EXPIRE_HOURS = parseInt(process.env.PAYMENT_HARD_EXPIRE_HOURS || '24', 10);
 const STALE_ORDER_HOURS = parseInt(process.env.STALE_ORDER_HOURS || '48', 10);
-// SaaS subscription billing (pawaPay) has its own, slightly longer grace before
+// SaaS subscription billing (Paystack) has its own, slightly longer grace before
 // we reconcile — a MoMo approval prompt can legitimately sit a few minutes.
 const BILLING_PENDING_TTL_MINUTES = parseInt(process.env.BILLING_PENDING_TTL_MINUTES || '30', 10);
 
@@ -57,14 +56,14 @@ async function expirePendingPayment(order) {
  * pending charge per subscription is allowed (to prevent double billing), so a
  * charge abandoned by the customer — or one left pending by a transient gateway
  * error / lost callback — would otherwise block the merchant from ever renewing.
- * We ask pawaPay for the true state and resolve it: applied, failed, or (after
+ * We ask Paystack for the true state and resolve it: applied, failed, or (after
  * the hard-expiry window) force-failed to release the lock.
  */
 async function reconcileStaleBilling() {
   const stale = await query(
     `SELECT * FROM billing_transactions
       WHERE status = 'pending'
-        AND gateway = 'pawapay'
+        AND gateway = 'paystack'
         AND initiated_at < NOW() - ($1 || ' minutes')::interval
       ORDER BY initiated_at ASC
       LIMIT 25`,
@@ -75,13 +74,13 @@ async function reconcileStaleBilling() {
 
   for (const tx of stale.rows) {
     try {
-      const verified = await pawapay.checkDepositStatus(tx.reference);
+      const verified = await paystack.verifyTransaction(tx.reference);
       if (!verified.success) {
         logger.warn('[sweeper] billing status check failed ref=%s: %s', tx.reference, verified.error);
         continue; // Try again next run.
       }
 
-      if (verified.completed) {
+      if (verified.status === 'success') {
         if (verified.currency && verified.currency !== 'GHS') {
           logger.error('[sweeper] billing %s completed in unexpected currency %s; failing',
             tx.reference, verified.currency);
@@ -91,22 +90,22 @@ async function reconcileStaleBilling() {
         logger.info('[sweeper] billing %s actually paid — applying', tx.reference);
         await webhookProcessor.applyBillingSuccess({
           reference: tx.reference,
-          transactionId: verified.providerTransactionId,
-          amount: verified.amount
+          transactionId: verified.gateway_ref,
+          amount: verified.amount_ghs
         });
         continue;
       }
 
-      if (verified.failed || !verified.found) {
+      if (['failed', 'abandoned', 'reversed'].includes(verified.status)) {
         await webhookProcessor.applyBillingFailure({
           reference: tx.reference,
-          errorPayload: verified.failureReason || { notFound: !verified.found },
-          reason: verified.failureReason?.failureCode || (!verified.found ? 'not_found' : 'declined')
+          errorPayload: { status: verified.status },
+          reason: verified.status
         });
         continue;
       }
 
-      // Still in flight (ACCEPTED/PROCESSING). Give it until the hard-expiry
+      // Still in flight (pending/ongoing/queued). Give it until the hard-expiry
       // window, then stop waiting so the subscription isn't blocked forever.
       const ageHours = (Date.now() - new Date(tx.initiated_at).getTime()) / 3_600_000;
       if (ageHours >= HARD_EXPIRE_HOURS) {
@@ -142,6 +141,13 @@ async function runPaymentSweeper() {
 
         const verification = await paystack.verifyTransaction(order.payment_ref);
         if (verification.success && verification.status === 'success') {
+          // Same multi-currency guard as the live webhook path (processPaystack) —
+          // an out-of-band currency here means our GHS amount assumption is wrong.
+          if (verification.currency && verification.currency !== 'GHS') {
+            logger.error('[sweeper] order %s verified paid in unexpected currency %s; skipping (needs manual review)',
+              order.order_number, verification.currency);
+            continue;
+          }
           logger.info('[sweeper] order %s actually paid — applying', order.order_number);
           await conversation.handlePaymentSuccess({
             reference: order.payment_ref,

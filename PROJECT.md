@@ -3,7 +3,7 @@
 ## Architecture
 This application is a WhatsApp Commerce & Subscription SaaS.
 - **Stateful Conversation Engine & Webhooks**: Ingests incoming WhatsApp webhooks, routes them per tenant, queues messages for sequential processing, uses locking mechanisms to prevent concurrency races.
-- **SaaS Billing & Renewals**: Integrates Paystack, pawaPay, and Hubtel for subscription handling. Manages plan transitions, webhook event signature verification, and daily renewal crons.
+- **SaaS Billing & Renewals**: Integrates Paystack (dominant/active gateway for both order checkout and subscription billing) with Hubtel kept as an inactive legacy fallback. Manages plan transitions, webhook event signature verification, and daily renewal crons.
 - **Security & Authentication**: Uses Clerk auth, API key middleware for API endpoints, and verifies incoming provider webhook signatures.
 - **Database**: SQLite/PostgreSQL used for storage.
 
@@ -23,7 +23,7 @@ This application is a WhatsApp Commerce & Subscription SaaS.
 |---|------|-------|-------------|--------|
 | 1 | Exploration & Scoping | Initial codebase walkthrough and setup analysis | None | DONE |
 | 2 | Stateful Conversation Engine Audit | Audit conversation handler, queue, lock, whatsapp service, webhooks route | M1 | DONE |
-| 3 | SaaS Billing & Renewals Audit | Audit Paystack, pawaPay, Hubtel, subscription service, payment routes | M1 | DONE |
+| 3 | SaaS Billing & Renewals Audit | Audit Paystack, Hubtel, subscription service, payment routes | M1 | DONE |
 | 4 | Security & Authentication Audit | Audit auth middleware, routes, API keys, database models | M1 | DONE |
 | 5 | Test Suite & Final Report | Synthesize findings into audit_report.md, verify demonstration test scripts | M2, M3, M4 | DONE |
 

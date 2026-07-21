@@ -108,7 +108,7 @@ test('enqueue: a missing signature header stores null, not undefined/empty-strin
     return { rows: [], rowCount: 0 };
   };
   await withQuery(fakeQuery, async () => {
-    await queue.enqueue({ source: 'pawapay', externalId: 'dep.1', payload: { a: 1 } });
+    await queue.enqueue({ source: 'hubtel', externalId: 'dep.1', payload: { a: 1 } });
   });
   assert.equal(capturedParams[4], null);
 });

@@ -14,6 +14,7 @@ const {
   detectNetwork,
   formatGhs,
   generateReference,
+  syntheticEmail,
   truncate,
   formatDate,
   sleep,
@@ -2232,7 +2233,7 @@ async function startMomoPayment({ business, customer, orderId, momoNumber }) {
   await orderService.attachPaymentReference(order.id, reference, 'momo');
 
   const result = await paystack.initializeMoMoCharge({
-    email: `customer+${reference}@whatsapp-saas.local`,
+    email: syntheticEmail('customer', reference),
     amountGhs: order.total_ghs,
     phoneNumber: momoNumber,
     reference,
@@ -2278,7 +2279,7 @@ async function startCardPayment({ business, customer, orderId }) {
     : undefined;
 
   const result = await paystack.createPaymentLink({
-    email: `customer+${reference}@whatsapp-saas.local`,
+    email: syntheticEmail('customer', reference),
     amountGhs: order.total_ghs,
     reference,
     callbackUrl,

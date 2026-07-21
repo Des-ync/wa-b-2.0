@@ -7,8 +7,6 @@ const queue = require('../services/webhook.queue');
 
 const router = express.Router();
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 /**
  * Paystack webhook: HMAC-SHA512 over the raw body. Mounted with express.raw()
  * in server.js so req.body is a Buffer here.
@@ -114,43 +112,13 @@ router.get('/paystack/callback', callbackLimiter, async (req, res) => {
 });
 
 /**
- * pawaPay deposit callback (SaaS subscription billing). Configure
- * {PUBLIC_BASE_URL}/api/payments/pawapay/callback in the pawaPay dashboard.
- *
- * The callback body is treated purely as a TRIGGER: the queue processor
- * re-verifies the deposit via GET /v2/deposits/{depositId} against pawaPay
- * before applying any billing state, so a forged callback cannot fake a
- * payment — at worst it makes us look up a deposit that doesn't exist.
- */
-router.post('/pawapay/callback', async (req, res) => {
-  const payload = req.body || {};
-  const depositId = payload.depositId;
-
-  if (typeof depositId !== 'string' || !UUID_RE.test(depositId)) {
-    logger.warn('pawaPay callback missing/invalid depositId; dropping');
-    return res.status(400).send('invalid depositId');
-  }
-
-  try {
-    const { duplicate } = await queue.enqueue({
-      source: 'pawapay',
-      externalId: `deposit:${depositId}:${payload.status || 'x'}`,
-      payload,
-      signatureValid: true
-    });
-    if (duplicate) {
-      logger.info('pawaPay callback duplicate ignored: %s', depositId);
-    }
-    res.status(200).send('OK');
-  } catch (err) {
-    logger.error('pawaPay enqueue failed: %s', err.message);
-    res.status(500).send('enqueue failed');
-  }
-});
-
-/**
  * Hubtel callback: signed with HMAC-SHA256 (`x-hubtel-signature`) when configured.
- * Kept for legacy in-flight transactions initiated before the pawaPay switch.
+ *
+ * Legacy fallback only — Paystack is the sole active gateway for both customer
+ * checkout and SaaS subscription billing. Hubtel is never used to initiate a
+ * new charge; this route stays mounted purely to receive/verify any residual
+ * in-flight Hubtel callbacks from before the Paystack switch. Not wired back
+ * into any active flow — kept dormant intentionally, to be reconsidered later.
  * Mounted with express.raw() so we can verify the raw body.
  */
 router.post('/hubtel/callback', async (req, res) => {

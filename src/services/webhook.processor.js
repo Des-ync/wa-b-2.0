@@ -4,7 +4,6 @@ const conversation = require('./conversation.handler');
 const subService = require('./subscription.service');
 const notification = require('./notification.service');
 const hubtel = require('./hubtel.service');
-const pawapay = require('./pawapay.service');
 const { query } = require('../config/database');
 
 /**
@@ -37,6 +36,14 @@ async function processMessenger(payload) {
   await conversation.handleInbound(payload, 'messenger');
 }
 
+/**
+ * Paystack now serves two distinct flows through the same webhook: customer
+ * order payments (references generated with generateReference('ORD') in
+ * conversation.handler.js) and SaaS subscription billing (references
+ * generated with generateReference('SUB') in subscription.service.js,
+ * replacing the old pawaPay integration). The 'SUB-' prefix is how we tell
+ * them apart and route to the right handler.
+ */
 async function processPaystack(payload) {
   const eventType = payload?.event;
   const data = payload?.data || {};
@@ -49,6 +56,8 @@ async function processPaystack(payload) {
     return;
   }
 
+  const isBilling = reference.startsWith('SUB-');
+
   if (eventType === 'charge.success' && data.status === 'success') {
     // Paystack accounts can be multi-currency. `amount` is a bare minor-unit
     // integer with no currency baked in, so a 1000 NGN charge would otherwise
@@ -58,11 +67,19 @@ async function processPaystack(payload) {
         reference, data.currency);
       return;
     }
-    await conversation.handlePaymentSuccess({ reference, gatewayRef, amount });
+    if (isBilling) {
+      await applyBillingSuccess({ reference, transactionId: gatewayRef, amount });
+    } else {
+      await conversation.handlePaymentSuccess({ reference, gatewayRef, amount });
+    }
     return;
   }
   if (eventType === 'charge.failed' || data.status === 'failed') {
-    await conversation.handlePaymentFailure({ reference });
+    if (isBilling) {
+      await applyBillingFailure({ reference, errorPayload: payload, reason: data.gateway_response || 'declined' });
+    } else {
+      await conversation.handlePaymentFailure({ reference });
+    }
     return;
   }
   logger.debug('Paystack event ignored: %s status=%s', eventType, data.status);
@@ -143,61 +160,12 @@ async function processHubtel(payload) {
   });
 }
 
-/**
- * pawaPay deposit callbacks are a TRIGGER only. The deposit's true state is
- * fetched from pawaPay's status API before anything is applied, so callback
- * forgery is harmless. A deposit still in flight throws → queue backoff retry.
- */
-async function processPawapay(payload) {
-  const parsed = pawapay.parseCallback(payload);
-  if (!parsed.depositId) {
-    logger.warn('pawaPay callback missing depositId; dropping');
-    return;
-  }
-
-  const verified = await pawapay.checkDepositStatus(parsed.depositId);
-  if (!verified.success) {
-    throw new Error(`pawaPay status check failed for ${parsed.depositId}: ${verified.error}`);
-  }
-  if (!verified.found) {
-    logger.warn('pawaPay callback for unknown depositId %s; dropping', parsed.depositId);
-    return;
-  }
-
-  if (verified.completed) {
-    if (verified.currency && verified.currency !== 'GHS') {
-      logger.error('pawaPay deposit %s completed in unexpected currency %s; dropping',
-        parsed.depositId, verified.currency);
-      return;
-    }
-    await applyBillingSuccess({
-      reference: parsed.depositId,
-      transactionId: verified.providerTransactionId,
-      amount: verified.amount
-    });
-    return;
-  }
-
-  if (verified.failed) {
-    await applyBillingFailure({
-      reference: parsed.depositId,
-      errorPayload: verified.failureReason || payload,
-      reason: verified.failureReason?.failureCode || 'declined'
-    });
-    return;
-  }
-
-  // ACCEPTED / PROCESSING / IN_RECONCILIATION — not final yet; retry later.
-  throw new Error(`pawaPay deposit ${parsed.depositId} not finalized yet (${verified.status})`);
-}
-
 const PROCESSORS = {
   whatsapp:  processWhatsApp,
   instagram: processInstagram,
   messenger: processMessenger,
   paystack:  processPaystack,
-  hubtel:    processHubtel,
-  pawapay:   processPawapay
+  hubtel:    processHubtel
 };
 
 let _running = false;

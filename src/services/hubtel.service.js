@@ -48,7 +48,7 @@ async function chargeSubscription({ phoneNumber, amountGhs, reference, descripti
   const body = {
     CustomerName: 'SaaS Subscriber',
     CustomerMsisdn: msisdn,
-    CustomerEmail: `subscriber+${reference}@whatsapp-saas.local`,
+    CustomerEmail: syntheticEmail('subscriber', reference),
     Channel: channel,
     Amount: Number(amountGhs),
     PrimaryCallbackUrl: primaryCallbackUrl || callbackUrl,

@@ -3,7 +3,7 @@
 A production-ready Node.js + Express + PostgreSQL platform that lets Ghanaian SMEs sell, accept payments, and manage customer orders entirely through WhatsApp — and bills those SMEs monthly via Mobile Money for using the platform.
 
 - **End-customer flow** (browse menu → cart → address → MoMo/Card payment → confirmation) over WhatsApp Cloud API.
-- **SaaS billing flow** (PAY / RENEW / STATUS / UPGRADE / CANCEL / SUPPORT) via pawaPay MoMo deposits (server-initiated collections, flat 1%).
+- **SaaS billing flow** (PAY / RENEW / STATUS / UPGRADE / CANCEL / SUPPORT) via Paystack MoMo collections (server-initiated, flat 1%). Hubtel is kept mounted as an inactive legacy fallback only.
 - Stateful conversation engine with durable webhook queue, full audit trail, cron-driven renewals/reminders/suspensions.
 
 ---
@@ -17,7 +17,6 @@ A production-ready Node.js + Express + PostgreSQL platform that lets Ghanaian SM
 | ngrok (dev) | latest |
 | Meta Business account | with WhatsApp Cloud API app |
 | Paystack account | test or live |
-| pawaPay merchant account | with Ghana deposits enabled |
 
 ---
 
@@ -37,9 +36,8 @@ Copy `.env.example` to `.env` and fill in every required value:
 | `WA_API_VERSION` | | Default `v19.0` |
 | `PAYSTACK_SECRET_KEY` | ✅ | `sk_test_...` or `sk_live_...` |
 | `PAYSTACK_PUBLIC_KEY` | | `pk_test_...` or `pk_live_...` |
-| `PAWAPAY_API_TOKEN` | ✅ | pawaPay API token (sandbox or production) |
-| `PAWAPAY_BASE_URL` | | Defaults to sandbox `https://api.sandbox.pawapay.io`; set `https://api.pawapay.io` for production |
-| `HUBTEL_*` | | Legacy — only to receive callbacks for charges initiated before the pawaPay switch |
+| `PAYSTACK_EMAIL_DOMAIN` | | Domain for the synthetic customer/subscriber email Paystack requires; must be real/registrable (defaults to `skes.tech`) |
+| `HUBTEL_*` | | Legacy fallback — kept only to receive/verify callbacks for any residual in-flight charges; never used to initiate new charges. Inactive by design. |
 | `SUPPORT_WHATSAPP_NUMBER` | ✅ | E.164 number shown in *SUPPORT* replies |
 | `DEFAULT_TRIAL_DAYS` | | Days of free trial on new businesses (default `14`) |
 | `SUSPENSION_GRACE_DAYS` | | Days past renewal before auto-suspension (default `3`) |
@@ -84,7 +82,7 @@ Server boots on `http://localhost:3000`. Health check: `GET /health`.
 
 ## 4. Expose your local server with ngrok
 
-WhatsApp + Paystack + pawaPay webhooks need a public HTTPS URL. In a separate terminal:
+WhatsApp + Paystack webhooks need a public HTTPS URL. In a separate terminal:
 
 ```bash
 ngrok http 3000
@@ -135,12 +133,9 @@ Without this field set, inbound messages for that tenant will be silently droppe
 
 ---
 
-## 7. Configure pawaPay callback
+## 7. Hubtel — legacy fallback (inactive)
 
-1. In the **pawaPay dashboard → API configuration → Callback URLs**, set the deposit callback to:
-   `https://xxxx.ngrok.io/api/payments/pawapay/callback`
-2. No shared-secret HMAC is needed on this endpoint: the callback body is treated purely as a trigger. Before any billing state changes, the queue processor re-verifies the deposit with `GET /v2/deposits/{depositId}` against pawaPay's API, so forged callbacks cannot fake a payment.
-3. The legacy `POST /api/payments/hubtel/callback` route (HMAC-verified) remains mounted for charges initiated before the pawaPay switch; it can be removed once no `hubtel` transactions are pending.
+Paystack is the sole active payment gateway (order checkout and SaaS subscription billing both). Hubtel is not wired into any initiation flow — nothing in this codebase calls `hubtel.service.js#chargeSubscription`. The `POST /api/payments/hubtel/callback` route (HMAC-verified) stays mounted purely to receive/verify any residual in-flight Hubtel callbacks; it can be removed once no `hubtel` transactions are pending. Left in place intentionally as a fallback to be reconsidered later, not activated.
 
 ---
 
@@ -198,10 +193,9 @@ UPDATE api_keys SET revoked_at = NOW() WHERE id = '<key-uuid>';
 
 | Method | Path | Auth | Description |
 | --- | --- | --- | --- |
-| POST | `/api/payments/paystack/webhook` | None (HMAC-verified) | Paystack signed events |
+| POST | `/api/payments/paystack/webhook` | None (HMAC-verified) | Paystack signed events — order payments AND SaaS subscription billing (routed by reference prefix, `ORD-` vs `SUB-`) |
 | GET  | `/api/payments/paystack/callback` | None | Browser redirect after card payment |
-| POST | `/api/payments/pawapay/callback` | None (verified by status re-fetch) | pawaPay deposit result callback |
-| POST | `/api/payments/hubtel/callback` | None (HMAC-verified) | Legacy Hubtel payment result callback |
+| POST | `/api/payments/hubtel/callback` | None (HMAC-verified) | Legacy Hubtel payment result callback — inactive fallback, retained only for residual in-flight charges |
 
 ### Subscriptions (SaaS billing)
 
@@ -260,7 +254,7 @@ UPDATE api_keys SET revoked_at = NOW() WHERE id = '<key-uuid>';
 
 | Time | Job | Action |
 | --- | --- | --- |
-| 08:00 | `runRenewalJob` | Charge subscriptions whose `next_billing_date ≤ NOW()` via pawaPay. Also finalizes cancel-at-period-end subscriptions and clears stale conversation sessions. |
+| 08:00 | `runRenewalJob` | Charge subscriptions whose `next_billing_date ≤ NOW()` via Paystack. Also finalizes cancel-at-period-end subscriptions and clears stale conversation sessions. |
 | 09:00 | `runReminderJob` | Send 3-day renewal reminders to businesses approaching billing date. |
 | 10:00 | `runSuspensionJob` | Suspend businesses more than `SUSPENSION_GRACE_DAYS` past due. |
 
@@ -270,7 +264,7 @@ Each job acquires a DB advisory lock (`worker_locks` table) before running — o
 
 ## 12. Webhook queue & worker
 
-All inbound webhook events (WhatsApp messages, Paystack events, pawaPay/Hubtel callbacks) are persisted to the `webhook_events` table **before** the HTTP `200 OK` is sent. A background processor drains the queue and retries failed events with exponential backoff (up to 8 attempts).
+All inbound webhook events (WhatsApp messages, Paystack events, legacy Hubtel callbacks) are persisted to the `webhook_events` table **before** the HTTP `200 OK` is sent. A background processor drains the queue and retries failed events with exponential backoff (up to 8 attempts).
 
 **Single-process deploy** (default): the processor runs inside the HTTP server.
 
@@ -303,15 +297,14 @@ whatsapp-saas/
 │   │   └── issue-key.js                CLI: npm run issue-key
 │   ├── routes/
 │   │   ├── webhook.routes.js           WhatsApp inbound
-│   │   ├── payment.routes.js           Paystack + pawaPay (+legacy Hubtel) callbacks
+│   │   ├── payment.routes.js           Paystack (+legacy Hubtel) callbacks
 │   │   ├── subscription.routes.js      SaaS subscription management
 │   │   ├── order.routes.js             Order CRUD
 │   │   └── admin.routes.js             Dashboard stats API
 │   ├── services/
 │   │   ├── whatsapp.service.js         Send messages + templates
-│   │   ├── paystack.service.js         MoMo charge, card link, signature verify
-│   │   ├── pawapay.service.js          MoMo deposits (SaaS billing) + status verify
-│   │   ├── hubtel.service.js           Legacy — callback verify for pre-switch charges
+│   │   ├── paystack.service.js         MoMo charge, card link, signature verify — order checkout AND SaaS billing
+│   │   ├── hubtel.service.js           Legacy fallback — callback verify only, inactive
 │   │   ├── subscription.service.js     SaaS billing lifecycle
 │   │   ├── conversation.handler.js     Stateful bot brain
 │   │   ├── order.service.js            Order creation + payment marking
@@ -342,6 +335,6 @@ Logs are written to `./logs/combined.log` and `./logs/error.log` (rotated at 5 M
 - [ ] `businesses.wa_phone_number_id` is set; a WhatsApp message routes to the correct tenant
 - [ ] `GET /api/admin/stats` with an admin key returns KPI JSON
 - [ ] `GET /api/admin/stats` with no key returns `401`
-- [ ] `POST /api/subscriptions` triggers a pawaPay MoMo prompt on the test number
+- [ ] `POST /api/subscriptions` triggers a Paystack MoMo prompt on the test number
 - [ ] A successful Paystack test charge updates `orders.payment_status = 'paid'` and the customer receives a WhatsApp confirmation
 - [ ] Sending a duplicate Paystack webhook for the same reference does **not** double-apply payment

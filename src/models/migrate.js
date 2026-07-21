@@ -771,11 +771,11 @@ CREATE INDEX IF NOT EXISTS idx_expenses_business ON expenses(business_id, expens
 
 -- =========================================================================
 -- payouts: MANUAL record of money actually sent to a merchant's MoMo.
--- Customer order payments all land in the platform's own Paystack/Hubtel/
--- pawaPay account (there is no per-tenant subaccount/split), so paying a
--- merchant their share is an operational step ops performs outside this
--- codebase — this table is the audit trail for that step, not an automated
--- disbursement integration (never invent one without vendor docs in hand).
+-- Customer order payments all land in the platform's own Paystack account
+-- (there is no per-tenant subaccount/split), so paying a merchant their
+-- share is an operational step ops performs outside this codebase — this
+-- table is the audit trail for that step, not an automated disbursement
+-- integration (never invent one without vendor docs in hand).
 -- =========================================================================
 CREATE TABLE IF NOT EXISTS payouts (
   id             UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -823,8 +823,12 @@ CREATE INDEX IF NOT EXISTS idx_audit_log_business ON audit_log(business_id, crea
 CREATE INDEX IF NOT EXISTS idx_audit_log_created ON audit_log(created_at DESC);
 
 -- =========================================================================
--- Upgrade path: databases created before the pawaPay gateway existed carry
--- CHECK constraints without 'pawapay'. Drop-and-recreate is re-runnable.
+-- Upgrade path: 'pawapay' is retired (Paystack is now the sole active
+-- gateway for both order checkout and SaaS subscription billing; Hubtel is
+-- kept only as an inactive legacy fallback). The value stays allowed here
+-- purely so historical billing_transactions/webhook_events rows written
+-- while pawaPay was live don't violate the constraint on re-migrate — no
+-- code path writes 'pawapay' going forward. Drop-and-recreate is re-runnable.
 -- =========================================================================
 ALTER TABLE billing_transactions DROP CONSTRAINT IF EXISTS billing_transactions_gateway_check;
 ALTER TABLE billing_transactions ADD CONSTRAINT billing_transactions_gateway_check
