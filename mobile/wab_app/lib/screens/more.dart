@@ -3,9 +3,13 @@ import 'package:provider/provider.dart';
 
 import '../state/session.dart';
 import '../theme.dart';
+import 'accounting.dart';
 import 'analytics.dart';
+import 'audit_log.dart';
+import 'automations.dart';
 import 'broadcasts.dart';
 import 'customers.dart';
+import 'onboarding_checklist.dart';
 import 'promos.dart';
 import 'settings.dart';
 
@@ -21,22 +25,26 @@ class MoreScreen extends StatelessWidget {
     Widget item(IconData icon, String title, String subtitle, Widget screen) {
       return Card(
         child: ListTile(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
           leading: Container(
             width: 42,
             height: 42,
             decoration: BoxDecoration(
-                color: WabColors.accentSoft, borderRadius: BorderRadius.circular(12)),
+                color: WabColors.accentSoft,
+                borderRadius: BorderRadius.circular(12)),
             child: Icon(icon, color: WabColors.accentInk, size: 22),
           ),
-          title: Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
+          title:
+              Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
           subtitle: Text(subtitle,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(color: WabColors.muted, fontSize: 13)),
-          trailing: const Icon(Icons.chevron_right_rounded, color: WabColors.muted2),
-          onTap: () =>
-              Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen)),
+          trailing:
+              const Icon(Icons.chevron_right_rounded, color: WabColors.muted2),
+          onTap: () => Navigator.of(context)
+              .push(MaterialPageRoute(builder: (_) => screen)),
         ),
       );
     }
@@ -53,16 +61,35 @@ class MoreScreen extends StatelessWidget {
                 backgroundColor: WabColors.accent,
                 child: Text(name.isEmpty ? 'W' : name[0].toUpperCase(),
                     style: const TextStyle(
-                        color: Colors.white, fontWeight: FontWeight.w800, fontSize: 20)),
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 20)),
               ),
               title: Text(name,
-                  style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
-              subtitle: Text(phone, style: const TextStyle(color: WabColors.muted)),
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w800, fontSize: 17)),
+              subtitle:
+                  Text(phone, style: const TextStyle(color: WabColors.muted)),
             ),
           ),
           const SizedBox(height: 16),
-          item(Icons.insights_rounded, 'Analytics',
-              'Revenue trend, top products, busiest hours', const AnalyticsScreen()),
+          item(
+              Icons.checklist_rounded,
+              'Setup checklist',
+              'Business profile, catalog, payments, WhatsApp test',
+              const OnboardingChecklistScreen()),
+          const SizedBox(height: 10),
+          item(
+              Icons.insights_rounded,
+              'Analytics',
+              'Revenue trend, top products, busiest hours',
+              const AnalyticsScreen()),
+          const SizedBox(height: 10),
+          item(
+              Icons.account_balance_wallet_rounded,
+              'Payouts & settlement',
+              'What you\'re owed, today\'s sales, payout history',
+              const AccountingScreen()),
           const SizedBox(height: 10),
           item(Icons.people_alt_rounded, 'Customers',
               'Everyone who has chatted or ordered', const CustomersScreen()),
@@ -72,6 +99,15 @@ class MoreScreen extends StatelessWidget {
           const SizedBox(height: 10),
           item(Icons.campaign_rounded, 'Broadcasts',
               'Message all opted-in customers', const BroadcastsScreen()),
+          const SizedBox(height: 10),
+          item(
+              Icons.bolt_rounded,
+              'Automations',
+              'Reorder reminders, win-back, review requests',
+              const AutomationsScreen()),
+          const SizedBox(height: 10),
+          item(Icons.history_rounded, 'Activity log',
+              'Settings changes and staff key actions', const AuditLogScreen()),
           const SizedBox(height: 10),
           item(Icons.settings_rounded, 'Settings',
               'Bot, delivery, hours, subscription', const SettingsScreen()),

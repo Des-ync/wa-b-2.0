@@ -11,7 +11,8 @@ import '../theme.dart';
 /// toggle, price, and image URL — the three fields a merchant needs to touch
 /// most often, without the full "edit product" form. Returns `true` if
 /// something was saved (or queued for later while offline).
-Future<bool?> showProductQuickEdit(BuildContext context, Map<String, dynamic> product) {
+Future<bool?> showProductQuickEdit(
+    BuildContext context, Map<String, dynamic> product) {
   return showModalBottomSheet<bool>(
     context: context,
     isScrollControlled: true,
@@ -31,8 +32,10 @@ class ProductQuickEditSheet extends StatefulWidget {
 }
 
 class _ProductQuickEditSheetState extends State<ProductQuickEditSheet> {
-  late final _price = TextEditingController(text: widget.product['price_ghs']?.toString());
-  late final _imageUrl = TextEditingController(text: widget.product['image_url']?.toString());
+  late final _price =
+      TextEditingController(text: widget.product['price_ghs']?.toString());
+  late final _imageUrl =
+      TextEditingController(text: widget.product['image_url']?.toString());
   late bool _inStock = widget.product['in_stock'] != false;
   bool _busy = false;
 
@@ -47,7 +50,8 @@ class _ProductQuickEditSheetState extends State<ProductQuickEditSheet> {
     final price = double.tryParse(_price.text.trim());
     if (price == null || price < 0) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Enter a valid price'), backgroundColor: WabColors.danger));
+          content: Text('Enter a valid price'),
+          backgroundColor: WabColors.danger));
       return;
     }
     final id = '${widget.product['id']}';
@@ -78,12 +82,13 @@ class _ProductQuickEditSheetState extends State<ProductQuickEditSheet> {
         if (mounted) {
           Navigator.pop(context, true);
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-              content: Text('Offline — saved locally, will sync when back online')));
+              content:
+                  Text('Offline — saved locally, will sync when back online')));
         }
       } else {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text(e.message), backgroundColor: WabColors.danger));
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text(e.message), backgroundColor: WabColors.danger));
         }
       }
     } finally {
@@ -95,8 +100,8 @@ class _ProductQuickEditSheetState extends State<ProductQuickEditSheet> {
   Widget build(BuildContext context) {
     final imageUrl = _imageUrl.text.trim();
     return Padding(
-      padding:
-          EdgeInsets.fromLTRB(24, 24, 24, MediaQuery.of(context).viewInsets.bottom + 24),
+      padding: EdgeInsets.fromLTRB(
+          24, 24, 24, MediaQuery.of(context).viewInsets.bottom + 24),
       child: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -106,19 +111,22 @@ class _ProductQuickEditSheetState extends State<ProductQuickEditSheet> {
                 style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
             const SizedBox(height: 4),
             Text('${widget.product['name']}',
-                style: const TextStyle(color: WabColors.muted, fontWeight: FontWeight.w600)),
+                style: const TextStyle(
+                    color: WabColors.muted, fontWeight: FontWeight.w600)),
             const SizedBox(height: 20),
             SwitchListTile(
               value: _inStock,
               onChanged: (v) => setState(() => _inStock = v),
-              title: const Text('In stock', style: TextStyle(fontWeight: FontWeight.w600)),
+              title: const Text('In stock',
+                  style: TextStyle(fontWeight: FontWeight.w600)),
               activeThumbColor: WabColors.accent,
               contentPadding: EdgeInsets.zero,
             ),
             const SizedBox(height: 8),
             TextField(
               controller: _price,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
               decoration: const InputDecoration(labelText: 'Price (GH₵)'),
             ),
             const SizedBox(height: 12),
@@ -132,7 +140,8 @@ class _ProductQuickEditSheetState extends State<ProductQuickEditSheet> {
                     decoration: const InputDecoration(
                         labelText: 'Photo URL',
                         hintText: 'https://…',
-                        helperText: 'Paste a link — there is no in-app photo upload yet'),
+                        helperText:
+                            'Paste a link — there is no in-app photo upload yet'),
                   ),
                 ),
                 if (imageUrl.isNotEmpty) ...[
@@ -144,6 +153,14 @@ class _ProductQuickEditSheetState extends State<ProductQuickEditSheet> {
                       width: 48,
                       height: 48,
                       fit: BoxFit.cover,
+                      // Decode at display size, not the source image's full
+                      // resolution — this is a 48dp thumbnail, no reason to
+                      // hold a multi-megapixel bitmap in memory for it.
+                      cacheWidth: (48 * MediaQuery.of(context).devicePixelRatio)
+                          .round(),
+                      cacheHeight:
+                          (48 * MediaQuery.of(context).devicePixelRatio)
+                              .round(),
                       errorBuilder: (_, __, ___) => Container(
                         width: 48,
                         height: 48,
@@ -163,7 +180,8 @@ class _ProductQuickEditSheetState extends State<ProductQuickEditSheet> {
                   ? const SizedBox(
                       width: 22,
                       height: 22,
-                      child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2.5, color: Colors.white))
                   : const Text('Save'),
             ),
           ],

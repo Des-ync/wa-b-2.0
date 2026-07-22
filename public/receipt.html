@@ -16,8 +16,12 @@
     padding: 28px 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.04);
   }
   .receipt-head { text-align: center; margin-bottom: 20px; }
+  .receipt-head .merchant-logo { width: 56px; height: 56px; border-radius: 14px; object-fit: cover; margin: 0 auto 10px; display: block; border: 1px solid var(--line); }
   .receipt-head h1 { font-size: 18px; margin: 0 0 4px; }
   .receipt-head .muted { color: var(--muted); font-size: 13px; }
+  .rider-call { color: var(--accent-ink); text-decoration: none; font-weight: 600; }
+  .refund-policy { margin-top: 16px; padding: 12px 14px; background: var(--bg-2); border-radius: var(--r-sm, 8px); font-size: 12px; color: var(--muted); line-height: 1.5; }
+  .refund-policy strong { color: var(--ink); display: block; margin-bottom: 4px; font-size: 12px; }
   .receipt-status {
     display: inline-block; margin-top: 10px; padding: 4px 12px; border-radius: 999px;
     font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
@@ -34,7 +38,7 @@
   .receipt-totals div { display: flex; justify-content: space-between; font-size: 14px; padding: 3px 0; }
   .receipt-totals .grand { font-size: 18px; font-weight: 700; margin-top: 6px; }
   .receipt-footer { text-align: center; margin-top: 20px; font-size: 12px; color: var(--muted-2); }
-  .receipt-actions { display: flex; gap: 10px; justify-content: center; margin-top: 20px; }
+  .receipt-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-top: 20px; }
   .err-box, .loading-box { text-align: center; padding: 60px 20px; color: var(--muted); }
   .receipt-timeline { margin: 16px 0; border-top: 1px dashed var(--line-2); border-bottom: 1px dashed var(--line-2); padding: 14px 0; }
   .receipt-timeline .tl-row { display: flex; gap: 10px; font-size: 13px; padding: 3px 0; align-items: baseline; }
@@ -62,6 +66,7 @@
   <div id="card" class="receipt-card" style="display:none"></div>
   <div id="actions" class="receipt-actions" style="display:none">
     <a id="reorderBtn" class="btn btn-primary" href="#" style="display:none" target="_blank" rel="noopener">🔁 Order again</a>
+    <a id="shareBtn" class="btn btn-ghost" href="#" target="_blank" rel="noopener">↗ Share</a>
     <button class="btn btn-ghost" onclick="window.print()">Print / Save PDF</button>
     <button class="btn btn-ghost" id="copyLinkBtn">Copy link</button>
   </div>
@@ -127,11 +132,15 @@ async function loadReceipt() {
       </div>
     ` : '';
 
-    const etaHtml = (r.estimated_ready_at || r.estimated_delivery_at) ? `
+    const riderDigits = String(r.rider_phone || '').replace(/[^\d]/g, '');
+    const riderLine = r.rider_name ? `
+      <div><span>Rider</span><span>${esc(r.rider_name)} (${esc((r.delivery_status || '').replace('_', ' '))})${riderDigits ? ` · <a class="rider-call" href="tel:+${riderDigits}">Call ↗</a>` : ''}</span></div>
+    ` : '';
+    const etaHtml = (r.estimated_ready_at || r.estimated_delivery_at || riderLine) ? `
       <div class="receipt-meta">
         ${r.estimated_ready_at ? `<div><span>Estimated ready</span><span>${new Date(r.estimated_ready_at).toLocaleString('en-GH', { dateStyle: 'medium', timeStyle: 'short' })}</span></div>` : ''}
         ${r.estimated_delivery_at ? `<div><span>Estimated delivery</span><span>${new Date(r.estimated_delivery_at).toLocaleString('en-GH', { dateStyle: 'medium', timeStyle: 'short' })}</span></div>` : ''}
-        ${r.rider_name ? `<div><span>Rider</span><span>${esc(r.rider_name)} (${esc((r.delivery_status || '').replace('_', ' '))})</span></div>` : ''}
+        ${riderLine}
       </div>
     ` : '';
 
@@ -142,8 +151,13 @@ async function loadReceipt() {
       </div>
     ` : '';
 
+    const logoHtml = r.business_logo_url
+      ? `<img class="merchant-logo" src="${esc(r.business_logo_url)}" alt="${esc(r.business_name)}" onerror="this.remove()" />`
+      : '';
+
     cardEl.innerHTML = `
       <div class="receipt-head">
+        ${logoHtml}
         <h1>${esc(r.business_name)}</h1>
         <div class="muted">Order ${esc(r.order_number)}</div>
         <span class="receipt-status ${statusClass(r.payment_status)}">${esc(r.payment_status)}</span>
@@ -164,6 +178,11 @@ async function loadReceipt() {
         <div><span>Delivery fee</span><span>${money(r.delivery_fee)}</span></div>
         <div class="grand"><span>Total</span><span>${money(r.total_ghs)}</span></div>
       </div>
+      ${r.refund_policy ? `
+      <div class="refund-policy">
+        <strong>Refunds &amp; cancellations</strong>
+        ${esc(r.refund_policy)}
+      </div>` : ''}
       <div class="receipt-footer">
         Questions? Contact ${esc(r.business_name)} at ${esc(r.business_support_phone || '')}<br/>
         Powered by WA-B Solutions
@@ -175,6 +194,12 @@ async function loadReceipt() {
       reorderBtn.href = 'https://wa.me/' + digits + '?text=' + encodeURIComponent('REPEAT');
       reorderBtn.style.display = '';
     }
+
+    // wa.me with no phone number opens WhatsApp's own contact/share picker
+    // rather than messaging one fixed number — a real "share to WhatsApp",
+    // not a disguised "message the shop" link.
+    const shareText = `${r.business_name} — Order ${r.order_number} (${money(r.total_ghs)})\n${window.location.href}`;
+    document.getElementById('shareBtn').href = 'https://wa.me/?text=' + encodeURIComponent(shareText);
 
     loadingEl.style.display = 'none';
     cardEl.style.display = 'block';

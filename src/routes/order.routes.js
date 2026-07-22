@@ -58,7 +58,24 @@ router.get('/stats/today', async (req, res) => {
          (SELECT COUNT(*)::int FROM today WHERE status = 'cancelled')               AS cancelled_count,
          (SELECT COUNT(*)::int FROM today WHERE payment_ref IS NOT NULL)            AS payment_attempts,
          (SELECT COUNT(*)::int FROM orders
-           WHERE business_id = $1 AND status IN ('confirmed','paid','preparing'))   AS open_orders`,
+           WHERE business_id = $1 AND status IN ('confirmed','paid','preparing'))   AS open_orders,
+         (SELECT COUNT(*)::int FROM customers
+           WHERE business_id = $1
+             AND created_at >= date_trunc('day', NOW() AT TIME ZONE 'Africa/Accra') AT TIME ZONE 'Africa/Accra')
+                                                                                     AS new_customers_count,
+         -- "Needs a reply": the merchant (or a human handoff) has taken this
+         -- chat off the bot, and the customer's most recent message is still
+         -- sitting unanswered. Not a total unread count — most inbound
+         -- messages ARE answered, by the bot, automatically.
+         (SELECT COUNT(*)::int
+            FROM customers c
+            LEFT JOIN LATERAL (
+              SELECT direction FROM message_log
+               WHERE customer_id = c.id
+               ORDER BY created_at DESC, id DESC LIMIT 1
+            ) lm ON TRUE
+           WHERE c.business_id = $1 AND c.bot_paused = TRUE AND lm.direction = 'inbound')
+                                                                                     AS messages_needing_reply_count`,
       [business_id]
     );
     const s = r.rows[0];
@@ -270,6 +287,129 @@ router.patch('/:id/status', requirePermission('orders', 'write'), async (req, re
     res.json({ success: true, order });
   } catch (err) {
     logger.error('PATCH /orders/:id/status failed: %s', err.message);
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+/**
+ * POST /api/orders/:id/mark-paid — record a payment the merchant collected
+ * outside a gateway webhook (cash in hand, a bank transfer, etc). Routes
+ * through the SAME orderService.markOrderPaid() the Paystack/MTN MoMo
+ * webhook path uses, so payment_status, stock decrement, loyalty, and GMV/
+ * analytics (which all gate on payment_status = 'paid') stay correct.
+ * PATCH .../status only ever advances the fulfillment stage and never
+ * touched payment_status — a merchant flipping an order to "confirmed" as
+ * their "mark paid" action would silently undercount that sale everywhere
+ * payment_status is the source of truth.
+ * body: { method?: 'cash'|'momo'|'card' (default 'cash'), amount_ghs? }
+ */
+router.post('/:id/mark-paid', requirePermission('orders', 'write'), async (req, res) => {
+  try {
+    const existing = await orderService.getOrderById(req.params.id);
+    if (!existing) return res.status(404).json({ success: false, error: 'Order not found' });
+    if (tenantBlocksBusinessId(req, existing.business_id)) {
+      return res.status(403).json({ success: false, error: 'Key does not match business' });
+    }
+
+    const method = ['cash', 'momo', 'card'].includes(req.body?.method) ? req.body.method : 'cash';
+    let amount;
+    if (req.body?.amount_ghs !== undefined) {
+      amount = Number(req.body.amount_ghs);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        return res.status(400).json({ success: false, error: 'amount_ghs must be a positive number' });
+      }
+    }
+
+    const result = await orderService.markOrderPaid({
+      orderId: existing.id,
+      paymentMethod: method,
+      amount,
+      changedBy: 'merchant'
+    });
+    if (!result) return res.status(404).json({ success: false, error: 'Order not found' });
+    if (result.refunded) {
+      return res.status(409).json({ success: false, error: 'Order was already refunded' });
+    }
+    if (result.alreadyPaid) {
+      return res.json({ success: true, order: result.order, alreadyPaid: true });
+    }
+    if (result.mismatch) {
+      return res.status(400).json({
+        success: false,
+        error: `Amount does not match the order total (expected GH₵${result.expected}, got GH₵${result.received})`,
+        expected: result.expected,
+        received: result.received
+      });
+    }
+
+    const order = result.order;
+    const [bizRes, customerRes] = await Promise.all([
+      query('SELECT * FROM businesses WHERE id = $1', [order.business_id]),
+      order.customer_id
+        ? query('SELECT * FROM customers WHERE id = $1', [order.customer_id])
+        : Promise.resolve({ rows: [] })
+    ]);
+    notification.notifyOrderPaid({ order, business: bizRes.rows[0], customer: customerRes.rows[0] })
+      .catch(err => logger.warn('mark-paid notify failed for order %s: %s', order.id, err.message));
+
+    res.json({ success: true, order, lowStock: result.lowStock || [] });
+  } catch (err) {
+    logger.error('POST /orders/:id/mark-paid failed: %s', err.message, { stack: err.stack });
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+/**
+ * POST /api/orders/:id/payment-reminder — merchant-triggered nudge: resends
+ * the same retry/cancel prompt the automatic payment-failed message uses, so
+ * the customer's tap is handled by the exact same, already-tested retry flow
+ * — this is not a new payment path. Only valid for an order that isn't paid
+ * or refunded yet, and rate-limited to one every 10 minutes per order so a
+ * merchant can't spam a customer by repeat-tapping the button.
+ */
+router.post('/:id/payment-reminder', requirePermission('orders', 'write'), async (req, res) => {
+  try {
+    const existing = await orderService.getOrderById(req.params.id);
+    if (!existing) return res.status(404).json({ success: false, error: 'Order not found' });
+    if (tenantBlocksBusinessId(req, existing.business_id)) {
+      return res.status(403).json({ success: false, error: 'Key does not match business' });
+    }
+    if (existing.payment_status === 'paid') {
+      return res.status(409).json({ success: false, error: 'Order is already paid' });
+    }
+    if (existing.payment_status === 'refunded') {
+      return res.status(409).json({ success: false, error: 'Order was refunded' });
+    }
+
+    const lastSentAt = await orderService.getLastPaymentReminderAt(existing.id);
+    if (lastSentAt && Date.now() - new Date(lastSentAt).getTime() < 10 * 60 * 1000) {
+      return res.status(429).json({
+        success: false,
+        error: 'A reminder was already sent for this order in the last 10 minutes'
+      });
+    }
+
+    const [bizRes, customerRes] = await Promise.all([
+      query('SELECT * FROM businesses WHERE id = $1', [existing.business_id]),
+      existing.customer_id
+        ? query('SELECT * FROM customers WHERE id = $1', [existing.customer_id])
+        : Promise.resolve({ rows: [] })
+    ]);
+    const business = bizRes.rows[0];
+    const customer = customerRes.rows[0];
+    if (!customer) {
+      return res.status(400).json({ success: false, error: 'Order has no customer to remind' });
+    }
+
+    const sent = await notification.notifyPaymentReminder({ order: existing, business, customer });
+    if (!sent?.success) {
+      return res.status(502).json({ success: false, error: sent?.error || 'Failed to send reminder' });
+    }
+
+    await orderService.recordPaymentReminderSent(existing.id);
+    res.json({ success: true });
+  } catch (err) {
+    logger.error('POST /orders/:id/payment-reminder failed: %s', err.message);
     res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });

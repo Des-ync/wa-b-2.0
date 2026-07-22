@@ -249,6 +249,27 @@ function notifyOrderCancelled({ order, business, customer }) {
 }
 
 /**
+ * Merchant-triggered "send payment reminder" (order_detail.dart's Payment
+ * section). Reuses the SAME retry/cancel buttons the automatic
+ * payment_failed_retry message sends, so the customer's tap is handled by
+ * the exact same, already-tested retryOrderPayment/cancelUnpaidOrder flow in
+ * conversation.handler.js — this is a nudge, not a new payment path.
+ */
+async function notifyPaymentReminder({ order, business, customer }) {
+  if (!customer || !order) return { success: false, error: 'Missing order or customer' };
+  const lang = langOf(business);
+  return getAdapter(customer.channel).sendButtons(
+    destOf(customer),
+    t(lang, 'payment_reminder', { n: order.order_number, total: formatGhs(order.total_ghs) }),
+    [
+      { id: `retrypay_${order.id}`, title: t(lang, 'btn_try_again') },
+      { id: `cancelord_${order.id}`, title: t(lang, 'btn_cancel_order') }
+    ],
+    { businessId: business.id, customerId: customer.id }
+  );
+}
+
+/**
  * A customer asked to talk to a human (typed "human"/"agent", or tapped
  * Talk to us). The bot is already paused for them by the caller; this just
  * makes sure the merchant actually notices — a push AND a WhatsApp text,
@@ -480,6 +501,7 @@ module.exports = {
   notifyOrderPaid,
   notifyOrderReceived,
   notifyOrderCancelled,
+  notifyPaymentReminder,
   notifyOrderStatusChange,
   notifyRiderAssigned,
   notifyDeliveryCompleted,

@@ -373,3 +373,7 @@ router.post('/sample-catalog', async (req, res) => {
 
 module.exports = router;
 module.exports.computeOnboardingSteps = computeOnboardingSteps;
+// Single source of truth for "industry" — business.routes.js validates
+// against this same list so a merchant can never pick a value that silently
+// falls back to the generic sample catalog.
+module.exports.INDUSTRIES = Object.keys(SAMPLE_CATALOGS);

@@ -277,7 +277,7 @@ function setCategory(c) { ACTIVE_CATEGORY = c; renderCategories(); renderProduct
 function productCard(p, digits) {
   return `
     <div class="prod-card">
-      ${p.image_url ? `<img class="prod-img" src="${esc(p.image_url)}" alt="${esc(p.name)}" onerror="this.style.display='none'" />` : ''}
+      ${p.image_url ? `<img class="prod-img" src="${esc(p.image_url)}" alt="${esc(p.name)}" loading="lazy" decoding="async" onerror="this.style.display='none'" />` : ''}
       <div class="prod-body">
         <div class="prod-cat">${esc(p.category)}</div>
         <div class="prod-name">${esc(p.name)}</div>
@@ -313,7 +313,7 @@ function renderBundles() {
   wrap.style.display = 'block';
   document.getElementById('bundleGrid').innerHTML = BUNDLES.map(b => `
     <div class="prod-card">
-      ${b.image_url ? `<img class="prod-img" src="${esc(b.image_url)}" alt="${esc(b.name)}" onerror="this.style.display='none'" />` : ''}
+      ${b.image_url ? `<img class="prod-img" src="${esc(b.image_url)}" alt="${esc(b.name)}" loading="lazy" decoding="async" onerror="this.style.display='none'" />` : ''}
       <div class="prod-body">
         <div class="prod-cat">Bundle</div>
         <div class="prod-name">${esc(b.name)}</div>

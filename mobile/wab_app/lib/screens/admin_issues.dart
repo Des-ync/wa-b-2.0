@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../api/onboarding_api.dart';
 import '../state/session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import 'admin_incomplete_setup.dart';
 
 /// Live problem feed: server errors, failed/stuck webhooks, failed message
 /// sends and failed billing charges — with one-tap retries where possible.
@@ -16,6 +18,24 @@ class AdminIssuesTab extends StatefulWidget {
 
 class _AdminIssuesTabState extends State<AdminIssuesTab> {
   int _reloadKey = 0;
+  int? _incompleteSetupCount;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadIncompleteCount();
+  }
+
+  Future<void> _loadIncompleteCount() async {
+    try {
+      final res = await context.read<Session>().api.getIncompleteSetupBusinesses();
+      if (mounted) {
+        setState(() => _incompleteSetupCount = ((res['businesses'] as List?) ?? []).length);
+      }
+    } catch (_) {
+      // Non-fatal — the banner just doesn't show.
+    }
+  }
 
   Future<void> _retryWebhook(String id) async {
     try {
@@ -63,6 +83,34 @@ class _AdminIssuesTabState extends State<AdminIssuesTab> {
   Widget build(BuildContext context) {
     return Column(
       children: [
+        if ((_incompleteSetupCount ?? 0) > 0)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+            child: Material(
+              color: WabColors.warning.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(14),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(14),
+                onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const AdminIncompleteSetupScreen())),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.checklist_rounded, size: 18, color: WabColors.warning),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text('$_incompleteSetupCount shop(s) mid-setup',
+                            style: const TextStyle(
+                                fontWeight: FontWeight.w700, color: WabColors.warning)),
+                      ),
+                      const Icon(Icons.chevron_right_rounded, size: 18, color: WabColors.warning),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
           child: Row(

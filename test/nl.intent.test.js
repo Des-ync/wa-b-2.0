@@ -66,3 +66,14 @@ test('unknown chatter returns null — the bot stays in business context', () =>
   assert.equal(detectIntent(''), null);
   assert.equal(detectIntent(null), null);
 });
+
+test('TRACK vocabulary matches order-status keywords and synonyms', () => {
+  assert.deepEqual(detectIntent('track'), { intent: 'TRACK' });
+  assert.deepEqual(detectIntent('my order'), { intent: 'TRACK' });
+  assert.deepEqual(detectIntent('order status'), { intent: 'TRACK' });
+  assert.deepEqual(detectIntent('where is my order'), { intent: 'TRACK' });
+  assert.deepEqual(detectIntent("wheres my order"), { intent: 'TRACK' });
+  assert.deepEqual(detectIntent('Track My Order'), { intent: 'TRACK' });
+  // doesn't need allowProduct — TRACK is an exact vocabulary match
+  assert.deepEqual(detectIntent('track order', { allowProduct: false }), { intent: 'TRACK' });
+});

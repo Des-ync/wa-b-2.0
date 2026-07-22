@@ -6,6 +6,8 @@ const { tenantBlocksBusinessId, resolveBusinessId } = require('../middleware/ten
 const { toCsv } = require('../utils/csv');
 const { pdfResponse } = require('../utils/pdf');
 const { recordAudit } = require('../utils/auditLog');
+const paystack = require('../services/paystack.service');
+const { generateReference } = require('../utils/helpers');
 
 const router = express.Router();
 
@@ -353,6 +355,116 @@ router.post('/payouts', requirePermission('financial', 'write'), async (req, res
     res.status(201).json({ success: true, payout: result.rows[0] });
   } catch (err) {
     logger.error('POST /accounting/payouts failed: %s', err.message);
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+/**
+ * POST /api/accounting/payouts/auto — trigger an AUTOMATED Paystack Transfer
+ * payout to the merchant's own payout_momo_number. Unlike the manual
+ * /payouts route above (an audit record of money ops already sent by hand),
+ * this one actually moves money: it creates a Paystack transfer recipient,
+ * initiates a transfer, and inserts a 'pending' payouts row that the webhook
+ * (transfer.success/transfer.failed — see webhook.processor.js) settles to
+ * settled/failed once Paystack confirms. Works for all three networks
+ * (MTN/Vodafone/AirtelTigo), unlike the old MTN-only Disbursement path.
+ *
+ * NOTE: if the platform's Paystack account has "Approve transfers with OTP"
+ * enabled (Dashboard > Settings > Preferences), Paystack will not move the
+ * money until that OTP (sent to the account owner, not the merchant) is
+ * submitted — this cannot be automated by design, so this route surfaces
+ * that case as a clear 409 rather than silently leaving the payout pending
+ * forever. Disable that setting for this route to work unattended.
+ */
+router.post('/payouts/auto', requirePermission('financial', 'write'), async (req, res) => {
+  try {
+    const businessId = resolveBusinessId(req);
+    if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (tenantBlocksBusinessId(req, businessId)) {
+      return res.status(403).json({ success: false, error: 'Key does not match business' });
+    }
+
+    const amount = Number(req.body?.amount_ghs);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return res.status(400).json({ success: false, error: 'amount_ghs must be a positive number' });
+    }
+
+    const bizRes = await query(
+      `SELECT id, name, payout_momo_number, payout_momo_network FROM businesses WHERE id = $1`,
+      [businessId]
+    );
+    const business = bizRes.rows[0];
+    if (!business) return res.status(404).json({ success: false, error: 'Business not found' });
+    if (!business.payout_momo_number || !MOMO_NETWORKS.includes(business.payout_momo_network)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Automated payout requires a payout MoMo number and network on file'
+      });
+    }
+
+    const recipient = await paystack.createTransferRecipient({
+      name: business.name,
+      accountNumber: business.payout_momo_number,
+      network: business.payout_momo_network
+    });
+    if (!recipient.success) {
+      logger.error('Transfer recipient creation failed for business %s: %s', businessId, recipient.error);
+      return res.status(502).json({ success: false, error: recipient.error || 'Could not register payout recipient' });
+    }
+
+    const reference = generateReference('PAYOUT');
+
+    // Reserve the payouts row BEFORE calling Paystack — if the transfer call
+    // throws after Paystack has already accepted it (a transient network
+    // error on OUR side reading the response, say), we still have a durable
+    // 'pending' record to reconcile instead of losing the payout from our
+    // books entirely. Mirrors the same "reserve first" ordering
+    // order.service.js's attachPaymentReference uses for customer checkout.
+    const reserved = await query(
+      `INSERT INTO payouts
+         (business_id, amount_ghs, momo_number, momo_network, reference, note, recorded_by, status, gateway, initiated_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'pending','paystack','paystack_auto')
+       RETURNING *`,
+      [
+        businessId, amount.toFixed(2), business.payout_momo_number, business.payout_momo_network,
+        reference, 'Automated Paystack payout', req.auth?.clerkUserId || req.auth?.keyId || null
+      ]
+    );
+    const payoutId = reserved.rows[0].id;
+
+    const result = await paystack.initiateTransfer({
+      amountGhs: amount,
+      recipientCode: recipient.recipientCode,
+      reference,
+      reason: `Payout to ${business.name}`
+    });
+
+    if (result.requiresOtp) {
+      logger.error('Automated payout for business %s requires OTP finalization (disable OTP for Transfers in Paystack Dashboard)', businessId);
+      await query(`UPDATE payouts SET status = 'failed' WHERE id = $1`, [payoutId]);
+      return res.status(409).json({ success: false, error: result.error });
+    }
+    if (!result.success) {
+      logger.error('Automated payout failed for business %s: %s', businessId, result.error);
+      await query(`UPDATE payouts SET status = 'failed' WHERE id = $1`, [payoutId]);
+      return res.status(502).json({ success: false, error: result.error || 'Payout request failed' });
+    }
+
+    const inserted = await query(
+      `UPDATE payouts SET gateway_ref = $2 WHERE id = $1 RETURNING *`,
+      [payoutId, result.transferCode]
+    );
+
+    recordAudit({
+      actorType: req.auth?.scope === 'admin' ? 'admin' : 'merchant',
+      actorId: req.auth?.clerkUserId || req.auth?.keyId,
+      businessId, action: 'accounting.payout_auto_initiated',
+      detail: { amount_ghs: amount, reference }
+    });
+
+    res.status(202).json({ success: true, payout: inserted.rows[0] });
+  } catch (err) {
+    logger.error('POST /accounting/payouts/auto failed: %s', err.message);
     res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });

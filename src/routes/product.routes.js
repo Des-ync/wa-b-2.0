@@ -5,6 +5,7 @@ const { requireAuth, requirePermission } = require('../middleware/auth');
 const { tenantBlocksBusinessId } = require('../middleware/tenantAccess');
 const { toCsv, parseCsv } = require('../utils/csv');
 const orderService = require('../services/order.service');
+const automations = require('../services/automations');
 
 const router = express.Router();
 
@@ -223,7 +224,15 @@ router.patch('/:id', requirePermission('products', 'write'), async (req, res) =>
       `UPDATE products SET ${sets.join(', ')} WHERE id = $1 RETURNING *`,
       params
     );
-    res.json({ success: true, product: result.rows[0] });
+    const updated = result.rows[0];
+
+    // Back-in-stock alert: fire-and-forget, never blocks or fails the save.
+    if (!product.in_stock && updated.in_stock) {
+      automations.notifyProductRestocked(updated).catch(err =>
+        logger.warn('notifyProductRestocked failed for product %s: %s', updated.id, err.message));
+    }
+
+    res.json({ success: true, product: updated });
   } catch (err) {
     logger.error('PATCH /products/:id failed: %s', err.message);
     res.status(500).json({ success: false, error: 'Internal server error' });

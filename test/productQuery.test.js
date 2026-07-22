@@ -45,3 +45,18 @@ test('returns null for plain product-name or command text', () => {
   assert.equal(detectProductQuery(''), null);
   assert.equal(detectProductQuery(null), null);
 });
+
+test('detects delivery-fee questions', () => {
+  assert.deepEqual(detectProductQuery('How much is delivery?'), { type: 'delivery_fee' });
+  assert.deepEqual(detectProductQuery('what is the delivery fee'), { type: 'delivery_fee' });
+  assert.deepEqual(detectProductQuery('delivery cost'), { type: 'delivery_fee' });
+  assert.deepEqual(detectProductQuery('shipping fee?'), { type: 'delivery_fee' });
+  assert.deepEqual(detectProductQuery('do you deliver'), { type: 'delivery_fee' });
+  assert.deepEqual(detectProductQuery('cost of delivery'), { type: 'delivery_fee' });
+});
+
+test('price questions still win over the delivery-fee pattern when both could apply', () => {
+  // "below 50" is a much stronger, unambiguous signal — numeric filters are
+  // checked first so they can never be shadowed by the delivery-fee phrase.
+  assert.equal(detectProductQuery('anything below 50 cedis for delivery').type, 'price_below');
+});

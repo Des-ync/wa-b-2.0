@@ -39,6 +39,9 @@ function makeClient(orderRow, {
         };
         return { rows: [updated], rowCount: 1 };
       }
+      if (sql.includes('INSERT INTO order_status_history')) {
+        return { rows: [{ id: 'hist-1' }], rowCount: 1 };
+      }
       if (sql.includes('SELECT loyalty_enabled')) {
         return { rows: [loyaltyBusiness], rowCount: 1 };
       }

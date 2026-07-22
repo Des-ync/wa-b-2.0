@@ -111,6 +111,93 @@ router.get('/paystack/callback', callbackLimiter, async (req, res) => {
   return res.redirect(303, '/wa-b/payment-pending.html');
 });
 
+const MOMO_REF_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Separate instances (not one shared limiter) so a burst of Collections
+// callbacks can never eat into the Disbursements callback budget, or vice
+// versa, when both arrive from the same MTN egress IP.
+const mtnCollectionCallbackLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false
+});
+const mtnDisbursementCallbackLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+/**
+ * MTN MoMo Collections callback — DORMANT. Paystack is now the sole active
+ * gateway for customer checkout (all networks); nothing initiates a new
+ * MTN-direct charge anymore, so no new X-Callback-Url pointing here will be
+ * issued going forward. This route stays mounted purely to receive/verify
+ * any residual in-flight MTN charge from before that switch, same reasoning
+ * as the dormant Hubtel route below.
+ *
+ * Unlike Paystack/Hubtel, MTN's callbacks are NOT cryptographically signed —
+ * so this route trusts NOTHING from the body. The path segment (our own
+ * generated X-Reference-Id, embedded in the X-Callback-Url we gave MTN) is
+ * the only thing used to identify the transaction; the worker re-verifies
+ * the real status via getPaymentStatus before applying any state change.
+ * This route is purely a "something changed, go check" doorbell — a forged
+ * POST here is harmless, at worst it triggers one extra (free) status-check
+ * call to MTN for a bogus reference.
+ */
+router.post('/mtnmomo/callback/:reference', mtnCollectionCallbackLimiter, async (req, res) => {
+  const referenceId = req.params.reference;
+  if (!MOMO_REF_RE.test(referenceId)) {
+    return res.status(400).send('invalid reference');
+  }
+  try {
+    const { duplicate } = await queue.enqueue({
+      source: 'mtn_momo',
+      externalId: referenceId,
+      payload: { referenceId },
+      signatureValid: true
+    });
+    if (duplicate) {
+      logger.info('MTN MoMo callback duplicate ignored: %s', referenceId);
+    }
+    res.status(200).send('OK');
+  } catch (err) {
+    logger.error('MTN MoMo enqueue failed: %s', err.message);
+    res.status(500).send('enqueue failed');
+  }
+});
+
+/**
+ * MTN MoMo Disbursements (merchant payout) callback — DORMANT. Automated
+ * merchant payouts now go through Paystack Transfers (see
+ * accounting.routes.js POST /payouts/auto and the transfer.* handling in
+ * webhook.processor.js); this route stays mounted only to receive/verify any
+ * residual in-flight MTN payout from before that switch. Same doorbell-only
+ * pattern as above, re-verified via getTransferStatus downstream.
+ */
+router.post('/mtnmomo/disbursement-callback/:reference', mtnDisbursementCallbackLimiter, async (req, res) => {
+  const referenceId = req.params.reference;
+  if (!MOMO_REF_RE.test(referenceId)) {
+    return res.status(400).send('invalid reference');
+  }
+  try {
+    const { duplicate } = await queue.enqueue({
+      source: 'mtn_momo_disbursement',
+      externalId: referenceId,
+      payload: { referenceId },
+      signatureValid: true
+    });
+    if (duplicate) {
+      logger.info('MTN MoMo disbursement callback duplicate ignored: %s', referenceId);
+    }
+    res.status(200).send('OK');
+  } catch (err) {
+    logger.error('MTN MoMo disbursement enqueue failed: %s', err.message);
+    res.status(500).send('enqueue failed');
+  }
+});
+
 /**
  * Hubtel callback: signed with HMAC-SHA256 (`x-hubtel-signature`) when configured.
  *

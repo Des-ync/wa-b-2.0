@@ -34,15 +34,15 @@ const _slides = [
   ),
 ];
 
-class OnboardingScreen extends StatefulWidget {
+class WelcomeCarouselScreen extends StatefulWidget {
   final VoidCallback onDone;
-  const OnboardingScreen({super.key, required this.onDone});
+  const WelcomeCarouselScreen({super.key, required this.onDone});
 
   @override
-  State<OnboardingScreen> createState() => _OnboardingScreenState();
+  State<WelcomeCarouselScreen> createState() => _WelcomeCarouselScreenState();
 }
 
-class _OnboardingScreenState extends State<OnboardingScreen> {
+class _WelcomeCarouselScreenState extends State<WelcomeCarouselScreen> {
   final _controller = PageController();
   int _page = 0;
 

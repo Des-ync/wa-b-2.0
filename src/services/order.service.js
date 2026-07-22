@@ -479,6 +479,25 @@ async function addOrderNote(orderId, note, { author = 'Merchant' } = {}) {
 }
 
 /**
+ * Most recent merchant-triggered payment reminder for this order, if any —
+ * used to rate-limit the "Send reminder" action so a merchant tapping it
+ * twice by accident (or on purpose) can't spam the same customer.
+ */
+async function getLastPaymentReminderAt(orderId) {
+  const res = await query(
+    `SELECT created_at FROM order_status_history
+      WHERE order_id = $1 AND event = 'payment:reminder_sent'
+      ORDER BY created_at DESC LIMIT 1`,
+    [orderId]
+  );
+  return res.rows[0]?.created_at || null;
+}
+
+async function recordPaymentReminderSent(orderId) {
+  await logOrderEvent(orderId, 'payment:reminder_sent', { changedBy: 'merchant' });
+}
+
+/**
  * Assign (or reassign) a rider. Reassigning resets delivery_status back to
  * 'assigned' — a new rider hasn't picked anything up yet.
  */
@@ -639,6 +658,24 @@ async function attachPaymentReference(orderId, paymentRef, paymentMethod) {
   });
 }
 
+/** The payment_attempts row for our own human-readable reference, if any. */
+async function getPaymentAttempt(reference) {
+  const res = await query('SELECT * FROM payment_attempts WHERE reference = $1', [reference]);
+  return res.rows[0] || null;
+}
+
+/**
+ * Resolve a payment_attempts row from a gateway's OWN reference id (e.g. MTN
+ * MoMo's X-Reference-Id) — used by the (now dormant) MTN webhook processor to
+ * map an inbound callback, which only carries the gateway's id, back to our
+ * order. Kept for residual in-flight MTN reconciliation; nothing writes a new
+ * gateway_ref anymore since checkout no longer initiates MTN-direct charges.
+ */
+async function getPaymentAttemptByGatewayRef(gatewayRef) {
+  const res = await query('SELECT * FROM payment_attempts WHERE gateway_ref = $1', [gatewayRef]);
+  return res.rows[0] || null;
+}
+
 /**
  * Loyalty side-effects for a just-paid order, run inside markOrderPaid's own
  * transaction so points/stamps/referral state can never drift from what was
@@ -714,7 +751,7 @@ async function applyLoyaltyForPaidOrder(client, order, customer) {
  * Returns:
  *   { order, alreadyPaid?, mismatch?, expected?, received? } or null if order missing.
  */
-async function markOrderPaid({ orderId, paymentRef, paymentMethod, amount }) {
+async function markOrderPaid({ orderId, paymentRef, paymentMethod, amount, changedBy = 'system' } = {}) {
   return transaction(async client => {
     const lock = await client.query(
       `SELECT * FROM orders WHERE id = $1 FOR UPDATE`,
@@ -768,6 +805,11 @@ async function markOrderPaid({ orderId, paymentRef, paymentMethod, amount }) {
       [orderId, paymentRef || null, paymentMethod || null]
     );
     const order = orderRes.rows[0];
+    await logOrderEvent(orderId,
+      'payment:paid',
+      { note: `${order.payment_method || 'unknown'} · GH₵${Number(order.total_ghs).toFixed(2)}`, changedBy },
+      client
+    );
 
     let loyalty = null;
     if (order.customer_id) {
@@ -846,7 +888,7 @@ async function markOrderPaid({ orderId, paymentRef, paymentMethod, amount }) {
   });
 }
 
-async function markOrderFailed({ orderId, paymentRef }) {
+async function markOrderFailed({ orderId, paymentRef, reason }) {
   // 'failed' (not 'unpaid') so the payment history distinguishes an attempt
   // that bounced from an order that never entered payment. Retry still works:
   // attachPaymentReference moves any non-paid/refunded order back to 'pending'.
@@ -859,7 +901,9 @@ async function markOrderFailed({ orderId, paymentRef }) {
       RETURNING *`,
     [orderId, paymentRef || null]
   );
-  return res.rows[0] || null;
+  const order = res.rows[0] || null;
+  if (order) await logOrderEvent(orderId, 'payment:failed', { note: reason || null, changedBy: 'system' });
+  return order;
 }
 
 module.exports = {
@@ -877,9 +921,13 @@ module.exports = {
   listOrdersForBusiness,
   updateOrderStatus,
   attachPaymentReference,
+  getPaymentAttempt,
+  getPaymentAttemptByGatewayRef,
   markOrderPaid,
   markOrderFailed,
   addOrderNote,
+  getLastPaymentReminderAt,
+  recordPaymentReminderSent,
   assignDelivery,
   updateDeliveryStatus,
   setEstimates,

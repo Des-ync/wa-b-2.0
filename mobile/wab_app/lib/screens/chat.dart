@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../api/client.dart';
+import '../api/conversation_api.dart';
 import '../state/session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
@@ -98,6 +99,82 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  Future<void> _openSummary() async {
+    Map<String, dynamic>? summary;
+    String? error;
+    try {
+      final res = await context.read<Session>().api.getConversationSummary(widget.customerId);
+      summary = res['summary'] as Map<String, dynamic>?;
+    } on ApiException catch (e) {
+      error = e.message;
+    }
+    if (!mounted) return;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: WabColors.bg,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (_) => Padding(
+        padding: const EdgeInsets.fromLTRB(24, 24, 24, 32),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Conversation summary',
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 16),
+              if (error != null)
+                Text(error, style: const TextStyle(color: WabColors.danger))
+              else if (summary == null)
+                const Text('No summary available yet.',
+                    style: TextStyle(color: WabColors.muted))
+              else ...[
+                Row(
+                  children: [
+                    StatusChip(
+                        summary['needs_attention'] == true ? 'failed' : 'active',
+                        label: '${summary['headline']}'),
+                  ],
+                ),
+                if (summary['needs_attention'] == true) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: WabColors.danger.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                        'Mentioned: ${(summary['attention_keywords'] as List? ?? []).join(', ')}',
+                        style: const TextStyle(color: WabColors.danger, fontWeight: FontWeight.w600)),
+                  ),
+                ],
+                const SizedBox(height: 16),
+                for (final b in (summary['bullet_points'] as List? ?? []))
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Padding(
+                          padding: EdgeInsets.only(top: 6, right: 8),
+                          child: Icon(Icons.circle, size: 5, color: WabColors.muted2),
+                        ),
+                        Expanded(child: Text('$b', style: const TextStyle(height: 1.4))),
+                      ],
+                    ),
+                  ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _togglePause() async {
     final action = _paused ? 'resume' : 'pause';
     try {
@@ -129,6 +206,11 @@ class _ChatScreenState extends State<ChatScreen> {
       appBar: AppBar(
         title: Text('$name'),
         actions: [
+          IconButton(
+            tooltip: 'Conversation summary',
+            onPressed: _openSummary,
+            icon: const Icon(Icons.info_outline_rounded),
+          ),
           TextButton.icon(
             onPressed: _togglePause,
             icon: Icon(_paused ? Icons.smart_toy_outlined : Icons.front_hand_rounded,

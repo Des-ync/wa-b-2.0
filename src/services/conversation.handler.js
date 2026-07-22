@@ -924,15 +924,22 @@ async function handleCommerce({ business, inbound }) {
 
   const state = await loadOrCreateState(customer.id);
 
-  // Instagram/Messenger text mode: both adapters send numbered text menus
-  // instead of native buttons (chips vanish mid-conversation and never
-  // render on desktop), so typed replies are translated here — BEFORE any
-  // routing looks at the message — onto the same interactive ids the button
-  // UI produces.
-  //   "2"            → the 2nd option of the last menu we sent (ig_options)
+  // Free-text intent detection — BEFORE any routing looks at the message —
+  // translates typed replies onto the same interactive ids the button UI
+  // produces:
+  //   "2"            → the 2nd option of the last menu we sent (ig_options,
+  //                    Instagram/Messenger only — always empty on WhatsApp
+  //                    since only their adapters ever populate it, so this
+  //                    branch is a no-op there)
   //   simple phrases → fixed en/tw vocabulary (nl.intent.js), business
   //                    context only; anything unknown falls through untouched.
-  if (['instagram', 'messenger'].includes(customer.channel) && !inbound.interactiveId && inbound.text) {
+  // Originally Instagram/Messenger-only (their numbered-text menus need a
+  // typed-reply translator by construction), but WhatsApp customers just as
+  // often type instead of tapping a native button — "I want 2 jollof" from
+  // idle used to fall straight through to the generic welcome message,
+  // silently dropping both the product and the quantity. Same vocabulary,
+  // same product/quantity extraction, now for every channel.
+  if (!inbound.interactiveId && inbound.text) {
     const step = state.current_step;
     // Steps where free text IS the answer — never reinterpret those.
     const freeTextSteps = ['get_address', 'momo_get_phone'];
@@ -960,6 +967,7 @@ async function handleCommerce({ business, inbound }) {
           case 'MENU': inbound.interactiveId = 'start_order'; break;
           case 'HELP': inbound.interactiveId = 'support_request'; break;
           case 'REPEAT': inbound.interactiveId = 'repeat_order'; break;
+          case 'TRACK': inbound.interactiveId = 'track_order'; break;
           case 'CHECKOUT': inbound.interactiveId = 'checkout'; break;
           case 'CANCEL': inbound.text = 'CANCEL'; break;
           case 'YES':
@@ -1029,6 +1037,10 @@ async function handleCommerce({ business, inbound }) {
   if (inbound.interactiveId && inbound.interactiveId.startsWith('cancelord_')) {
     return cancelUnpaidOrder({ business, customer, orderId: inbound.interactiveId.slice('cancelord_'.length) });
   }
+  // "Notify me" on an out-of-stock product — same any-state rule as the two above.
+  if (inbound.interactiveId && inbound.interactiveId.startsWith('watchprod_')) {
+    return watchProductForRestock({ business, customer, productId: inbound.interactiveId.slice('watchprod_'.length) });
+  }
 
   // Active flow routing
   if (state.current_flow === 'ordering') {
@@ -1050,6 +1062,14 @@ async function handleCommerce({ business, inbound }) {
   const orderRef = (inbound.text || '').match(ORDER_NUMBER_RE);
   if (orderRef) {
     return customerOrderStatus({ business, customer, orderNumber: orderRef[0].toUpperCase() });
+  }
+
+  // "TRACK" / "MY ORDER" — same self-service status lookup as above, but
+  // for a customer who doesn't have (or doesn't want to type) the exact
+  // order number: just show their most recent order.
+  if (['TRACK', 'TRACK ORDER', 'MY ORDER', 'ORDER STATUS'].includes(upper)
+      || inbound.interactiveId === 'track_order') {
+    return trackLastOrder({ business, customer });
   }
 
   // Reorder: rebuild the cart from the customer's last order.
@@ -1117,6 +1137,23 @@ async function customerOrderStatus({ business, customer, orderNumber }) {
   if (['unpaid', 'pending', 'failed'].includes(order.payment_status) && order.status !== 'cancelled') {
     await retryOrderPayment({ business, customer, orderId: order.id });
   }
+}
+
+/**
+ * "TRACK" / "MY ORDER" — status of the customer's most recent order at this
+ * shop, no order number required. Delegates to customerOrderStatus for the
+ * actual card + retry-pay logic so both entry points stay in lockstep.
+ */
+async function trackLastOrder({ business, customer }) {
+  const lang = langOf(business);
+  const last = await orderService.getLastOrderForCustomer(customer.id, business.id);
+  if (!last) {
+    await chOf(customer).sendText(destOf(customer),
+      t(lang, 'no_previous_order', { shop: business.name }),
+      { businessId: business.id, customerId: customer.id });
+    return;
+  }
+  return customerOrderStatus({ business, customer, orderNumber: last.order_number });
 }
 
 /**
@@ -1321,6 +1358,32 @@ async function cancelUnpaidOrder({ business, customer, orderId }) {
     { businessId: business.id, customerId: customer.id });
 }
 
+/**
+ * "Notify me" tap on an out-of-stock product (see addProductToCart). Upserts
+ * the watch so re-opting-in after already being notified once resets
+ * notified_at back to NULL — a repeat out-of-stock/back-in-stock cycle
+ * notifies again instead of going silent forever after the first hit.
+ */
+async function watchProductForRestock({ business, customer, productId }) {
+  const lang = langOf(business);
+  const res = await query('SELECT id, name FROM products WHERE id = $1 AND business_id = $2', [productId, business.id]);
+  const product = res.rows[0];
+  if (!product) {
+    await chOf(customer).sendText(destOf(customer), t(lang, 'item_gone'),
+      { businessId: business.id, customerId: customer.id });
+    return;
+  }
+  await query(
+    `INSERT INTO product_watchers (business_id, product_id, customer_id)
+     VALUES ($1,$2,$3)
+     ON CONFLICT (product_id, customer_id) DO UPDATE SET notified_at = NULL`,
+    [business.id, product.id, customer.id]
+  );
+  await chOf(customer).sendText(destOf(customer),
+    t(lang, 'product_watch_confirmed', { name: product.name }),
+    { businessId: business.id, customerId: customer.id });
+}
+
 async function sendWelcome({ business, customer }) {
   // Merchants can brand their greeting from the dashboard; the stock copy is
   // only the fallback. The action buttons are always appended.
@@ -1355,14 +1418,30 @@ async function sendWelcome({ business, customer }) {
  * fallback so an inquiry can never reveal something the menu itself hides.
  */
 async function fetchVisibleProducts(businessId) {
+  // "Popular" used to mean nothing but the merchant's manual featured flag —
+  // a brand-new item the merchant flags gets shown first, but actual
+  // best-sellers with zero curation had no way to surface themselves.
+  // order_count (paid orders this item has actually appeared in) now breaks
+  // ties within/behind that curation, so real demand drives ranking instead
+  // of falling straight to alphabetical/category order. featured still wins
+  // outright — that's a deliberate merchant choice (e.g. promoting a new
+  // item) and shouldn't be buried under an old best-seller.
   const products = await query(
-    `SELECT p.id, p.name, p.description, p.price_ghs, p.category,
+    `WITH popularity AS (
+       SELECT item->>'product_id' AS product_id, COUNT(*)::int AS order_count
+         FROM orders o, jsonb_array_elements(o.items) item
+        WHERE o.business_id = $1 AND o.payment_status = 'paid' AND item->>'product_id' IS NOT NULL
+        GROUP BY item->>'product_id'
+     )
+     SELECT p.id, p.name, p.description, p.price_ghs, p.category,
             p.featured, p.available_from, p.available_to
        FROM products p
        LEFT JOIN categories c ON c.business_id = p.business_id AND lower(c.name) = lower(p.category)
+       LEFT JOIN popularity pop ON pop.product_id = p.id::text
       WHERE p.business_id = $1 AND p.in_stock = TRUE AND p.hidden = FALSE
         AND COALESCE(c.hidden, FALSE) = FALSE
-      ORDER BY p.featured DESC, COALESCE(c.sort_order, 0) ASC, p.category ASC, p.sort_order ASC, p.name ASC
+      ORDER BY p.featured DESC, COALESCE(pop.order_count, 0) DESC,
+               COALESCE(c.sort_order, 0) ASC, p.category ASC, p.sort_order ASC, p.name ASC
       LIMIT 200`,
     [businessId]
   );
@@ -1521,6 +1600,14 @@ async function continueOrderingFlow({ business, customer, state, inbound }) {
   }
 
   if (state.current_step === 'get_address') {
+    if (inbound.interactiveId === 'use_saved_address' && customer.address) {
+      return captureAddress({ business, customer, cart, address: customer.address, location: null, promoCode });
+    }
+    if (inbound.interactiveId === 'enter_new_address') {
+      await chOf(customer).sendText(destOf(customer), t(lang, 'ask_address'),
+        { businessId: business.id, customerId: customer.id });
+      return;
+    }
     return captureAddress({ business, customer, cart, address: inbound.text, location: inbound.location, promoCode });
   }
 
@@ -1630,6 +1717,22 @@ async function tryProductInquiry({ business, customer, text }) {
   if (!parsed) return false;
 
   const lang = langOf(business);
+
+  if (parsed.type === 'delivery_fee') {
+    const zones = deliveryZonesOf(business);
+    if (zones.length) {
+      const list = zones.map(z => `• ${z.name} — ${formatGhs(z.fee_ghs)}`).join('\n');
+      await chOf(customer).sendText(destOf(customer), t(lang, 'delivery_fee_zones', { list }),
+        { businessId: business.id, customerId: customer.id });
+      return true;
+    }
+    const fee = Number(business.delivery_fee_ghs) || 0;
+    await chOf(customer).sendText(destOf(customer),
+      t(lang, fee > 0 ? 'delivery_fee_flat' : 'delivery_fee_free', { fee: formatGhs(fee) }),
+      { businessId: business.id, customerId: customer.id });
+    return true;
+  }
+
   const visible = await fetchVisibleProducts(business.id);
 
   let matches;
@@ -1667,7 +1770,8 @@ async function addProductToCart({ business, customer, productId, cart, quantity 
     return;
   }
   if (!product.in_stock) {
-    await chOf(customer).sendText(destOf(customer), t(lang, 'out_of_stock', { name: product.name }),
+    await chOf(customer).sendButtons(destOf(customer), t(lang, 'out_of_stock', { name: product.name }),
+      [{ id: `watchprod_${product.id}`, title: t(lang, 'btn_notify_restock') }],
       { businessId: business.id, customerId: customer.id });
     return;
   }
@@ -2012,9 +2116,21 @@ async function applyPromoCode({ business, customer, state, cart, code }) {
 async function askForAddress({ business, customer, promoCode }) {
   const state = await loadOrCreateState(customer.id);
   const cart = state.flow_data?.cart || [];
+  const lang = langOf(business);
   await saveState(customer.id, { flow: 'ordering', step: 'get_address', data: { cart, promo_code: promoCode || null } });
+
+  // Offer last order's address back as a one-tap default — most customers
+  // deliver to the same place every time and re-typing it is pure friction.
+  if (customer.address) {
+    await chOf(customer).sendButtons(destOf(customer),
+      t(lang, 'ask_address_saved', { address: customer.address }), [
+        { id: 'use_saved_address', title: t(lang, 'btn_use_saved_address') },
+        { id: 'enter_new_address', title: t(lang, 'btn_enter_new_address') }
+      ], { businessId: business.id, customerId: customer.id });
+    return;
+  }
   await chOf(customer).sendText(destOf(customer),
-    t(langOf(business), 'ask_address'),
+    t(lang, 'ask_address'),
     { businessId: business.id, customerId: customer.id });
 }
 
@@ -2042,6 +2158,15 @@ async function captureAddress({ business, customer, cart, address, location, pro
       t(langOf(business), 'address_short'),
       { businessId: business.id, customerId: customer.id });
     return;
+  }
+
+  // Remember it for next time (best-effort — never let this block checkout).
+  if (trimmed !== customer.address) {
+    try {
+      await query('UPDATE customers SET address = $2 WHERE id = $1', [customer.id, trimmed]);
+    } catch (err) {
+      logger.debug('failed to remember delivery address for customer %s: %s', customer.id, err.message);
+    }
   }
 
   // Zones configured → let the customer pick one (per-zone fee); otherwise
@@ -2239,6 +2364,14 @@ async function startMomoPayment({ business, customer, orderId, momoNumber }) {
     return;
   }
   const reference = generateReference('ORD');
+
+  // All networks (MTN/Vodafone/AirtelTigo) collect through Paystack's
+  // unified momo channel — Paystack is the sole active gateway for customer
+  // checkout now. (A direct MTN Collections integration existed briefly;
+  // its code stays mounted dormant — see mtnmomo.service.js and the
+  // payment.routes.js callback comments — purely to reconcile any residual
+  // in-flight charge from before this switch, but nothing initiates a new
+  // MTN-direct charge anymore.)
   await orderService.attachPaymentReference(order.id, reference, 'momo');
 
   const result = await paystack.initializeMoMoCharge({
@@ -2423,7 +2556,7 @@ async function handlePaymentSuccess({ reference, gatewayRef, amount }) {
   return { handled: true, order: updated };
 }
 
-async function handlePaymentFailure({ reference }) {
+async function handlePaymentFailure({ reference, reason }) {
   const order = await orderService.getOrderByPaymentRef(reference);
   if (!order) return { handled: false };
   // A failure for a SUPERSEDED attempt (customer already retried with a new
@@ -2433,11 +2566,11 @@ async function handlePaymentFailure({ reference }) {
       reference, order.order_number, order.payment_ref);
     return { handled: true, stale: true };
   }
-  await orderService.markOrderFailed({ orderId: order.id, paymentRef: reference });
+  await orderService.markOrderFailed({ orderId: order.id, paymentRef: reference, reason });
   dashboardNotify.notifyDashboard(order.business_id, {
     type: 'failed_payment', title: '⚠️ Payment failed',
-    body: `Order #${order.order_number} — GH₵${Number(order.total_ghs).toFixed(2)} payment did not go through.`,
-    data: { order_id: order.id, order_number: order.order_number }
+    body: `Order #${order.order_number} — GH₵${Number(order.total_ghs).toFixed(2)} payment did not go through${reason ? ` (${reason})` : ''}.`,
+    data: { order_id: order.id, order_number: order.order_number, reason: reason || null }
   });
 
   const customerRes = await query('SELECT * FROM customers WHERE id = $1', [order.customer_id]);
@@ -2446,7 +2579,7 @@ async function handlePaymentFailure({ reference }) {
     const bizRes = await query('SELECT bot_language FROM businesses WHERE id = $1', [order.business_id]);
     const lang = langOf(bizRes.rows[0]);
     await chOf(customer).sendButtons(destOf(customer),
-      t(lang, 'payment_failed_retry', { n: order.order_number }),
+      t(lang, 'payment_failed_retry', { n: order.order_number, reason }),
       [
         { id: `retrypay_${order.id}`, title: t(lang, 'btn_try_again') },
         { id: `cancelord_${order.id}`, title: t(lang, 'btn_cancel_order') }
@@ -2464,5 +2597,6 @@ module.exports = {
   handlePaymentFailure,
   // exported for tests
   normalizeIntent,
-  titleMatches
+  titleMatches,
+  handleCommerce
 };

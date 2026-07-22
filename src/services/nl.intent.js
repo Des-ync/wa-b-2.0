@@ -61,6 +61,15 @@ const VOCAB = new Map([
     'REPEAT', 'REORDER', 'AGAIN', 'SAME AGAIN', 'SAME AS LAST TIME',
     'REPEAT LAST ORDER', 'BIO', 'SAN TO', 'SAN TO DEDAW NO'            // NEEDS_NATIVE_REVIEW
   ]],
+  // Twi deliberately omitted here — "order"/"track" have no settled Twi
+  // commerce equivalent in this vocabulary and guessing risks shipping
+  // something wrong rather than just missing; add behind NEEDS_NATIVE_REVIEW
+  // once a native speaker confirms a phrase.
+  ['TRACK', [
+    'TRACK', 'TRACK ORDER', 'TRACK MY ORDER', 'MY ORDER', 'MY ORDERS',
+    'ORDER STATUS', 'STATUS', 'WHERE IS MY ORDER', 'WHERES MY ORDER',
+    'WHERE IS MY STUFF', 'WHERE IS MY FOOD', 'WHERE IS MY DELIVERY'
+  ]],
   ['YES', [
     'YES', 'YEAH', 'YEP', 'OK', 'OKAY', 'SURE', 'CONFIRM', 'CONFIRM & PAY',
     'AANE', 'YOO', 'AMPA'                                              // NEEDS_NATIVE_REVIEW

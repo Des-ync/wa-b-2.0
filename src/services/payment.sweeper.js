@@ -16,6 +16,7 @@
 const logger = require('../utils/logger');
 const { query } = require('../config/database');
 const paystack = require('./paystack.service');
+const mtnmomo = require('./mtnmomo.service');
 const orderService = require('./order.service');
 const subService = require('./subscription.service');
 const webhookProcessor = require('./webhook.processor');
@@ -30,8 +31,37 @@ const STALE_ORDER_HOURS = parseInt(process.env.STALE_ORDER_HOURS || '48', 10);
 // we reconcile — a MoMo approval prompt can legitimately sit a few minutes.
 const BILLING_PENDING_TTL_MINUTES = parseInt(process.env.BILLING_PENDING_TTL_MINUTES || '30', 10);
 
+/**
+ * Verify a stuck order's payment against whichever gateway actually holds it.
+ * payment_attempts.gateway_ref is only ever set for MTN MoMo direct attempts
+ * (Paystack's own reference doubles as its gateway reference — see
+ * order.service.js#attachPaymentReference) — its presence IS the routing
+ * signal. Paystack is now the sole active checkout gateway, so no NEW
+ * attempt will ever have a gateway_ref again; this branch only still matters
+ * for reconciling a residual in-flight MTN charge from before that switch.
+ * Normalizes MTN's PENDING/SUCCESSFUL/FAILED vocabulary to the same
+ * success/failed/pending shape verifyTransaction already returns, so the
+ * rest of this file's reconciliation logic doesn't need to know which
+ * gateway it's looking at.
+ */
+async function verifyOrderPayment(order, attempt) {
+  if (attempt?.gateway_ref) {
+    const s = await mtnmomo.getPaymentStatus(attempt.gateway_ref);
+    if (!s.success) return { success: false, error: s.error };
+    const STATUS_MAP = { SUCCESSFUL: 'success', FAILED: 'failed', PENDING: 'pending' };
+    return {
+      success: true,
+      status: STATUS_MAP[s.status] || 'pending',
+      amount_ghs: s.amountGhs,
+      currency: s.currency,
+      gateway_ref: s.financialTransactionId
+    };
+  }
+  return paystack.verifyTransaction(order.payment_ref);
+}
+
 async function expirePendingPayment(order) {
-  await orderService.markOrderFailed({ orderId: order.id, paymentRef: order.payment_ref });
+  await orderService.markOrderFailed({ orderId: order.id, paymentRef: order.payment_ref, reason: 'timeout' });
   try {
     const customerRes = await query('SELECT * FROM customers WHERE id = $1', [order.customer_id]);
     const customer = customerRes.rows[0];
@@ -139,7 +169,8 @@ async function runPaymentSweeper() {
           continue;
         }
 
-        const verification = await paystack.verifyTransaction(order.payment_ref);
+        const attempt = await orderService.getPaymentAttempt(order.payment_ref);
+        const verification = await verifyOrderPayment(order, attempt);
         if (verification.success && verification.status === 'success') {
           // Same multi-currency guard as the live webhook path (processPaystack) —
           // an out-of-band currency here means our GHS amount assumption is wrong.

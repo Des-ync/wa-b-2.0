@@ -219,10 +219,187 @@ function verifyPaystackWebhook(rawBody, signature, secret = PAYSTACK_SECRET_KEY)
   }
 }
 
+// ---------------------------------------------------------------------------
+// Transfers (automated merchant payouts) — see accounting.routes.js
+// POST /payouts/auto. Replaces the dormant MTN Disbursement path for ALL
+// three networks (MTN/Vodafone/AirtelTigo), not just MTN.
+// ---------------------------------------------------------------------------
+
+// Ghana mobile money bank_code values are Paystack-assigned and NOT the same
+// as the `provider` slugs the /charge momo channel uses above — resolved
+// from Paystack's own /bank list rather than hardcoded, since a wrong code
+// here would misdirect a real-money transfer. Cached for the process
+// lifetime: this is static reference data, not something that changes
+// mid-run.
+let _momoBankListCache = null;
+
+async function listMobileMoneyBanks() {
+  if (_momoBankListCache) return _momoBankListCache;
+  ensureConfigured();
+  const res = await http.get('/bank', {
+    params: { currency: 'GHS', type: 'mobile_money' },
+    headers: authHeaders()
+  });
+  _momoBankListCache = res.data?.data || [];
+  return _momoBankListCache;
+}
+
+const MOMO_BANK_NAME_HINTS = {
+  mtn: ['mtn'],
+  // Vodafone Cash was rebranded to Telecel Cash in Ghana in 2024 — match both
+  // so this keeps working regardless of which name Paystack's list uses.
+  vodafone: ['vodafone', 'telecel'],
+  airteltigo: ['airteltigo', 'airtel', 'tigo']
+};
+
+/**
+ * Pure matching step, split out from resolveMomoBankCode below purely so it's
+ * unit-testable without a live network call (same "test the part that
+ * doesn't touch the wire" convention mtnmomo.service.test.js already uses).
+ * Throws rather than guessing if no match is found — an unrecognized network
+ * or an empty/unexpected bank list here would misroute a real payout.
+ */
+function matchMomoBankCode(banks, network) {
+  const hints = MOMO_BANK_NAME_HINTS[network];
+  if (!hints) throw new Error(`Unsupported mobile money network for transfers: ${network}`);
+  const match = (banks || []).find(b => {
+    const name = String(b.name || '').toLowerCase();
+    return hints.some(h => name.includes(h));
+  });
+  if (!match) throw new Error(`No Paystack mobile money bank found matching network "${network}"`);
+  return match.code;
+}
+
+/**
+ * Resolve our internal network code ('mtn'|'vodafone'|'airteltigo') to the
+ * bank_code Paystack expects when creating a mobile_money transfer recipient.
+ */
+async function resolveMomoBankCode(network) {
+  const banks = await listMobileMoneyBanks();
+  return matchMomoBankCode(banks, network);
+}
+
+/**
+ * Create a Transfer Recipient for a mobile money payout.
+ * Deliberately NOT cached/reused across calls — a stale recipient tied to a
+ * merchant's old payout number would misdirect real money, and recipient
+ * creation is cheap on Paystack's side, so a fresh one per payout sidesteps
+ * that whole class of drift bug for what is an infrequent, manually-
+ * triggered action (not a hot path).
+ */
+async function createTransferRecipient({ name, accountNumber, network }) {
+  ensureConfigured();
+  const normalized = normalizeGhanaPhone(accountNumber);
+  if (!normalized) return { success: false, error: 'Invalid Ghana phone number' };
+  try {
+    const bankCode = await resolveMomoBankCode(network);
+    const res = await http.post('/transferrecipient', {
+      type: 'mobile_money',
+      name: name || normalized,
+      account_number: normalized.replace(/^\+/, ''),
+      bank_code: bankCode,
+      currency: 'GHS'
+    }, { headers: authHeaders() });
+    const data = res.data?.data || {};
+    return { success: true, recipientCode: data.recipient_code, raw: res.data };
+  } catch (err) {
+    logger.error('Paystack transfer recipient creation failed: %s | %j', err.message, err.response?.data);
+    return {
+      success: false,
+      error: err.response?.data?.message || err.message,
+      raw: err.response?.data
+    };
+  }
+}
+
+/**
+ * Initiate a Transfer (payout) to an already-created recipient.
+ *
+ * Paystack accounts can have "Approve transfers with OTP" enabled (the
+ * account owner gets an SMS OTP that must be submitted to
+ * /transfer/finalize_transfer before the money actually moves) — this is a
+ * platform-account dashboard security setting, not something this
+ * integration can complete on anyone's behalf, since the OTP goes to the
+ * PLATFORM's Paystack account owner, not the merchant. When Paystack reports
+ * status:'otp', that's surfaced as `requiresOtp: true` rather than treated
+ * as an ordinary pending/failure — callers should tell an admin to disable
+ * OTP for Transfers in Paystack Dashboard > Settings > Preferences for
+ * unattended automated payouts to work at all.
+ */
+async function initiateTransfer({ amountGhs, recipientCode, reference, reason }) {
+  ensureConfigured();
+  try {
+    const res = await http.post('/transfer', {
+      source: 'balance',
+      amount: toPesewas(amountGhs),
+      recipient: recipientCode,
+      reference,
+      reason: reason || 'Payout'
+    }, { headers: authHeaders() });
+
+    const data = res.data?.data || {};
+    if (data.status === 'otp') {
+      return {
+        success: false,
+        requiresOtp: true,
+        transferCode: data.transfer_code || null,
+        error: 'Transfer requires OTP finalization — disable "Approve transfers with OTP" in Paystack Dashboard > Settings > Preferences for automated payouts',
+        raw: res.data
+      };
+    }
+
+    return {
+      success: true,
+      status: data.status || 'pending',
+      transferCode: data.transfer_code || null,
+      reference: data.reference || reference,
+      raw: res.data
+    };
+  } catch (err) {
+    logger.error('Paystack transfer failed: %s | %j', err.message, err.response?.data);
+    return {
+      success: false,
+      transient: isTransientError(err),
+      error: err.response?.data?.message || err.message,
+      raw: err.response?.data
+    };
+  }
+}
+
+/**
+ * Verify a transfer's true status by our own reference — same "the webhook
+ * might never arrive" reconciliation role verifyTransaction plays for charges.
+ */
+async function verifyTransfer(reference) {
+  ensureConfigured();
+  try {
+    const res = await http.get(`/transfer/verify/${encodeURIComponent(reference)}`, {
+      headers: authHeaders()
+    });
+    const data = res.data?.data || {};
+    return {
+      success: true,
+      status: data.status,
+      transferCode: data.transfer_code || null,
+      reference: data.reference,
+      raw: res.data
+    };
+  } catch (err) {
+    logger.error('Paystack transfer verify failed: %s | %j', err.message, err.response?.data);
+    return { success: false, error: err.response?.data?.message || err.message };
+  }
+}
+
 module.exports = {
   initializeMoMoCharge,
   createPaymentLink,
   verifyTransaction,
   refundTransaction,
-  verifyPaystackWebhook
+  verifyPaystackWebhook,
+  listMobileMoneyBanks,
+  matchMomoBankCode,
+  resolveMomoBankCode,
+  createTransferRecipient,
+  initiateTransfer,
+  verifyTransfer
 };

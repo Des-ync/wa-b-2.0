@@ -5,14 +5,15 @@ const { requireAuth, requirePermission } = require('../middleware/auth');
 const { resolveBusinessId } = require('../middleware/tenantAccess');
 const { normalizeGhanaPhone } = require('../utils/helpers');
 const { recordAudit } = require('../utils/auditLog');
+const { INDUSTRIES } = require('./onboarding.routes');
 
 const router = express.Router();
 
 router.use(requireAuth('any'));
 
 const SETTINGS_COLUMNS =
-  'id, name, owner_name, slug, vat_rate_pct, welcome_message, support_phone, delivery_fee_ghs, delivery_zones, open_time, close_time, ' +
-  'logo_url, banner_url, ' +
+  'id, name, owner_name, slug, industry, vat_rate_pct, welcome_message, support_phone, delivery_fee_ghs, delivery_zones, open_time, close_time, ' +
+  'logo_url, banner_url, refund_policy, ' +
   'bot_language, payout_momo_number, payout_momo_network, ' +
   'cart_nudge_enabled, cart_nudge_delay_minutes, cart_nudge_max_per_cart, ' +
   'cart_nudge_message_template, cart_nudge_template_b, cart_nudge_coupon_code, ' +
@@ -114,6 +115,13 @@ router.patch('/settings', requirePermission('settings'), async (req, res) => {
       if (v.length > 200) return res.status(400).json({ success: false, error: 'owner_name too long (max 200 chars)' });
       set('owner_name', v || null);
     }
+    if ('industry' in body) {
+      const v = String(body.industry || '').trim().toLowerCase();
+      if (!INDUSTRIES.includes(v)) {
+        return res.status(400).json({ success: false, error: `industry must be one of: ${INDUSTRIES.join(', ')}` });
+      }
+      set('industry', v);
+    }
     if ('vat_rate_pct' in body) {
       const n = Number(body.vat_rate_pct);
       if (!Number.isFinite(n) || n < 0 || n > 100) {
@@ -126,6 +134,10 @@ router.patch('/settings', requirePermission('settings'), async (req, res) => {
         const v = body[col] == null ? null : String(body[col]).trim().slice(0, 500);
         set(col, v || null);
       }
+    }
+    if ('refund_policy' in body) {
+      const v = body.refund_policy == null ? null : String(body.refund_policy).trim().slice(0, 1500);
+      set('refund_policy', v || null);
     }
     if ('slug' in body) {
       const v = String(body.slug || '').trim().toLowerCase();

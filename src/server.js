@@ -11,6 +11,8 @@ const notification = require('./services/notification.service');
 const webhookProcessor = require('./services/webhook.processor');
 const paymentSweeper = require('./services/payment.sweeper');
 const cartNudge = require('./services/cart.nudge');
+const loyaltyJobs = require('./services/loyalty.jobs');
+const automations = require('./services/automations');
 const broadcastSender = require('./services/broadcast.sender');
 const { alertOps } = require('./services/alert.service');
 const dbBackup = require('./jobs/db.backup');
@@ -42,6 +44,8 @@ const apikeyRoutes = require('./routes/apikey.routes');
 const storefrontRoutes = require('./routes/storefront.routes');
 const inventoryRoutes = require('./routes/inventory.routes');
 const accountingRoutes = require('./routes/accounting.routes');
+const automationsRoutes = require('./routes/automations.routes');
+const auditlogRoutes = require('./routes/auditlog.routes');
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
@@ -251,6 +255,8 @@ app.use('/api/receipts', apiLimiter, receiptRoutes);
 app.use('/api/storefront', apiLimiter, storefrontRoutes);
 app.use('/api/inventory', apiLimiter, inventoryRoutes);
 app.use('/api/accounting', apiLimiter, accountingRoutes);
+app.use('/api/automations', apiLimiter, automationsRoutes);
+app.use('/api/audit-log', apiLimiter, auditlogRoutes);
 
 // Public system status — powers the (honest) status page. Exposes only
 // coarse operational signals, never tenant data.
@@ -363,11 +369,31 @@ function startCronJobs() {
     );
   }, { timezone: 'Africa/Accra' });
 
+  // Birthday loyalty coupons, daily 07:00 — self-locked via worker_locks
+  // (birthday_coupon_job), so this is safe even if RUN_CRON=true on more
+  // than one instance. Previously only scheduled in src/worker.js, which
+  // deploy/ecosystem.config.js never starts (only wa-saas-api / src/server.js
+  // runs in production) — it was dead code in practice.
+  cron.schedule('0 7 * * *', () => {
+    loyaltyJobs.runBirthdayCouponJob().catch(err =>
+      logger.error('birthdayCouponJob crashed: %s', err.message, { stack: err.stack })
+    );
+  }, { timezone: 'Africa/Accra' });
+
   // Broadcast queue drain, once a minute — small rate-limited batches so a
   // merchant's re-engagement blast never bursts past Meta's send limits.
   cron.schedule('* * * * *', () => {
     broadcastSender.runBroadcastSenderJob().catch(err =>
       logger.error('broadcastSenderJob crashed: %s', err.message, { stack: err.stack })
+    );
+  }, { timezone: 'Africa/Accra' });
+
+  // Lifecycle automations (reorder reminder / win-back / post-purchase
+  // review / delivery feedback) every 30 minutes — hour/day-granularity
+  // triggers, no need for tighter polling.
+  cron.schedule('*/30 * * * *', () => {
+    automations.runAutomationsJob().catch(err =>
+      logger.error('automationsJob crashed: %s', err.message, { stack: err.stack })
     );
   }, { timezone: 'Africa/Accra' });
 
@@ -387,7 +413,7 @@ function startCronJobs() {
     );
   }, { timezone: 'Africa/Accra' });
 
-  logger.info('Cron jobs scheduled (Africa/Accra) — 08:00 renewals, 09:00 reminders, 10:00 suspensions, 5-min payment sweeper, 15-min cart nudges, 1-min broadcast drain, 20:30 daily summary, 03:15 db backup, weekly prune.');
+  logger.info('Cron jobs scheduled (Africa/Accra) — 08:00 renewals, 09:00 reminders, 10:00 suspensions, 5-min payment sweeper, 15-min cart nudges, 07:00 birthday coupons, 1-min broadcast drain, 30-min lifecycle automations, 20:30 daily summary, 03:15 db backup, weekly prune.');
 }
 
 /* -------------------------------------------------------------------------

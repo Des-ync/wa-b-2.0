@@ -16,6 +16,34 @@
  *   t('tw', 'order_created', { n: 'ORD-2026-1234', total: 'GH₵50.00' })
  */
 
+// Normalized payment-failure categories (see webhook.processor.js's
+// normalizeFailureReason) mapped to a short customer-facing phrase — keeps
+// Paystack's free-text gateway_response and MTN MoMo's enum reason codes
+// speaking one consistent, translated vocabulary instead of leaking raw
+// gateway text (or nothing at all) into the chat.
+const FAILURE_REASON_TEXT = {
+  insufficient_funds: {
+    en: 'insufficient funds in your MoMo wallet',
+    tw: 'sika a ɛwɔ wo MoMo wallet mu no nnɔɔso'
+  },
+  cancelled: {
+    en: 'you cancelled the approval prompt',
+    tw: 'wo ara na wugyaee approval no'
+  },
+  timeout: {
+    en: 'the approval prompt timed out',
+    tw: 'approval no bere no twaa mu'
+  },
+  wrong_number: {
+    en: 'the MoMo number could not be reached',
+    tw: 'yɛantumi amfa MoMo nɔma no ho'
+  },
+  declined: {
+    en: 'your provider declined the payment',
+    tw: 'wo network no ampene akatua no so'
+  }
+};
+
 const STRINGS = {
   /* ---------- global / guardrails ---------- */
   slow_down: {
@@ -164,6 +192,18 @@ const STRINGS = {
   product_query_none: {
     en: p => `We don't have that right now. Reply *MENU* to see what ${p.shop} has available.`,
     tw: p => `Yɛnni saa adeɛ no seesei. Kyerɛw *MENU* na hwɛ nea ${p.shop} wɔ.`
+  },
+  delivery_fee_zones: {
+    en: p => `🛵 Delivery fee depends on your area:\n\n${p.list}`,
+    tw: p => `🛵 Ɔsoma ka no gyina wo beae so:\n\n${p.list}` // NEEDS_NATIVE_REVIEW
+  },
+  delivery_fee_flat: {
+    en: p => `🛵 Delivery is a flat ${p.fee}.`,
+    tw: p => `🛵 Ɔsoma ka no yɛ ${p.fee} pɛpɛɛpɛ.` // NEEDS_NATIVE_REVIEW
+  },
+  delivery_fee_free: {
+    en: () => `🛵 Delivery is free!`,
+    tw: () => `🛵 Ɔsoma no yɛ kwa!` // NEEDS_NATIVE_REVIEW
   },
   menu_title: {
     en: p => `${p.shop} Menu`,
@@ -335,6 +375,18 @@ const STRINGS = {
     en: () => `That address looks too short. Please send a more detailed delivery address, or share your location pin 📍.`,
     tw: () => `Address no yɛ tiaa dodo. Yɛsrɛ wo kyerɛkyerɛ mu yiye, anaa fa wo location pin no bra 📍.`
   },
+  ask_address_saved: {
+    en: p => `📍 Deliver to your saved address?\n${p.address}`,
+    tw: p => `📍 Yɛmfa nkɔ address a woasie no?\n${p.address}`   // NEEDS_NATIVE_REVIEW
+  },
+  btn_use_saved_address: {
+    en: () => `Use saved address`,
+    tw: () => `Fa address a asie` // NEEDS_NATIVE_REVIEW
+  },
+  btn_enter_new_address: {
+    en: () => `Enter new address`,
+    tw: () => `Kyerɛw foforo` // NEEDS_NATIVE_REVIEW
+  },
   zone_header: { en: () => 'Delivery zone', tw: () => 'Beae a yɛde bɛba' },
   zone_section: { en: () => 'Zones', tw: () => 'Mmeae' },
   zone_body: {
@@ -403,9 +455,13 @@ const STRINGS = {
     en: p => `⚠️ The payment received for order *${p.n}* did not match the order total. Our team will be in touch.`,
     tw: p => `⚠️ Akatua a yegye maa nhyehyɛe *${p.n}* no ne ne boɔ anhyia. Yɛn adwumakuw no bɛkasa wo.`
   },
+  payment_reminder: {
+    en: p => `⏰ Reminder: your order *${p.n}* (${p.total}) is still awaiting payment.\n\nTap below to finish paying, or cancel if you've changed your mind.`,
+    tw: p => `⏰ Nkaebɔ: wo nhyehyɛe *${p.n}* (${p.total}) ho akatua no nnya nnyɛɛ.\n\nMia ase na wie akatua no, anaasɛ twa mu sɛ wo adwene asesa.`
+  },
   payment_failed_retry: {
-    en: p => `⚠️ Payment for order *${p.n}* did not go through.\n\nYour order is saved — you can try paying again.`,
-    tw: p => `⚠️ Nhyehyɛe *${p.n}* ho akatua no ansi yiye.\n\nWo nhyehyɛe no da so wɔ hɔ — wubetumi asan atua bio.`
+    en: p => `⚠️ Payment for order *${p.n}* did not go through${p.reason ? ` — ${(FAILURE_REASON_TEXT[p.reason] || FAILURE_REASON_TEXT.declined).en}` : ''}.\n\nYour order is saved — you can try paying again.`,
+    tw: p => `⚠️ Nhyehyɛe *${p.n}* ho akatua no ansi yiye${p.reason ? ` — ${(FAILURE_REASON_TEXT[p.reason] || FAILURE_REASON_TEXT.declined).tw}` : ''}.\n\nWo nhyehyɛe no da so wɔ hɔ — wubetumi asan atua bio.`
   },
   payment_received: {
     en: p => `✅ Payment received!\n\nOrder: ${p.n}\nTotal: ${p.total}\nBusiness: ${p.shop}\n\nWe'll notify you the moment your order is on its way. Thank you for shopping with us! 🛍️${p.receiptUrl ? `\n\nReceipt: ${p.receiptUrl}` : ''}\n\nWant the same again next time? Just reply *REPEAT*.`,
@@ -420,6 +476,56 @@ const STRINGS = {
   sms_cart_nudge: {
     en: p => `${p.shop}: You left ${p.count} item(s) in your cart. Reply to this WhatsApp/Instagram chat to finish your order.`,
     tw: p => `${p.shop}: Wogyaw nneɛma ${p.count} wɔ wo cart mu. San kɔ WhatsApp/Instagram nkitahodi no so na wie wo nhyehyɛe no.`
+  },
+
+  /* ---------- lifecycle automations (src/services/automations.js) ---------- */
+  reorder_reminder: {
+    en: p => `🔄 Hi! It's been ${p.days} days since your last order at *${p.shop}*. Ready to reorder? Reply *MENU* to shop again.`,
+    tw: p => `🔄 Ɛda ${p.days} a woatɔ adeɛ wɔ *${p.shop}* a. Wopɛ sɛ wosan tɔ bio? Kyerɛw *MENU* na tɔ bio.`
+  },
+  sms_reorder_reminder: {
+    en: p => `${p.shop}: It's been a while since your last order! Reply MENU on WhatsApp to reorder.`,
+    tw: p => `${p.shop}: Ɛda bi a woatɔ adeɛ! Kyerɛw MENU wɔ WhatsApp so na san tɔ bio.`
+  },
+  win_back: {
+    en: p => `👋 We miss you at *${p.shop}*! It's been ${p.days} days. Come see what's new — reply *MENU* to shop.`,
+    tw: p => `👋 Wo ho hia yɛn wɔ *${p.shop}*! Ɛda ${p.days} a woamma. Bra hwɛ nea foforɔ wɔ hɔ — kyerɛw *MENU*.`
+  },
+  sms_win_back: {
+    en: p => `${p.shop}: We miss you! Reply MENU on WhatsApp to see what's new.`,
+    tw: p => `${p.shop}: Wo ho hia yɛn! Kyerɛw MENU wɔ WhatsApp so.`
+  },
+  post_purchase_review: {
+    en: p => `🙏 How was your order *${p.n}* from *${p.shop}*? Reply with a quick rating (1-5) or tell us what you thought!`,
+    tw: p => `🙏 Wo nhyehyɛe *${p.n}* a wonyaa firi *${p.shop}* yɛɛ dɛn? Kyerɛw nɔma (1-5) anaa ka wo adwene kyerɛ yɛn!`
+  },
+  sms_post_purchase_review: {
+    en: p => `${p.shop}: How was order ${p.n}? Reply on WhatsApp and let us know!`,
+    tw: p => `${p.shop}: Nhyehyɛe ${p.n} yɛɛ dɛn? Bua yɛn wɔ WhatsApp so!`
+  },
+  delivery_feedback: {
+    en: p => `🛵 How was your delivery for order *${p.n}*? Any issues — just reply here and we'll sort it out.`,
+    tw: p => `🛵 Wo nhyehyɛe *${p.n}* no delivery yɛɛ dɛn? Sɛ biribi ansi yiye a, bua yɛn wɔ ha na yɛbɛsiesie.`
+  },
+  sms_delivery_feedback: {
+    en: p => `${p.shop}: How was your delivery for order ${p.n}? Reply on WhatsApp if anything was off.`,
+    tw: p => `${p.shop}: Wo nhyehyɛe ${p.n} delivery yɛɛ dɛn? Bua yɛn wɔ WhatsApp so sɛ biribi ansi yiye a.`
+  },
+  back_in_stock: {
+    en: p => `📦 Good news! *${p.name}* is back in stock at *${p.shop}*. Reply *MENU* to order before it's gone again.`,
+    tw: p => `📦 Nsɛmpa! *${p.name}* aba bio wɔ *${p.shop}*. Kyerɛw *MENU* na tɔ ansa na asa bio.`
+  },
+  sms_back_in_stock: {
+    en: p => `${p.shop}: ${p.name} is back in stock! Reply MENU on WhatsApp to order.`,
+    tw: p => `${p.shop}: ${p.name} aba bio! Kyerɛw MENU wɔ WhatsApp so na tɔ.`
+  },
+  btn_notify_restock: {
+    en: () => 'Notify me',
+    tw: () => 'Bɔ me amanneɛ'
+  },
+  product_watch_confirmed: {
+    en: p => `👍 We'll message you the moment *${p.name}* is back in stock.`,
+    tw: p => `👍 Sɛ *${p.name}* san ba a, yɛbɛbɔ wo amanneɛ ntɛm ara.`
   },
 
   /* ---------- fulfilment status notifications ---------- */

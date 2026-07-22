@@ -21,6 +21,11 @@ const router = express.Router();
 // of the 404 a bad receipt link deserves.
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// Shown when a merchant hasn't set their own refund_policy — kept in one
+// place so the default can be tightened later without touching every row.
+const DEFAULT_REFUND_POLICY =
+  'Contact the shop directly to discuss a refund or cancellation. Refunds for undelivered or incorrect orders are handled at the shop’s discretion.';
+
 router.get('/:id', async (req, res) => {
   try {
     if (!UUID_RE.test(req.params.id)) {
@@ -32,6 +37,7 @@ router.get('/:id', async (req, res) => {
               o.delivery_address, o.estimated_ready_at, o.estimated_delivery_at,
               o.rider_name, o.rider_phone, o.delivery_status, o.delivery_proof_url,
               b.name AS business_name, b.support_phone, b.whatsapp_number AS business_whatsapp,
+              b.logo_url AS business_logo_url, b.refund_policy,
               c.display_name AS customer_name, c.whatsapp_number AS customer_phone
          FROM orders o
          JOIN businesses b ON b.id = o.business_id
@@ -72,11 +78,18 @@ router.get('/:id', async (req, res) => {
         estimated_ready_at: row.estimated_ready_at,
         estimated_delivery_at: row.estimated_delivery_at,
         rider_name: row.rider_name,
+        // Unmasked, unlike customer_phone_masked below — this exists so the
+        // customer holding the receipt can actually call/message their own
+        // rider; it's operational logistics info, not PII being protected
+        // from them.
+        rider_phone: row.rider_phone,
         delivery_status: row.delivery_status,
         delivery_proof_url: row.delivery_proof_url,
         timeline: historyRes.rows,
         business_name: row.business_name,
         business_support_phone: row.support_phone || row.business_whatsapp,
+        business_logo_url: row.business_logo_url,
+        refund_policy: row.refund_policy || DEFAULT_REFUND_POLICY,
         customer_name: row.customer_name,
         customer_phone_masked: maskedPhone
       }

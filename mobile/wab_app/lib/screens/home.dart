@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../api/notifications_api.dart';
+import '../api/onboarding_api.dart';
 import '../state/session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import 'notifications.dart';
+import 'onboarding_checklist.dart';
 import 'order_detail.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -16,6 +20,9 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   Map<String, dynamic>? _stats;
   List<dynamic> _recentOrders = [];
+  List<dynamic> _lowStock = [];
+  int _unreadNotifications = 0;
+  Map<String, dynamic>? _onboarding;
   String? _error;
   bool _loading = true;
 
@@ -37,11 +44,19 @@ class _HomeScreenState extends State<HomeScreen> {
       final results = await Future.wait([
         session.api.get('/api/orders/stats/today', query: {'business_id': bid}),
         session.api.get('/api/orders', query: {'business_id': bid, 'limit': 10}),
+        session.api.get('/api/inventory/reorder-suggestions', query: {'business_id': bid}),
+        session.api.getNotifications(bid, limit: 1),
+        // A banner about setup progress is a nice-to-have, not core to the
+        // Today view — a failure here must never blank out the rest of it.
+        session.api.getOnboardingStatus(bid).catchError((_) => <String, dynamic>{}),
       ]);
       if (!mounted) return;
       setState(() {
         _stats = results[0]['stats'] as Map<String, dynamic>?;
         _recentOrders = (results[1]['orders'] as List?) ?? [];
+        _lowStock = (results[2]['suggestions'] as List?) ?? [];
+        _unreadNotifications = (results[3]['unread_count'] as num?)?.toInt() ?? 0;
+        _onboarding = results[4];
         _loading = false;
       });
     } catch (e) {
@@ -51,6 +66,79 @@ class _HomeScreenState extends State<HomeScreen> {
         _loading = false;
       });
     }
+  }
+
+  Future<void> _openNotifications() async {
+    await Navigator.of(context)
+        .push(MaterialPageRoute(builder: (_) => const NotificationsScreen()));
+    _load();
+  }
+
+  void _showLowStockSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: WabColors.bg,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (_) => DraggableScrollableSheet(
+        initialChildSize: 0.6,
+        maxChildSize: 0.9,
+        expand: false,
+        builder: (_, scrollCtrl) => Padding(
+          padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Low stock',
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 4),
+              const Text('At or below their reorder threshold',
+                  style: TextStyle(color: WabColors.muted, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 16),
+              Expanded(
+                child: _lowStock.isEmpty
+                    ? const Center(
+                        child: EmptyState(
+                            icon: Icons.inventory_2_rounded,
+                            title: 'Nothing low right now'))
+                    : ListView.separated(
+                        controller: scrollCtrl,
+                        itemCount: _lowStock.length,
+                        separatorBuilder: (_, __) => const Divider(height: 1),
+                        itemBuilder: (_, i) {
+                          final p = _lowStock[i] as Map<String, dynamic>;
+                          final qty = p['stock_qty'];
+                          return ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: Text('${p['name']}',
+                                style: const TextStyle(fontWeight: FontWeight.w700)),
+                            subtitle: Text(
+                                p['supplier_name'] != null
+                                    ? 'Supplier: ${p['supplier_name']}'
+                                    : 'No supplier on file',
+                                style: const TextStyle(color: WabColors.muted, fontSize: 13)),
+                            trailing: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                Text('$qty left',
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.w800, color: WabColors.warning)),
+                                Text('reorder ${p['suggested_reorder_qty']}',
+                                    style: const TextStyle(
+                                        color: WabColors.muted2, fontSize: 12)),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -72,6 +160,18 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         toolbarHeight: 68,
         actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 4),
+            child: Badge(
+              label: Text('$_unreadNotifications'),
+              isLabelVisible: _unreadNotifications > 0,
+              child: IconButton(
+                tooltip: 'Notifications',
+                onPressed: _openNotifications,
+                icon: const Icon(Icons.notifications_outlined),
+              ),
+            ),
+          ),
           if (status != null)
             Padding(
               padding: const EdgeInsets.only(right: 16),
@@ -90,6 +190,10 @@ class _HomeScreenState extends State<HomeScreen> {
                     physics: const AlwaysScrollableScrollPhysics(),
                     padding: const EdgeInsets.all(16),
                     children: [
+                      if (_onboarding?['all_complete'] == false) ...[
+                        _setupBanner(),
+                        const SizedBox(height: 16),
+                      ],
                       _statGrid(),
                       const SizedBox(height: 24),
                       const Text('Recent orders',
@@ -113,6 +217,44 @@ class _HomeScreenState extends State<HomeScreen> {
                     ],
                   ),
                 ),
+    );
+  }
+
+  Widget _setupBanner() {
+    final completed = _onboarding?['completed_count'] ?? 0;
+    final total = _onboarding?['total_count'] ?? 0;
+    return Material(
+      color: WabColors.accentSoft,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: () async {
+          await Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const OnboardingChecklistScreen()));
+          _load();
+        },
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              const Icon(Icons.checklist_rounded, color: WabColors.accentInk),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Finish setting up your shop',
+                        style: TextStyle(fontWeight: FontWeight.w800, color: WabColors.accentInk)),
+                    Text('$completed of $total steps complete',
+                        style: const TextStyle(color: WabColors.accentInk, fontSize: 13)),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right_rounded, color: WabColors.accentInk),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -175,6 +317,33 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
         ),
+        const SizedBox(height: 10),
+        Container(
+          decoration: BoxDecoration(
+            color: WabColors.paper,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: WabColors.line),
+          ),
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          child: Row(
+            children: [
+              _statCell('New customers', '${s['new_customers_count'] ?? 0}', WabColors.accentInk),
+              _divider(),
+              _statCell(
+                'Needs reply',
+                '${s['messages_needing_reply_count'] ?? 0}',
+                (s['messages_needing_reply_count'] ?? 0) > 0 ? WabColors.warning : WabColors.muted,
+              ),
+              _divider(),
+              _statCell(
+                'Low stock',
+                '${_lowStock.length}',
+                _lowStock.isNotEmpty ? WabColors.warning : WabColors.muted,
+                onTap: _lowStock.isNotEmpty ? _showLowStockSheet : null,
+              ),
+            ],
+          ),
+        ),
       ],
     );
   }
@@ -182,17 +351,21 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _divider() =>
       Container(width: 1, height: 34, color: WabColors.line);
 
-  Widget _statCell(String label, String value, Color color) {
+  Widget _statCell(String label, String value, Color color, {VoidCallback? onTap}) {
     return Expanded(
-      child: Column(
-        children: [
-          Text(value,
-              style: TextStyle(
-                  fontSize: 20, fontWeight: FontWeight.w800, color: color)),
-          const SizedBox(height: 2),
-          Text(label,
-              style: const TextStyle(fontSize: 12.5, color: WabColors.muted)),
-        ],
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: Column(
+          children: [
+            Text(value,
+                style: TextStyle(
+                    fontSize: 20, fontWeight: FontWeight.w800, color: color)),
+            const SizedBox(height: 2),
+            Text(label,
+                style: const TextStyle(fontSize: 12.5, color: WabColors.muted)),
+          ],
+        ),
       ),
     );
   }
@@ -215,7 +388,8 @@ class _HomeScreenState extends State<HomeScreen> {
             Text(ghs(o['total_ghs']),
                 style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
             const SizedBox(height: 4),
-            StatusChip('${o['payment_status'] ?? o['status']}'),
+            StatusChip('${o['payment_status'] ?? o['status']}',
+                label: paymentStatusLabel('${o['payment_status'] ?? o['status']}')),
           ],
         ),
         onTap: () => Navigator.of(context)

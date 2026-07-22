@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'screens/login.dart';
-import 'screens/onboarding.dart';
+import 'screens/welcome_carousel.dart';
 import 'screens/shell.dart';
 import 'screens/splash.dart';
 import 'services/push.dart';
@@ -78,7 +78,7 @@ class _GateState extends State<_Gate> {
       );
     }
     if (!_seenOnboarding!) {
-      return OnboardingScreen(onDone: _finishOnboarding);
+      return WelcomeCarouselScreen(onDone: _finishOnboarding);
     }
     if (!session.loggedIn) {
       return const LoginScreen();

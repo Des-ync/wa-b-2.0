@@ -98,10 +98,66 @@ test('processPaystack routes a SUB- failure to billing failure, not order failur
   assert.equal(notifyFailedCalls[0].business.id, 'biz-1');
 });
 
+test('processPaystack routes an ORD- failure to the order flow with a normalized reason', async () => {
+  await processPaystack({
+    event: 'charge.failed',
+    data: { reference: 'ORD-FAIL-1', status: 'failed', gateway_response: 'Insufficient Funds' }
+  });
+
+  assert.equal(handlePaymentFailureCalls.length, 1);
+  assert.equal(handlePaymentFailureCalls[0].reference, 'ORD-FAIL-1');
+  assert.equal(handlePaymentFailureCalls[0].reason, 'insufficient_funds');
+});
+
 test('processPaystack drops a charge in an unexpected (non-GHS) currency instead of crediting it', async () => {
   await processPaystack({
     event: 'charge.success',
     data: { reference: 'ORD-WRONG-CCY', id: 1, status: 'success', amount: 5000, currency: 'NGN' }
   });
   assert.equal(handlePaymentSuccessCalls.length, 0);
+});
+
+test('processPaystack settles a pending payout on transfer.success', async () => {
+  let updateParams = null;
+  await withQuery([
+    ['UPDATE payouts SET status', (params) => { updateParams = params; return { rowCount: 1, rows: [{ id: 'payout-1' }] }; }]
+  ], () => processPaystack({
+    event: 'transfer.success',
+    data: { reference: 'PAYOUT-1', transfer_code: 'TRF_1', status: 'success' }
+  }));
+  assert.deepEqual(updateParams, ['PAYOUT-1', 'settled', 'TRF_1']);
+  // Must not be misrouted into the customer/billing charge flows.
+  assert.equal(handlePaymentSuccessCalls.length, 0);
+});
+
+test('processPaystack fails a pending payout on transfer.failed', async () => {
+  let updateParams = null;
+  await withQuery([
+    ['UPDATE payouts SET status', (params) => { updateParams = params; return { rowCount: 1, rows: [{ id: 'payout-1' }] }; }]
+  ], () => processPaystack({
+    event: 'transfer.failed',
+    data: { reference: 'PAYOUT-2', transfer_code: 'TRF_2', status: 'failed' }
+  }));
+  assert.deepEqual(updateParams, ['PAYOUT-2', 'failed', 'TRF_2']);
+  assert.equal(handlePaymentFailureCalls.length, 0);
+});
+
+test('processPaystack fails a pending payout on transfer.reversed', async () => {
+  let updateParams = null;
+  await withQuery([
+    ['UPDATE payouts SET status', (params) => { updateParams = params; return { rowCount: 1, rows: [{ id: 'payout-1' }] }; }]
+  ], () => processPaystack({
+    event: 'transfer.reversed',
+    data: { reference: 'PAYOUT-3', transfer_code: 'TRF_3', status: 'reversed' }
+  }));
+  assert.equal(updateParams[1], 'failed');
+});
+
+test('processPaystack transfer event with no matching pending payout does not throw (already settled or unknown ref)', async () => {
+  await withQuery([
+    ['UPDATE payouts SET status', () => ({ rowCount: 0, rows: [] })]
+  ], () => processPaystack({
+    event: 'transfer.success',
+    data: { reference: 'PAYOUT-UNKNOWN', transfer_code: 'TRF_9' }
+  }));
 });

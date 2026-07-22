@@ -226,6 +226,9 @@ ALTER TABLE customers ADD COLUMN IF NOT EXISTS referred_by_customer_id UUID REFE
 -- Set once the referrer's reward has been granted, so a referred customer's
 -- SECOND, THIRD, ... paid order can never re-trigger the referrer's reward.
 ALTER TABLE customers ADD COLUMN IF NOT EXISTS referral_reward_granted_at TIMESTAMPTZ;
+-- Last delivery address that successfully cleared checkout — offered back
+-- as a one-tap default on the next order instead of re-typing every time.
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS address TEXT;
 
 -- =========================================================================
 -- customer_rewards: issued, per-customer redemption codes — stamp free
@@ -850,6 +853,10 @@ ALTER TABLE webhook_events ADD CONSTRAINT webhook_events_source_check
 -- =========================================================================
 ALTER TABLE businesses ADD COLUMN IF NOT EXISTS logo_url TEXT;
 ALTER TABLE businesses ADD COLUMN IF NOT EXISTS banner_url TEXT;
+-- Merchant-editable refund/cancellation policy shown on the customer-facing
+-- receipt. NULL falls back to a generic default in receipt.routes.js rather
+-- than storing the default text in every row.
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS refund_policy TEXT;
 
 CREATE TABLE IF NOT EXISTS product_bundles (
   id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -935,6 +942,117 @@ CREATE TABLE IF NOT EXISTS impersonation_sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_impersonation_business ON impersonation_sessions(business_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_impersonation_active ON impersonation_sessions(token_hash) WHERE revoked_at IS NULL;
+
+-- =========================================================================
+-- MTN MoMo direct integration — DORMANT. A direct Collections (customer
+-- checkout) and Disbursements (automated merchant payout) integration with
+-- MTN was built here, then superseded before going live: Paystack is now the
+-- sole active gateway for both customer checkout (all networks) and
+-- automated merchant payouts (also all networks, via Paystack Transfers —
+-- see the payouts columns below). This schema and the mtn_momo/
+-- mtn_momo_disbursement plumbing stay in place only to receive/verify any
+-- residual in-flight MTN callback; nothing initiates a new MTN-direct charge
+-- or payout anymore. 'pawapay' stays in the CHECK constraints below for the
+-- same historical-rows reason explained above.
+-- =========================================================================
+
+-- MTN's own X-Reference-Id (a UUID, distinct from our human-readable
+-- 'reference') for the one gateway that needs a second identifier to poll
+-- status — Paystack's reference already doubles as its own gateway
+-- reference, so this stays NULL for Paystack/Hubtel attempts.
+ALTER TABLE payment_attempts ADD COLUMN IF NOT EXISTS gateway_ref TEXT;
+-- UNIQUE (not just indexed): the webhook processor looks up an attempt BY
+-- this value alone, so two attempts sharing one gateway_ref would make an
+-- inbound callback ambiguous — collapse that class of bug into a DB error
+-- at write time instead of a silent wrong-order match at read time.
+-- DROP+CREATE (not ADD CONSTRAINT's DROP-then-ADD pattern used elsewhere in
+-- this file) because Postgres has no ALTER INDEX to add uniqueness in place —
+-- this keeps the migration re-runnable even against a DB that already has an
+-- earlier, non-unique version of this same index.
+DROP INDEX IF EXISTS idx_payment_attempts_gateway_ref;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_attempts_gateway_ref
+  ON payment_attempts(gateway_ref) WHERE gateway_ref IS NOT NULL;
+
+ALTER TABLE webhook_events DROP CONSTRAINT IF EXISTS webhook_events_source_check;
+ALTER TABLE webhook_events ADD CONSTRAINT webhook_events_source_check
+  CHECK (source IN ('whatsapp','paystack','hubtel','pawapay','instagram','messenger','mtn_momo','mtn_momo_disbursement'));
+
+-- payouts: now ALSO supports an automated payout via Paystack Transfers (the
+-- active gateway) or the dormant MTN Disbursement path, tracked pending ->
+-- settled/failed exactly like billing_transactions. Every pre-existing row
+-- is a manual record of money that was ALREADY sent, so status defaults to
+-- 'settled' and initiated_by to 'manual' — purely additive, no existing
+-- row's meaning changes.
+ALTER TABLE payouts ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'settled';
+ALTER TABLE payouts DROP CONSTRAINT IF EXISTS payouts_status_check;
+ALTER TABLE payouts ADD CONSTRAINT payouts_status_check
+  CHECK (status IN ('pending','settled','failed'));
+ALTER TABLE payouts ADD COLUMN IF NOT EXISTS gateway TEXT;
+ALTER TABLE payouts DROP CONSTRAINT IF EXISTS payouts_gateway_check;
+ALTER TABLE payouts ADD CONSTRAINT payouts_gateway_check
+  CHECK (gateway IS NULL OR gateway IN ('mtn_momo','paystack'));
+ALTER TABLE payouts ADD COLUMN IF NOT EXISTS gateway_ref TEXT;
+ALTER TABLE payouts ADD COLUMN IF NOT EXISTS initiated_by TEXT NOT NULL DEFAULT 'manual';
+ALTER TABLE payouts DROP CONSTRAINT IF EXISTS payouts_initiated_by_check;
+ALTER TABLE payouts ADD CONSTRAINT payouts_initiated_by_check
+  CHECK (initiated_by IN ('manual','mtn_momo_auto','paystack_auto'));
+CREATE INDEX IF NOT EXISTS idx_payouts_status_pending ON payouts(status) WHERE status = 'pending';
+
+-- =========================================================================
+-- automations: per-business on/off + config for the lifecycle-automation
+-- cron (src/services/automations.js) — reorder reminders, win-back,
+-- post-purchase review, delivery feedback. One generic table + registry
+-- instead of a bespoke cron function per template (see cart_nudge_* columns
+-- on businesses and loyalty_birthday_* for the two earlier one-off patterns
+-- this deliberately does NOT repeat a third and fourth time).
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS automations (
+  id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  business_id   UUID NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  key           TEXT NOT NULL CHECK (key IN
+                  ('reorder_reminder','win_back','post_purchase_review','delivery_feedback')),
+  enabled       BOOLEAN NOT NULL DEFAULT FALSE,
+  config        JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (business_id, key)
+);
+
+-- automation_sends: append-only send log, doubling as the dedup guard so a
+-- customer/order is never notified twice by the same automation. Order-
+-- anchored automations (post_purchase_review, delivery_feedback) match on
+-- (automation_key, order_id); customer-anchored ones (reorder_reminder,
+-- win_back) match on (automation_key, customer_id) within a cooldown window
+-- computed in application code, not a DB constraint — the cooldown length is
+-- merchant-configurable (automations.config), not fixed at schema time.
+CREATE TABLE IF NOT EXISTS automation_sends (
+  id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  business_id     UUID NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  automation_key  TEXT NOT NULL,
+  customer_id     UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  order_id        UUID REFERENCES orders(id) ON DELETE CASCADE,
+  sent_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_automation_sends_customer ON automation_sends(automation_key, customer_id, sent_at DESC);
+CREATE INDEX IF NOT EXISTS idx_automation_sends_order ON automation_sends(automation_key, order_id) WHERE order_id IS NOT NULL;
+
+-- product_watchers: a customer's "notify me when back in stock" opt-in for
+-- one product (see conversation.handler.js#watchProductForRestock, offered
+-- as a button the moment they try to order something out of stock).
+-- notified_at NULL = still waiting; set once notifyProductRestocked fires
+-- for this row, and reset back to NULL on a fresh opt-in so a repeat
+-- out-of-stock/back-in-stock cycle notifies again instead of going silent.
+CREATE TABLE IF NOT EXISTS product_watchers (
+  id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  business_id   UUID NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  product_id    UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  customer_id   UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  notified_at   TIMESTAMPTZ,
+  UNIQUE (product_id, customer_id)
+);
+CREATE INDEX IF NOT EXISTS idx_product_watchers_pending
+  ON product_watchers(product_id) WHERE notified_at IS NULL;
 
 -- =========================================================================
 -- updated_at trigger

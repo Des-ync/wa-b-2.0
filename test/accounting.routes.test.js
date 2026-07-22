@@ -8,6 +8,20 @@ let currentQuery = async () => { throw new Error('no query handler installed for
 db.query = (...args) => currentQuery(...args);
 db.transaction = async (cb) => cb({ query: (...args) => currentQuery(...args) });
 
+const paystack = require('../src/services/paystack.service');
+let createTransferRecipientReturn = null;
+let initiateTransferReturn = null;
+let createTransferRecipientCalls = [];
+let initiateTransferCalls = [];
+paystack.createTransferRecipient = async (args) => {
+  createTransferRecipientCalls.push(args);
+  return createTransferRecipientReturn;
+};
+paystack.initiateTransfer = async (args) => {
+  initiateTransferCalls.push(args);
+  return initiateTransferReturn;
+};
+
 const accountingRoutes = require('../src/routes/accounting.routes');
 
 function buildApp() {
@@ -148,6 +162,96 @@ test('POST /accounting/expenses records an expense for the caller\'s own busines
   assert.equal(res.status, 201);
   assert.equal(inserted[0], 'biz-1');
   assert.equal(inserted[1], 'ingredients');
+});
+
+test.beforeEach(() => {
+  createTransferRecipientReturn = null;
+  initiateTransferReturn = null;
+  createTransferRecipientCalls = [];
+  initiateTransferCalls = [];
+});
+
+test('POST /accounting/payouts/auto initiates a Paystack transfer for a Vodafone payout number (not MTN-only anymore)', async () => {
+  createTransferRecipientReturn = { success: true, recipientCode: 'RCP_123' };
+  initiateTransferReturn = { success: true, status: 'success', transferCode: 'TRF_456', reference: 'PAYOUT-1' };
+  let insertedPayout = null;
+  withKeyLookup(OWNER_KEY_ROW, async (sql, params) => {
+    if (sql.includes('FROM businesses WHERE id')) {
+      return { rows: [{ id: 'biz-1', name: 'Kwame Shop', payout_momo_number: '+233201234567', payout_momo_network: 'vodafone' }] };
+    }
+    if (sql.includes('INSERT INTO payouts')) {
+      insertedPayout = params;
+      return { rows: [{ id: 'payout-1', status: 'pending', gateway: 'paystack', initiated_by: 'paystack_auto' }] };
+    }
+    if (sql.includes('UPDATE payouts SET gateway_ref')) {
+      return { rows: [{ id: 'payout-1', status: 'pending', gateway_ref: 'TRF_456' }] };
+    }
+    return { rows: [] };
+  });
+  const app = buildApp();
+  const res = await request(app)
+    .post('/api/accounting/payouts/auto')
+    .set('Authorization', 'Bearer sk_live_abc')
+    .send({ amount_ghs: 250 });
+  assert.equal(res.status, 202);
+  assert.equal(res.body.payout.gateway_ref, 'TRF_456');
+  assert.equal(createTransferRecipientCalls.length, 1);
+  assert.equal(createTransferRecipientCalls[0].network, 'vodafone');
+  assert.equal(initiateTransferCalls.length, 1);
+  assert.equal(initiateTransferCalls[0].recipientCode, 'RCP_123');
+  assert.equal(insertedPayout[3], 'vodafone'); // momo_network column
+});
+
+test('POST /accounting/payouts/auto returns 400 when the business has no payout momo number/network on file', async () => {
+  withKeyLookup(OWNER_KEY_ROW, async (sql) => {
+    if (sql.includes('FROM businesses WHERE id')) {
+      return { rows: [{ id: 'biz-1', name: 'Kwame Shop', payout_momo_number: null, payout_momo_network: null }] };
+    }
+    return { rows: [] };
+  });
+  const app = buildApp();
+  const res = await request(app)
+    .post('/api/accounting/payouts/auto')
+    .set('Authorization', 'Bearer sk_live_abc')
+    .send({ amount_ghs: 100 });
+  assert.equal(res.status, 400);
+  assert.equal(createTransferRecipientCalls.length, 0);
+});
+
+test('POST /accounting/payouts/auto surfaces an OTP-required transfer as a 409, not a silent hang', async () => {
+  createTransferRecipientReturn = { success: true, recipientCode: 'RCP_123' };
+  initiateTransferReturn = { success: false, requiresOtp: true, error: 'Transfer requires OTP finalization — disable "Approve transfers with OTP" in Paystack Dashboard > Settings > Preferences for automated payouts' };
+  withKeyLookup(OWNER_KEY_ROW, async (sql) => {
+    if (sql.includes('FROM businesses WHERE id')) {
+      return { rows: [{ id: 'biz-1', name: 'Kwame Shop', payout_momo_number: '+233241234567', payout_momo_network: 'mtn' }] };
+    }
+    if (sql.includes('INSERT INTO payouts')) return { rows: [{ id: 'payout-1' }] };
+    return { rows: [] };
+  });
+  const app = buildApp();
+  const res = await request(app)
+    .post('/api/accounting/payouts/auto')
+    .set('Authorization', 'Bearer sk_live_abc')
+    .send({ amount_ghs: 100 });
+  assert.equal(res.status, 409);
+  assert.match(res.body.error, /OTP/);
+});
+
+test('POST /accounting/payouts/auto returns 502 when Paystack cannot create a transfer recipient', async () => {
+  createTransferRecipientReturn = { success: false, error: 'No Paystack mobile money bank found matching network "mtn"' };
+  withKeyLookup(OWNER_KEY_ROW, async (sql) => {
+    if (sql.includes('FROM businesses WHERE id')) {
+      return { rows: [{ id: 'biz-1', name: 'Kwame Shop', payout_momo_number: '+233241234567', payout_momo_network: 'mtn' }] };
+    }
+    return { rows: [] };
+  });
+  const app = buildApp();
+  const res = await request(app)
+    .post('/api/accounting/payouts/auto')
+    .set('Authorization', 'Bearer sk_live_abc')
+    .send({ amount_ghs: 100 });
+  assert.equal(res.status, 502);
+  assert.equal(initiateTransferCalls.length, 0, 'must not attempt a transfer without a recipient');
 });
 
 test('GET /accounting/reconciliation flags a paid order with no matching gateway event', async () => {

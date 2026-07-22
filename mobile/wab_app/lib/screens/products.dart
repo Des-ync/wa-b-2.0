@@ -4,6 +4,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../api/catalog_api.dart';
 import '../api/client.dart';
 import '../services/offline_cache.dart';
 import '../services/offline_queue.dart';
@@ -13,6 +14,8 @@ import '../widgets/common.dart';
 import '../widgets/product_quick_edit.dart';
 import '../widgets/voice_update_button.dart';
 import 'barcode_scanner.dart';
+import 'bundles.dart';
+import 'categories.dart';
 
 class ProductsScreen extends StatefulWidget {
   const ProductsScreen({super.key});
@@ -26,6 +29,18 @@ class _ProductsScreenState extends State<ProductsScreen> {
   bool _offline = false;
   List<Map<String, dynamic>> _products = [];
   StreamSubscription<List<ConnectivityResult>>? _connSub;
+  final _searchCtrl = TextEditingController();
+  String _query = '';
+
+  List<Map<String, dynamic>> _filter(List<Map<String, dynamic>> items) {
+    if (_query.isEmpty) return items;
+    final q = _query.toLowerCase();
+    return items
+        .where((p) =>
+            '${p['name']}'.toLowerCase().contains(q) ||
+            '${p['category'] ?? ''}'.toLowerCase().contains(q))
+        .toList();
+  }
 
   @override
   void initState() {
@@ -41,6 +56,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
   @override
   void dispose() {
     _connSub?.cancel();
+    _searchCtrl.dispose();
     super.dispose();
   }
 
@@ -56,7 +72,8 @@ class _ProductsScreenState extends State<ProductsScreen> {
     try {
       final res = await session.api
           .get('/api/products', query: {'business_id': session.businessId});
-      final products = ((res['products'] as List?) ?? []).cast<Map<String, dynamic>>();
+      final products =
+          ((res['products'] as List?) ?? []).cast<Map<String, dynamic>>();
       unawaited(OfflineCache.saveProducts(products));
       _products = products;
       if (mounted) setState(() => _offline = false);
@@ -115,16 +132,27 @@ class _ProductsScreenState extends State<ProductsScreen> {
               content: Text('Offline — queued, will sync when back online')));
         }
       } else if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(e.message), backgroundColor: WabColors.danger));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(e.message), backgroundColor: WabColors.danger));
       }
     }
   }
 
   Future<void> _openScanner() async {
-    await Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => BarcodeScannerScreen(products: _products)));
+    await Navigator.of(context).push(MaterialPageRoute(
+        builder: (_) => BarcodeScannerScreen(products: _products)));
     if (mounted) setState(() => _reloadKey++);
+  }
+
+  Future<void> _openCategories() async {
+    await Navigator.of(context)
+        .push(MaterialPageRoute(builder: (_) => const CategoriesScreen()));
+    if (mounted) setState(() => _reloadKey++);
+  }
+
+  Future<void> _openBundles() async {
+    await Navigator.of(context)
+        .push(MaterialPageRoute(builder: (_) => const BundlesScreen()));
   }
 
   @override
@@ -142,6 +170,14 @@ class _ProductsScreenState extends State<ProductsScreen> {
             onPressed: _openScanner,
             icon: const Icon(Icons.qr_code_scanner_rounded),
           ),
+          PopupMenuButton<String>(
+            onSelected: (v) =>
+                v == 'categories' ? _openCategories() : _openBundles(),
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'categories', child: Text('Categories')),
+              PopupMenuItem(value: 'bundles', child: Text('Bundles')),
+            ],
+          ),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
@@ -154,21 +190,44 @@ class _ProductsScreenState extends State<ProductsScreen> {
       body: Column(
         children: [
           if (_offline) const OfflineBanner(),
+          SearchField(
+            controller: _searchCtrl,
+            hint: 'Search products',
+            onChanged: (v) => setState(() => _query = v),
+          ),
           Expanded(
             child: AsyncList<Map<String, dynamic>>(
               key: ValueKey(_reloadKey),
               load: _load,
+              transform: _filter,
+              emptyFilteredTitle: 'No products match "$_query"',
               emptyTitle: 'No products yet',
-              emptySubtitle: 'Add products so customers can browse and order them on WhatsApp.',
+              emptySubtitle:
+                  'Add products so customers can browse and order them on WhatsApp.',
               emptyIcon: Icons.inventory_2_rounded,
               itemBuilder: (ctx, p) {
                 final inStock = p['in_stock'] == true;
                 final qty = p['stock_qty'];
+                final featured = p['featured'] == true;
                 return Card(
                   child: ListTile(
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                    title: Text('${p['name']}',
-                        style: const TextStyle(fontWeight: FontWeight.w700)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14)),
+                    title: Row(
+                      children: [
+                        if (featured) ...[
+                          const Icon(Icons.star_rounded,
+                              size: 16, color: WabColors.gold),
+                          const SizedBox(width: 4),
+                        ],
+                        Flexible(
+                          child: Text('${p['name']}',
+                              overflow: TextOverflow.ellipsis,
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.w700)),
+                        ),
+                      ],
+                    ),
                     subtitle: Text(
                         [
                           '${p['category'] ?? 'general'}',
@@ -180,12 +239,14 @@ class _ProductsScreenState extends State<ProductsScreen> {
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
                         Text(ghs(p['price_ghs']),
-                            style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                            style: const TextStyle(
+                                fontWeight: FontWeight.w800, fontSize: 15)),
                         const SizedBox(height: 4),
                         GestureDetector(
                           behavior: HitTestBehavior.opaque,
                           onTap: () => _toggleStock(p),
-                          child: StatusChip(inStock ? 'active' : 'out of stock'),
+                          child:
+                              StatusChip(inStock ? 'active' : 'out of stock'),
                         ),
                       ],
                     ),
@@ -211,27 +272,58 @@ class _ProductSheet extends StatefulWidget {
 }
 
 class _ProductSheetState extends State<_ProductSheet> {
-  late final _name = TextEditingController(text: widget.product?['name']?.toString());
+  late final _name =
+      TextEditingController(text: widget.product?['name']?.toString());
   late final _desc =
       TextEditingController(text: widget.product?['description']?.toString());
   late final _price =
       TextEditingController(text: widget.product?['price_ghs']?.toString());
   late final _category =
       TextEditingController(text: widget.product?['category']?.toString());
-  late final _stockQty =
-      TextEditingController(text: widget.product?['stock_qty']?.toString() ?? '');
+  late final _stockQty = TextEditingController(
+      text: widget.product?['stock_qty']?.toString() ?? '');
   late bool _inStock = widget.product?['in_stock'] != false;
+  late bool _featured = widget.product?['featured'] == true;
+  List<String> _categoryNames = [];
   bool _busy = false;
+  String? _nameError;
+  String? _priceError;
 
   bool get isEdit => widget.product != null;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCategories();
+  }
+
+  Future<void> _loadCategories() async {
+    try {
+      final session = context.read<Session>();
+      final res = await session.api.getCategories(session.businessId!);
+      final names = ((res['categories'] as List?) ?? [])
+          .map((c) => '${c['name']}')
+          .where((n) => n.isNotEmpty)
+          .toSet()
+          .toList()
+        ..sort();
+      if (mounted) setState(() => _categoryNames = names);
+    } catch (_) {
+      // Non-fatal — the field still works as free text without suggestions.
+    }
+  }
 
   Future<void> _save() async {
     final name = _name.text.trim();
     final price = double.tryParse(_price.text.trim());
-    if (name.isEmpty || price == null || price < 0) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Name and a valid price are required'),
-          backgroundColor: WabColors.danger));
+    final nameError = name.isEmpty ? 'Enter a product name' : null;
+    final priceError =
+        (price == null || price < 0) ? 'Enter a valid price' : null;
+    if (nameError != null || priceError != null) {
+      setState(() {
+        _nameError = nameError;
+        _priceError = priceError;
+      });
       return;
     }
     setState(() => _busy = true);
@@ -240,10 +332,13 @@ class _ProductSheetState extends State<_ProductSheet> {
       'name': name,
       'description': _desc.text.trim().isEmpty ? null : _desc.text.trim(),
       'price_ghs': price,
-      'category': _category.text.trim().isEmpty ? 'general' : _category.text.trim(),
+      'category':
+          _category.text.trim().isEmpty ? 'general' : _category.text.trim(),
       'in_stock': _inStock,
-      'stock_qty':
-          _stockQty.text.trim().isEmpty ? null : int.tryParse(_stockQty.text.trim()),
+      'featured': _featured,
+      'stock_qty': _stockQty.text.trim().isEmpty
+          ? null
+          : int.tryParse(_stockQty.text.trim()),
     };
     try {
       if (isEdit) {
@@ -269,12 +364,16 @@ class _ProductSheetState extends State<_ProductSheet> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Delete product?'),
-        content: Text('Remove "${widget.product!['name']}" from your catalogue?'),
+        content:
+            Text('Remove "${widget.product!['name']}" from your catalogue?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
           TextButton(
               onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Delete', style: TextStyle(color: WabColors.danger))),
+              child: const Text('Delete',
+                  style: TextStyle(color: WabColors.danger))),
         ],
       ),
     );
@@ -298,8 +397,8 @@ class _ProductSheetState extends State<_ProductSheet> {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding:
-          EdgeInsets.fromLTRB(24, 24, 24, MediaQuery.of(context).viewInsets.bottom + 24),
+      padding: EdgeInsets.fromLTRB(
+          24, 24, 24, MediaQuery.of(context).viewInsets.bottom + 24),
       child: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -309,7 +408,8 @@ class _ProductSheetState extends State<_ProductSheet> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(isEdit ? 'Edit product' : 'New product',
-                    style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+                    style: const TextStyle(
+                        fontSize: 22, fontWeight: FontWeight.w800)),
                 if (isEdit)
                   IconButton(
                       onPressed: _busy ? null : _delete,
@@ -320,20 +420,32 @@ class _ProductSheetState extends State<_ProductSheet> {
             const SizedBox(height: 20),
             TextField(
                 controller: _name,
-                decoration: const InputDecoration(labelText: 'Name')),
+                onChanged: (_) {
+                  if (_nameError != null) setState(() => _nameError = null);
+                },
+                decoration:
+                    InputDecoration(labelText: 'Name', errorText: _nameError)),
             const SizedBox(height: 12),
             TextField(
                 controller: _desc,
-                decoration: const InputDecoration(labelText: 'Description (optional)')),
+                decoration:
+                    const InputDecoration(labelText: 'Description (optional)')),
             const SizedBox(height: 12),
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
                   child: TextField(
                       controller: _price,
                       keyboardType:
                           const TextInputType.numberWithOptions(decimal: true),
-                      decoration: const InputDecoration(labelText: 'Price (GH₵)')),
+                      onChanged: (_) {
+                        if (_priceError != null) {
+                          setState(() => _priceError = null);
+                        }
+                      },
+                      decoration: InputDecoration(
+                          labelText: 'Price (GH₵)', errorText: _priceError)),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -341,14 +453,26 @@ class _ProductSheetState extends State<_ProductSheet> {
                       controller: _stockQty,
                       keyboardType: TextInputType.number,
                       decoration: const InputDecoration(
-                          labelText: 'Stock qty', hintText: 'blank = untracked')),
+                          labelText: 'Stock qty',
+                          hintText: 'blank = untracked')),
                 ),
               ],
             ),
             const SizedBox(height: 12),
-            TextField(
+            SizedBox(
+              width: double.infinity,
+              child: DropdownMenu<String>(
                 controller: _category,
-                decoration: const InputDecoration(labelText: 'Category')),
+                enableFilter: true,
+                requestFocusOnTap: true,
+                label: const Text('Category'),
+                hintText: 'Pick one or type a new one',
+                dropdownMenuEntries: [
+                  for (final name in _categoryNames)
+                    DropdownMenuEntry(value: name, label: name),
+                ],
+              ),
+            ),
             const SizedBox(height: 8),
             SwitchListTile(
               value: _inStock,
@@ -358,12 +482,24 @@ class _ProductSheetState extends State<_ProductSheet> {
               activeThumbColor: WabColors.accent,
               contentPadding: EdgeInsets.zero,
             ),
+            SwitchListTile(
+              value: _featured,
+              onChanged: (v) => setState(() => _featured = v),
+              title: const Text('Featured',
+                  style: TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: const Text(
+                  'Shown first to customers browsing on WhatsApp',
+                  style: TextStyle(fontSize: 12)),
+              activeThumbColor: WabColors.accent,
+              contentPadding: EdgeInsets.zero,
+            ),
             const SizedBox(height: 12),
             FilledButton(
               onPressed: _busy ? null : _save,
               child: _busy
                   ? const SizedBox(
-                      width: 22, height: 22,
+                      width: 22,
+                      height: 22,
                       child: CircularProgressIndicator(
                           strokeWidth: 2.5, color: Colors.white))
                   : Text(isEdit ? 'Save changes' : 'Add product'),
