@@ -50,7 +50,8 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _requestCode() async {
     final phone = _phoneCtrl.text.trim();
-    if (phone.length < 9) return _toast('Enter your business WhatsApp number', error: true);
+    if (phone.length < 9)
+      return _toast('Enter your business WhatsApp number', error: true);
     setState(() => _busy = true);
     try {
       await context.read<Session>().requestOtp(phone);
@@ -59,7 +60,8 @@ class _LoginScreenState extends State<LoginScreen> {
       _toast('Code sent to your WhatsApp 📲');
     } on ApiException catch (e) {
       if (e.code == 'link_required') {
-        _toast('Finish setup on the web dashboard first, then log in here.', error: true);
+        _toast('Finish setup on the web dashboard first, then log in here.',
+            error: true);
       } else {
         _toast(e.message, error: true);
       }
@@ -92,13 +94,17 @@ class _LoginScreenState extends State<LoginScreen> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (ctx) => Padding(
-        padding: EdgeInsets.fromLTRB(24, 24, 24, MediaQuery.of(ctx).viewInsets.bottom + 24),
+        padding: EdgeInsets.fromLTRB(
+            24, 24, 24, MediaQuery.of(ctx).viewInsets.bottom + 24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text('Team login',
-                style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: WabColors.ink)),
+                style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                    color: WabColors.ink)),
             const SizedBox(height: 8),
             const Text('Paste your WA-B admin API key (sk_admin_...).',
                 style: TextStyle(color: WabColors.muted)),
@@ -107,7 +113,8 @@ class _LoginScreenState extends State<LoginScreen> {
               controller: keyCtrl,
               autofocus: true,
               obscureText: true,
-              decoration: const InputDecoration(hintText: 'sk_admin_...'),
+              decoration: const InputDecoration(
+                  labelText: 'Admin API key', hintText: 'sk_admin_...'),
             ),
             const SizedBox(height: 20),
             FilledButton(
@@ -123,7 +130,10 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       await context.read<Session>().loginAdmin(key);
     } on ApiException catch (e) {
-      _toast(e.status == 401 || e.status == 403 ? 'That key was rejected.' : e.message,
+      _toast(
+          e.status == 401 || e.status == 403
+              ? 'That key was rejected.'
+              : e.message,
           error: true);
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -151,35 +161,46 @@ class _LoginScreenState extends State<LoginScreen> {
                 child: const Center(
                   child: Text('W',
                       style: TextStyle(
-                          color: WabColors.gold, fontSize: 34, fontWeight: FontWeight.w900)),
+                          color: WabColors.gold,
+                          fontSize: 34,
+                          fontWeight: FontWeight.w900)),
                 ),
               ),
               const SizedBox(height: 16),
               SizedBox(
                 width: 64,
-                child: KenteStrip(height: 4, borderRadius: BorderRadius.circular(2)),
+                child: KenteStrip(
+                    height: 4, borderRadius: BorderRadius.circular(2)),
               ),
               const SizedBox(height: 24),
               Text(
                 _codeSent ? 'Check WhatsApp' : 'Welcome back',
                 style: const TextStyle(
-                    fontSize: 30, fontWeight: FontWeight.w800, color: WabColors.ink, letterSpacing: -0.6),
+                    fontSize: 30,
+                    fontWeight: FontWeight.w800,
+                    color: WabColors.ink,
+                    letterSpacing: -0.6),
               ),
               const SizedBox(height: 10),
               Text(
                 _codeSent
                     ? 'We sent a 6-digit code to ${_phoneCtrl.text.trim()} on WhatsApp.'
                     : 'Log in with your business WhatsApp number.',
-                style: const TextStyle(fontSize: 16, color: WabColors.muted, height: 1.4),
+                style: const TextStyle(
+                    fontSize: 16, color: WabColors.muted, height: 1.4),
               ),
               const SizedBox(height: 36),
               if (!_codeSent) ...[
                 TextField(
                   controller: _phoneCtrl,
                   keyboardType: TextInputType.phone,
+                  textInputAction: TextInputAction.done,
+                  autofillHints: const [AutofillHints.telephoneNumber],
                   decoration: const InputDecoration(
+                    labelText: 'Business WhatsApp number',
                     hintText: '024 123 4567',
-                    prefixIcon: Icon(Icons.phone_rounded, color: WabColors.muted),
+                    prefixIcon:
+                        Icon(Icons.phone_rounded, color: WabColors.muted),
                   ),
                   onSubmitted: (_) => _requestCode(),
                 ),
@@ -188,19 +209,30 @@ class _LoginScreenState extends State<LoginScreen> {
                   onPressed: _busy ? null : _requestCode,
                   child: _busy
                       ? const SizedBox(
-                          width: 22, height: 22,
-                          child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2.5, color: Colors.white))
                       : const Text('Send login code'),
                 ),
               ] else ...[
                 TextField(
                   controller: _codeCtrl,
                   keyboardType: TextInputType.number,
+                  textInputAction: TextInputAction.done,
                   maxLength: 6,
                   autofocus: true,
-                  style: const TextStyle(fontSize: 24, letterSpacing: 12, fontWeight: FontWeight.w700),
+                  autofillHints: const [AutofillHints.oneTimeCode],
+                  style: const TextStyle(
+                      fontSize: 24,
+                      letterSpacing: 12,
+                      fontWeight: FontWeight.w700),
                   textAlign: TextAlign.center,
-                  decoration: const InputDecoration(counterText: '', hintText: '••••••'),
+                  decoration: const InputDecoration(
+                    counterText: '',
+                    hintText: '••••••',
+                    labelText: '6-digit code',
+                  ),
                   onSubmitted: (_) => _verify(),
                 ),
                 const SizedBox(height: 20),
@@ -208,8 +240,10 @@ class _LoginScreenState extends State<LoginScreen> {
                   onPressed: _busy ? null : _verify,
                   child: _busy
                       ? const SizedBox(
-                          width: 22, height: 22,
-                          child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2.5, color: Colors.white))
                       : const Text('Verify & sign in'),
                 ),
                 const SizedBox(height: 12),
@@ -221,11 +255,14 @@ class _LoginScreenState extends State<LoginScreen> {
                         _codeSent = false;
                         _codeCtrl.clear();
                       }),
-                      child: const Text('Change number', style: TextStyle(color: WabColors.muted)),
+                      child: const Text('Change number',
+                          style: TextStyle(color: WabColors.muted)),
                     ),
                     TextButton(
                       onPressed: _resendIn > 0 || _busy ? null : _requestCode,
-                      child: Text(_resendIn > 0 ? 'Resend in ${_resendIn}s' : 'Resend code'),
+                      child: Text(_resendIn > 0
+                          ? 'Resend in ${_resendIn}s'
+                          : 'Resend code'),
                     ),
                   ],
                 ),
@@ -234,8 +271,10 @@ class _LoginScreenState extends State<LoginScreen> {
               Center(
                 child: TextButton.icon(
                   onPressed: _busy ? null : _teamLogin,
-                  icon: const Icon(Icons.shield_rounded, size: 18, color: WabColors.muted),
-                  label: const Text('Team login', style: TextStyle(color: WabColors.muted)),
+                  icon: const Icon(Icons.shield_rounded,
+                      size: 18, color: WabColors.muted),
+                  label: const Text('Team login',
+                      style: TextStyle(color: WabColors.muted)),
                 ),
               ),
             ],

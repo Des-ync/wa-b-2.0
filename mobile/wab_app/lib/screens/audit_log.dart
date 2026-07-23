@@ -135,8 +135,7 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
                   [_actorFor(e), if (detail != null) detail].join(' · '),
                   style: const TextStyle(color: WabColors.muted)),
               trailing: Text(timeAgo(e['created_at']),
-                  style:
-                      const TextStyle(color: WabColors.muted2, fontSize: 12)),
+                  style: const TextStyle(color: WabColors.muted, fontSize: 12)),
             ),
           );
         },

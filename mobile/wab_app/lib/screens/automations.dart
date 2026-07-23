@@ -54,7 +54,8 @@ class _AutomationsScreenState extends State<AutomationsScreen> {
       final res = await session.api.getAutomations(session.businessId!);
       if (!mounted) return;
       setState(() {
-        _automations = ((res['automations'] as List?) ?? []).cast<Map<String, dynamic>>();
+        _automations =
+            ((res['automations'] as List?) ?? []).cast<Map<String, dynamic>>();
         _loading = false;
       });
     } catch (e) {
@@ -70,12 +71,13 @@ class _AutomationsScreenState extends State<AutomationsScreen> {
     setState(() => _savingKey = a['key']);
     try {
       final session = context.read<Session>();
-      await session.api.updateAutomation(session.businessId!, a['key'], enabled: value);
+      await session.api
+          .updateAutomation(session.businessId!, a['key'], enabled: value);
       _load();
     } on ApiException catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(e.message), backgroundColor: WabColors.danger));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(e.message), backgroundColor: WabColors.danger));
       }
     } finally {
       if (mounted) setState(() => _savingKey = null);
@@ -86,7 +88,8 @@ class _AutomationsScreenState extends State<AutomationsScreen> {
     final field = _configField[a['key']];
     if (field == null) return;
     final (configKey, label) = field;
-    final ctrl = TextEditingController(text: '${a['config']?[configKey] ?? ''}');
+    final ctrl =
+        TextEditingController(text: '${a['config']?[configKey] ?? ''}');
     final value = await showDialog<int>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -95,12 +98,14 @@ class _AutomationsScreenState extends State<AutomationsScreen> {
           controller: ctrl,
           autofocus: true,
           keyboardType: TextInputType.number,
-          decoration: const InputDecoration(),
+          decoration: InputDecoration(labelText: label),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           TextButton(
-              onPressed: () => Navigator.pop(ctx, int.tryParse(ctrl.text.trim())),
+              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () =>
+                  Navigator.pop(ctx, int.tryParse(ctrl.text.trim())),
               child: const Text('Save')),
         ],
       ),
@@ -109,13 +114,13 @@ class _AutomationsScreenState extends State<AutomationsScreen> {
     setState(() => _savingKey = a['key']);
     try {
       final session = context.read<Session>();
-      await session.api
-          .updateAutomation(session.businessId!, a['key'], config: {configKey: value});
+      await session.api.updateAutomation(session.businessId!, a['key'],
+          config: {configKey: value});
       _load();
     } on ApiException catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(e.message), backgroundColor: WabColors.danger));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(e.message), backgroundColor: WabColors.danger));
       }
     } finally {
       if (mounted) setState(() => _savingKey = null);
@@ -127,7 +132,8 @@ class _AutomationsScreenState extends State<AutomationsScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Automations')),
       body: _loading
-          ? const Center(child: CircularProgressIndicator(color: WabColors.accent))
+          ? const Center(
+              child: CircularProgressIndicator(color: WabColors.accent))
           : _error != null
               ? ErrorRetry(message: _error!, onRetry: _load)
               : RefreshIndicator(
@@ -139,7 +145,8 @@ class _AutomationsScreenState extends State<AutomationsScreen> {
                     children: [
                       const Text(
                           'Automatic WhatsApp messages that keep customers coming back — no manual work once turned on.',
-                          style: TextStyle(color: WabColors.muted, height: 1.4)),
+                          style:
+                              TextStyle(color: WabColors.muted, height: 1.4)),
                       const SizedBox(height: 16),
                       for (final a in _automations) _automationCard(a),
                     ],
@@ -162,15 +169,19 @@ class _AutomationsScreenState extends State<AutomationsScreen> {
           children: [
             Row(
               children: [
-                Icon(_icons[key] ?? Icons.bolt_rounded, color: WabColors.accentInk),
+                Icon(_icons[key] ?? Icons.bolt_rounded,
+                    color: WabColors.accentInk),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text('${a['label']}',
-                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w800, fontSize: 15)),
                 ),
                 busy
                     ? const SizedBox(
-                        width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2))
                     : Switch(
                         value: enabled,
                         activeThumbColor: WabColors.accent,
@@ -180,19 +191,37 @@ class _AutomationsScreenState extends State<AutomationsScreen> {
             ),
             const SizedBox(height: 6),
             Text('${a['description']}',
-                style: const TextStyle(color: WabColors.muted, fontSize: 13, height: 1.35)),
+                style: const TextStyle(
+                    color: WabColors.muted, fontSize: 13, height: 1.35)),
             if (field != null) ...[
               const SizedBox(height: 10),
-              GestureDetector(
-                onTap: busy ? null : () => _editConfig(a),
-                child: Row(
-                  children: [
-                    Text('${field.$2}: ${a['config']?[field.$1]}',
-                        style: const TextStyle(
-                            color: WabColors.accentInk, fontWeight: FontWeight.w600, fontSize: 13)),
-                    const SizedBox(width: 4),
-                    const Icon(Icons.edit_rounded, size: 14, color: WabColors.accentInk),
-                  ],
+              Semantics(
+                button: true,
+                label: 'Edit ${field.$2}',
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: busy ? null : () => _editConfig(a),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      child: ExcludeSemantics(
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text('${field.$2}: ${a['config']?[field.$1]}',
+                                style: const TextStyle(
+                                    color: WabColors.accentInk,
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 13)),
+                            const SizedBox(width: 4),
+                            const Icon(Icons.edit_rounded,
+                                size: 14, color: WabColors.accentInk),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ],

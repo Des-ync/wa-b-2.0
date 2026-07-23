@@ -14,7 +14,8 @@ class AdminBusinessDetailScreen extends StatefulWidget {
   const AdminBusinessDetailScreen({super.key, required this.businessId});
 
   @override
-  State<AdminBusinessDetailScreen> createState() => _AdminBusinessDetailScreenState();
+  State<AdminBusinessDetailScreen> createState() =>
+      _AdminBusinessDetailScreenState();
 }
 
 class _AdminBusinessDetailScreenState extends State<AdminBusinessDetailScreen> {
@@ -40,8 +41,8 @@ class _AdminBusinessDetailScreenState extends State<AdminBusinessDetailScreen> {
       setState(() {
         _business = res['business'] as Map<String, dynamic>?;
         _counters = res['counters'] as Map<String, dynamic>?;
-        _messages =
-            ((res['recent_messages'] as List?) ?? []).cast<Map<String, dynamic>>();
+        _messages = ((res['recent_messages'] as List?) ?? [])
+            .cast<Map<String, dynamic>>();
       });
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
@@ -115,10 +116,15 @@ class _AdminBusinessDetailScreenState extends State<AdminBusinessDetailScreen> {
     );
     if (days == null) return;
     final currentEnd =
-        DateTime.tryParse('${_business?['trial_ends_at'] ?? ''}') ?? DateTime.now();
-    final base = currentEnd.isAfter(DateTime.now()) ? currentEnd : DateTime.now();
+        DateTime.tryParse('${_business?['trial_ends_at'] ?? ''}') ??
+            DateTime.now();
+    final base =
+        currentEnd.isAfter(DateTime.now()) ? currentEnd : DateTime.now();
     await _patch(
-      {'trial_ends_at': base.add(Duration(days: days)).toUtc().toIso8601String()},
+      {
+        'trial_ends_at':
+            base.add(Duration(days: days)).toUtc().toIso8601String()
+      },
       'Trial extended by $days days',
     );
   }
@@ -128,12 +134,14 @@ class _AdminBusinessDetailScreenState extends State<AdminBusinessDetailScreen> {
     final send = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('WhatsApp ${_business?['owner_name'] ?? _business?['name']}'),
+        title:
+            Text('WhatsApp ${_business?['owner_name'] ?? _business?['name']}'),
         content: TextField(
           controller: controller,
           maxLines: 4,
           autofocus: true,
-          decoration: const InputDecoration(hintText: 'Type your message…'),
+          decoration: const InputDecoration(
+              labelText: 'Message', hintText: 'Type your message…'),
         ),
         actions: [
           TextButton(
@@ -153,7 +161,8 @@ class _AdminBusinessDetailScreenState extends State<AdminBusinessDetailScreen> {
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Message sent ✓'), backgroundColor: WabColors.accentInk));
+          content: Text('Message sent ✓'),
+          backgroundColor: WabColors.accentInk));
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -186,7 +195,8 @@ class _AdminBusinessDetailScreenState extends State<AdminBusinessDetailScreen> {
                     color: WabColors.bg2,
                     borderRadius: BorderRadius.circular(10)),
                 child: SelectableText(plaintext,
-                    style: const TextStyle(fontSize: 13, fontFamily: 'monospace')),
+                    style:
+                        const TextStyle(fontSize: 13, fontFamily: 'monospace')),
               ),
             ],
           ),
@@ -242,7 +252,9 @@ class _AdminBusinessDetailScreenState extends State<AdminBusinessDetailScreen> {
         title: Text('${b['name']}'),
         actions: [
           IconButton(
-              onPressed: _editProfile, icon: const Icon(Icons.edit_rounded)),
+              tooltip: 'Edit business profile',
+              onPressed: _editProfile,
+              icon: const Icon(Icons.edit_rounded)),
         ],
       ),
       body: RefreshIndicator(
@@ -331,14 +343,19 @@ class _AdminBusinessDetailScreenState extends State<AdminBusinessDetailScreen> {
             ..._messages.map((m) => Card(
                   child: ListTile(
                     dense: true,
-                    leading: Icon(
-                      m['direction'] == 'inbound'
-                          ? Icons.call_received_rounded
-                          : Icons.call_made_rounded,
-                      size: 18,
-                      color: m['direction'] == 'inbound'
-                          ? WabColors.goldInk
-                          : WabColors.accentInk,
+                    leading: Semantics(
+                      label: m['direction'] == 'inbound'
+                          ? 'Received message'
+                          : 'Sent message',
+                      child: Icon(
+                        m['direction'] == 'inbound'
+                            ? Icons.call_received_rounded
+                            : Icons.call_made_rounded,
+                        size: 18,
+                        color: m['direction'] == 'inbound'
+                            ? WabColors.goldInk
+                            : WabColors.accentInk,
+                      ),
                     ),
                     title: Text('${m['content'] ?? '[${m['message_type']}]'}',
                         maxLines: 2, overflow: TextOverflow.ellipsis),
@@ -367,7 +384,8 @@ class _Counter extends StatelessWidget {
       child: Column(
         children: [
           Text(value,
-              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+              style:
+                  const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
           const SizedBox(height: 2),
           Text(label,
               style: const TextStyle(color: WabColors.muted, fontSize: 11.5)),
@@ -387,19 +405,20 @@ class _EditProfileScreen extends StatefulWidget {
 }
 
 class _EditProfileScreenState extends State<_EditProfileScreen> {
-  late final _name = TextEditingController(text: '${widget.business['name'] ?? ''}');
+  late final _name =
+      TextEditingController(text: '${widget.business['name'] ?? ''}');
   late final _owner =
       TextEditingController(text: '${widget.business['owner_name'] ?? ''}');
-  late final _phone =
-      TextEditingController(text: '${widget.business['whatsapp_number'] ?? ''}');
-  late final _waPhoneId =
-      TextEditingController(text: '${widget.business['wa_phone_number_id'] ?? ''}');
+  late final _phone = TextEditingController(
+      text: '${widget.business['whatsapp_number'] ?? ''}');
+  late final _waPhoneId = TextEditingController(
+      text: '${widget.business['wa_phone_number_id'] ?? ''}');
   late final _support =
       TextEditingController(text: '${widget.business['support_phone'] ?? ''}');
-  late final _welcome =
-      TextEditingController(text: '${widget.business['welcome_message'] ?? ''}');
-  late final _deliveryFee =
-      TextEditingController(text: '${widget.business['delivery_fee_ghs'] ?? ''}');
+  late final _welcome = TextEditingController(
+      text: '${widget.business['welcome_message'] ?? ''}');
+  late final _deliveryFee = TextEditingController(
+      text: '${widget.business['delivery_fee_ghs'] ?? ''}');
   late final _openTime =
       TextEditingController(text: '${widget.business['open_time'] ?? ''}');
   late final _closeTime =
@@ -409,14 +428,28 @@ class _EditProfileScreenState extends State<_EditProfileScreen> {
   bool _saving = false;
 
   static const _industries = [
-    'retail', 'food', 'fashion', 'beauty', 'electronics', 'pharmacy', 'services', 'other'
+    'retail',
+    'food',
+    'fashion',
+    'beauty',
+    'electronics',
+    'pharmacy',
+    'services',
+    'other'
   ];
 
   @override
   void dispose() {
     for (final c in [
-      _name, _owner, _phone, _waPhoneId, _support, _welcome,
-      _deliveryFee, _openTime, _closeTime
+      _name,
+      _owner,
+      _phone,
+      _waPhoneId,
+      _support,
+      _welcome,
+      _deliveryFee,
+      _openTime,
+      _closeTime
     ]) {
       c.dispose();
     }
@@ -463,7 +496,8 @@ class _EditProfileScreenState extends State<_EditProfileScreen> {
               onPressed: _saving ? null : _save,
               child: _saving
                   ? const SizedBox(
-                      width: 18, height: 18,
+                      width: 18,
+                      height: 18,
                       child: CircularProgressIndicator(strokeWidth: 2))
                   : const Text('Save')),
         ],
@@ -518,8 +552,8 @@ class _EditProfileScreenState extends State<_EditProfileScreen> {
           const SizedBox(height: 14),
           TextField(
               controller: _waPhoneId,
-              decoration: const InputDecoration(
-                  labelText: 'Meta phone number ID')),
+              decoration:
+                  const InputDecoration(labelText: 'Meta phone number ID')),
           const SizedBox(height: 14),
           TextField(
               controller: _deliveryFee,

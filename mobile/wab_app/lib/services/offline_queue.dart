@@ -79,7 +79,8 @@ class OfflineQueue {
 
   static Future<void> _saveAll(List<QueuedAction> items) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_key, jsonEncode(items.map((e) => e.toJson()).toList()));
+    await prefs.setString(
+        _key, jsonEncode(items.map((e) => e.toJson()).toList()));
   }
 
   static Future<void> enqueue(QueuedAction action) async {

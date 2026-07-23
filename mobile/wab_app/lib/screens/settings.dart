@@ -191,13 +191,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
         if (delay != null) 'cart_nudge_delay_minutes': delay,
       });
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('Settings saved ✓')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Semantics(
+                liveRegion: true, child: const Text('Settings saved ✓'))));
       }
     } on ApiException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(e.message), backgroundColor: WabColors.danger));
+            content: Semantics(liveRegion: true, child: Text(e.message)),
+            backgroundColor: WabColors.danger));
       }
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -394,8 +396,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                     const SizedBox(height: 6),
                     const Text('Leave blank to stay open around the clock.',
-                        style:
-                            TextStyle(color: WabColors.muted2, fontSize: 13)),
+                        style: TextStyle(color: WabColors.muted, fontSize: 13)),
                     const SizedBox(height: 24),
                     _sectionTitle('Support'),
                     TextField(
@@ -488,14 +489,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   await session.api
                       .post('/api/subscriptions/${session.businessId}/renew');
                   if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                        content: Text(
-                            'Renewal started — approve the payment prompt on your phone.')));
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                        content: Semantics(
+                            liveRegion: true,
+                            child: const Text(
+                                'Renewal started — approve the payment prompt on your phone.'))));
                   }
                 } on ApiException catch (e) {
                   if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                        content: Text(e.message),
+                        content:
+                            Semantics(liveRegion: true, child: Text(e.message)),
                         backgroundColor: WabColors.danger));
                   }
                 }

@@ -86,7 +86,8 @@ class PushService {
       onDidReceiveNotificationResponse: _onResponse,
     );
     await _local
-        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>()
         ?.createNotificationChannel(androidChannel);
 
     final messaging = FirebaseMessaging.instance;
@@ -113,7 +114,8 @@ class PushService {
             priority: Priority.high,
             actions: _androidActionsFor(type),
           ),
-          iOS: DarwinNotificationDetails(categoryIdentifier: _iosCategoryFor(type)),
+          iOS: DarwinNotificationDetails(
+              categoryIdentifier: _iosCategoryFor(type)),
         ),
         payload: _encodePayload(msg.data),
       );
@@ -167,7 +169,9 @@ class PushService {
       };
 
   static void _onResponse(NotificationResponse resp) {
-    final data = resp.payload != null ? _parsePayload(resp.payload!) : <String, String>{};
+    final data = resp.payload != null
+        ? _parsePayload(resp.payload!)
+        : <String, String>{};
     switch (resp.actionId) {
       case _actionOrderAccept:
         _patchOrderStatus(data['order_id'], 'confirmed');
@@ -193,7 +197,8 @@ class PushService {
     final session = _session;
     if (session == null || orderId == null) return;
     try {
-      await session.api.patch('/api/orders/$orderId/status', body: {'status': status});
+      await session.api
+          .patch('/api/orders/$orderId/status', body: {'status': status});
     } catch (e) {
       debugPrint('Order action ($status) failed for order $orderId: $e');
     }
@@ -203,7 +208,8 @@ class PushService {
     final session = _session;
     if (session == null || customerId == null) return;
     try {
-      await session.api.post('/api/conversations/$customerId/reply', body: {'text': text});
+      await session.api
+          .post('/api/conversations/$customerId/reply', body: {'text': text});
     } catch (e) {
       debugPrint('Handoff reply failed for customer $customerId: $e');
     }

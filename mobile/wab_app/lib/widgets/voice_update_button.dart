@@ -92,7 +92,8 @@ class _VoiceUpdateButtonState extends State<VoiceUpdateButton> {
     final products = widget.productsProvider();
     final command = parseVoiceCommand(heard, products);
     if (command == null) {
-      _toast('Heard "$heard" — didn\'t catch a clear product update. Try again.');
+      _toast(
+          'Heard "$heard" — didn\'t catch a clear product update. Try again.');
       return;
     }
 
@@ -107,8 +108,12 @@ class _VoiceUpdateButtonState extends State<VoiceUpdateButton> {
         title: const Text('Confirm update'),
         content: Text(command.confirmationText),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Confirm')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Confirm')),
         ],
       ),
     );
@@ -150,7 +155,9 @@ class _VoiceUpdateButtonState extends State<VoiceUpdateButton> {
 
   void _toast(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Semantics(liveRegion: true, child: Text(message)),
+    ));
   }
 
   @override

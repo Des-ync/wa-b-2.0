@@ -216,8 +216,11 @@ class _ProductsScreenState extends State<ProductsScreen> {
                     title: Row(
                       children: [
                         if (featured) ...[
-                          const Icon(Icons.star_rounded,
-                              size: 16, color: WabColors.gold),
+                          Semantics(
+                            label: 'Featured',
+                            child: const Icon(Icons.star_rounded,
+                                size: 16, color: WabColors.gold),
+                          ),
                           const SizedBox(width: 4),
                         ],
                         Flexible(
@@ -242,11 +245,26 @@ class _ProductsScreenState extends State<ProductsScreen> {
                             style: const TextStyle(
                                 fontWeight: FontWeight.w800, fontSize: 15)),
                         const SizedBox(height: 4),
-                        GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          onTap: () => _toggleStock(p),
-                          child:
-                              StatusChip(inStock ? 'active' : 'out of stock'),
+                        Semantics(
+                          button: true,
+                          label: inStock
+                              ? 'In stock. Tap to mark out of stock.'
+                              : 'Out of stock. Tap to mark in stock.',
+                          child: Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(999),
+                              onTap: () => _toggleStock(p),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 4, vertical: 10),
+                                child: ExcludeSemantics(
+                                  child: StatusChip(
+                                      inStock ? 'active' : 'out of stock'),
+                                ),
+                              ),
+                            ),
+                          ),
                         ),
                       ],
                     ),
@@ -295,6 +313,16 @@ class _ProductSheetState extends State<_ProductSheet> {
   void initState() {
     super.initState();
     _loadCategories();
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _desc.dispose();
+    _price.dispose();
+    _category.dispose();
+    _stockQty.dispose();
+    super.dispose();
   }
 
   Future<void> _loadCategories() async {
@@ -412,6 +440,7 @@ class _ProductSheetState extends State<_ProductSheet> {
                         fontSize: 22, fontWeight: FontWeight.w800)),
                 if (isEdit)
                   IconButton(
+                      tooltip: 'Delete product',
                       onPressed: _busy ? null : _delete,
                       icon: const Icon(Icons.delete_outline_rounded,
                           color: WabColors.danger)),

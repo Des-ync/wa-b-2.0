@@ -34,10 +34,13 @@ extension CatalogApi on ApiClient {
     });
   }
 
-  Future<Map<String, dynamic>> deleteCategory(String id) => delete('/api/categories/$id');
+  Future<Map<String, dynamic>> deleteCategory(String id) =>
+      delete('/api/categories/$id');
 
-  Future<Map<String, dynamic>> reorderCategories(String businessId, List<String> order) {
-    return post('/api/categories/reorder', body: {'business_id': businessId, 'order': order});
+  Future<Map<String, dynamic>> reorderCategories(
+      String businessId, List<String> order) {
+    return post('/api/categories/reorder',
+        body: {'business_id': businessId, 'order': order});
   }
 
   Future<Map<String, dynamic>> getBundles(String businessId) {
@@ -56,7 +59,8 @@ extension CatalogApi on ApiClient {
       'business_id': businessId,
       'name': name,
       'price_ghs': priceGhs,
-      if (description != null && description.isNotEmpty) 'description': description,
+      if (description != null && description.isNotEmpty)
+        'description': description,
       'items': items,
       'active': active,
     });
@@ -79,5 +83,6 @@ extension CatalogApi on ApiClient {
     });
   }
 
-  Future<Map<String, dynamic>> deleteBundle(String id) => delete('/api/products/bundles/$id');
+  Future<Map<String, dynamic>> deleteBundle(String id) =>
+      delete('/api/products/bundles/$id');
 }

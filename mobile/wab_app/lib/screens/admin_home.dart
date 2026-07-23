@@ -35,6 +35,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
         title: const Text('WA-B Admin'),
         actions: [
           IconButton(
+            tooltip: 'Sign out',
             onPressed: () async {
               final confirm = await showDialog<bool>(
                 context: context,
@@ -128,7 +129,8 @@ class _AdminStatsState extends State<_AdminStats> {
     setState(() => _error = null);
     try {
       final res = await context.read<Session>().api.get('/api/admin/stats');
-      if (mounted) setState(() => _stats = res['stats'] as Map<String, dynamic>?);
+      if (mounted)
+        setState(() => _stats = res['stats'] as Map<String, dynamic>?);
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
     }
@@ -139,10 +141,15 @@ class _AdminStatsState extends State<_AdminStats> {
     if (_error != null) return ErrorRetry(message: _error!, onRetry: _load);
     final s = _stats;
     if (s == null) {
-      return const Center(child: CircularProgressIndicator(color: WabColors.accent));
+      return const Center(
+          child: CircularProgressIndicator(color: WabColors.accent));
     }
     final tiles = [
-      ('MRR this month', ghs(s['mrr_ghs_this_month'] ?? 0), WabColors.accentInk),
+      (
+        'MRR this month',
+        ghs(s['mrr_ghs_this_month'] ?? 0),
+        WabColors.accentInk
+      ),
       ('Total GMV', ghs(s['gmv_ghs'] ?? 0), WabColors.ink),
       ('Businesses', '${s['businesses_total'] ?? 0}', WabColors.ink),
       ('Active', '${s['businesses_active'] ?? 0}', WabColors.accentInk),
@@ -151,8 +158,11 @@ class _AdminStatsState extends State<_AdminStats> {
       ('Active subs', '${s['subscriptions_active'] ?? 0}', WabColors.accentInk),
       ('In grace', '${s['subscriptions_grace'] ?? 0}', WabColors.warning),
       ('Customers', '${s['customers_total'] ?? 0}', WabColors.ink),
-      ('Orders (paid)', '${s['orders_paid'] ?? 0}/${s['orders_total'] ?? 0}',
-          WabColors.ink),
+      (
+        'Orders (paid)',
+        '${s['orders_paid'] ?? 0}/${s['orders_total'] ?? 0}',
+        WabColors.ink
+      ),
       ('Msgs (24h)', '${s['messages_last_24h'] ?? 0}', WabColors.ink),
       ('Products', '${s['products_total'] ?? 0}', WabColors.ink),
     ];

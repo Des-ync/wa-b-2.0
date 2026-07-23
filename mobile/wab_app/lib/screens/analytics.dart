@@ -33,7 +33,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       final session = context.read<Session>();
       final res = await session.api.get('/api/analytics',
           query: {'business_id': session.businessId, 'days': _days});
-      if (mounted) setState(() => _data = res['analytics'] as Map<String, dynamic>?);
+      if (mounted)
+        setState(() => _data = res['analytics'] as Map<String, dynamic>?);
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
     }
@@ -69,7 +70,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       body: _error != null
           ? ErrorRetry(message: _error!, onRetry: _load)
           : a == null
-              ? const Center(child: CircularProgressIndicator(color: WabColors.accent))
+              ? const Center(
+                  child: CircularProgressIndicator(color: WabColors.accent))
               : RefreshIndicator(
                   onRefresh: _load,
                   color: WabColors.accent,
@@ -91,11 +93,13 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   }
 
   Widget _revenueCard(Map<String, dynamic> a) {
-    final trend = ((a['revenue_trend'] as List?) ?? []).cast<Map<String, dynamic>>();
+    final trend =
+        ((a['revenue_trend'] as List?) ?? []).cast<Map<String, dynamic>>();
     final total = trend.fold<double>(
         0, (sum, d) => sum + (double.tryParse('${d['gmv_ghs']}') ?? 0));
     final maxV = trend.fold<double>(
-        1, (m, d) => (double.tryParse('${d['gmv_ghs']}') ?? 0) > m
+        1,
+        (m, d) => (double.tryParse('${d['gmv_ghs']}') ?? 0) > m
             ? double.parse('${d['gmv_ghs']}')
             : m);
     return Card(
@@ -104,11 +108,14 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Revenue', style: TextStyle(color: WabColors.muted, fontSize: 13)),
+            const Text('Revenue',
+                style: TextStyle(color: WabColors.muted, fontSize: 13)),
             const SizedBox(height: 4),
             Text(ghs(total),
                 style: const TextStyle(
-                    fontSize: 28, fontWeight: FontWeight.w800, color: WabColors.accentInk)),
+                    fontSize: 28,
+                    fontWeight: FontWeight.w800,
+                    color: WabColors.accentInk)),
             const SizedBox(height: 16),
             SizedBox(
               height: 120,
@@ -135,7 +142,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                             Text(
                               _dayLabel(d['date']),
                               style: const TextStyle(
-                                  fontSize: 10, color: WabColors.muted2),
+                                  fontSize: 10, color: WabColors.muted),
                             ),
                           ],
                         ],
@@ -160,13 +167,23 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     final ab = (a['cart_abandonment'] as Map?) ?? {};
     final nu = (a['nudge_recovery'] as Map?) ?? {};
     final kpis = [
-      ('Repeat customers', a['repeat_customer_rate_pct'] != null
-          ? '${a['repeat_customer_rate_pct']}%' : '—'),
+      (
+        'Repeat customers',
+        a['repeat_customer_rate_pct'] != null
+            ? '${a['repeat_customer_rate_pct']}%'
+            : '—'
+      ),
       ('Active customers', '${a['active_customers'] ?? 0}'),
-      ('Cart abandonment', ab['abandonment_rate_pct'] != null
-          ? '${ab['abandonment_rate_pct']}%' : '—'),
-      ('Nudge recovery', nu['recovery_rate_pct'] != null
-          ? '${nu['recovery_rate_pct']}%' : '—'),
+      (
+        'Cart abandonment',
+        ab['abandonment_rate_pct'] != null
+            ? '${ab['abandonment_rate_pct']}%'
+            : '—'
+      ),
+      (
+        'Nudge recovery',
+        nu['recovery_rate_pct'] != null ? '${nu['recovery_rate_pct']}%' : '—'
+      ),
     ];
     return GridView.count(
       crossAxisCount: 2,
@@ -187,8 +204,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                           style: const TextStyle(
                               fontSize: 20, fontWeight: FontWeight.w800)),
                       Text(k.$1,
-                          style:
-                              const TextStyle(fontSize: 12, color: WabColors.muted)),
+                          style: const TextStyle(
+                              fontSize: 12, color: WabColors.muted)),
                     ],
                   ),
                 ),
@@ -198,7 +215,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   }
 
   Widget _topProducts(Map<String, dynamic> a) {
-    final top = ((a['top_products'] as List?) ?? []).cast<Map<String, dynamic>>();
+    final top =
+        ((a['top_products'] as List?) ?? []).cast<Map<String, dynamic>>();
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -226,7 +244,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                             style: const TextStyle(color: WabColors.muted)),
                         const SizedBox(width: 12),
                         Text(ghs(p['revenue_ghs']),
-                            style: const TextStyle(fontWeight: FontWeight.w700)),
+                            style:
+                                const TextStyle(fontWeight: FontWeight.w700)),
                       ],
                     ),
                   )),
@@ -237,7 +256,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   }
 
   Widget _busiestHours(Map<String, dynamic> a) {
-    final hours = ((a['busiest_hours'] as List?) ?? []).cast<Map<String, dynamic>>();
+    final hours =
+        ((a['busiest_hours'] as List?) ?? []).cast<Map<String, dynamic>>();
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -260,7 +280,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                   padding: const EdgeInsets.symmetric(vertical: 6),
                   child: Row(
                     children: [
-                      Expanded(child: Text('${hour.toString().padLeft(2, '0')}:00')),
+                      Expanded(
+                          child: Text('${hour.toString().padLeft(2, '0')}:00')),
                       Text('${h['orders'] ?? 0} orders',
                           style: const TextStyle(color: WabColors.muted)),
                     ],

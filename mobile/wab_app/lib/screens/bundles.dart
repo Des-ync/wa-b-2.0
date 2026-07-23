@@ -37,7 +37,8 @@ class _BundlesScreenState extends State<BundlesScreen> {
       final res = await session.api.getBundles(session.businessId!);
       if (!mounted) return;
       setState(() {
-        _bundles = ((res['bundles'] as List?) ?? []).cast<Map<String, dynamic>>();
+        _bundles =
+            ((res['bundles'] as List?) ?? []).cast<Map<String, dynamic>>();
         _loading = false;
       });
     } catch (e) {
@@ -50,8 +51,8 @@ class _BundlesScreenState extends State<BundlesScreen> {
   }
 
   Future<void> _edit([Map<String, dynamic>? bundle]) async {
-    final changed = await Navigator.of(context)
-        .push<bool>(MaterialPageRoute(builder: (_) => BundleEditScreen(bundle: bundle)));
+    final changed = await Navigator.of(context).push<bool>(
+        MaterialPageRoute(builder: (_) => BundleEditScreen(bundle: bundle)));
     if (changed == true) _load();
   }
 
@@ -60,12 +61,16 @@ class _BundlesScreenState extends State<BundlesScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Delete bundle?'),
-        content: Text('Remove "${bundle['name']}"? The individual products are unaffected.'),
+        content: Text(
+            'Remove "${bundle['name']}"? The individual products are unaffected.'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
           TextButton(
               onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Delete', style: TextStyle(color: WabColors.danger))),
+              child: const Text('Delete',
+                  style: TextStyle(color: WabColors.danger))),
         ],
       ),
     );
@@ -75,8 +80,8 @@ class _BundlesScreenState extends State<BundlesScreen> {
       _load();
     } on ApiException catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(e.message), backgroundColor: WabColors.danger));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(e.message), backgroundColor: WabColors.danger));
       }
     }
   }
@@ -93,7 +98,8 @@ class _BundlesScreenState extends State<BundlesScreen> {
         label: const Text('Add bundle'),
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator(color: WabColors.accent))
+          ? const Center(
+              child: CircularProgressIndicator(color: WabColors.accent))
           : _error != null
               ? ErrorRetry(message: _error!, onRetry: _load)
               : _bundles.isEmpty
@@ -119,23 +125,33 @@ class _BundlesScreenState extends State<BundlesScreen> {
                               .join(', ');
                           return Card(
                             child: ListTile(
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14)),
                               title: Text('${b['name']}',
-                                  style: const TextStyle(fontWeight: FontWeight.w700)),
-                              subtitle: Text(itemSummary.isEmpty ? 'No items' : itemSummary,
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.w700)),
+                              subtitle: Text(
+                                  itemSummary.isEmpty
+                                      ? 'No items'
+                                      : itemSummary,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(color: WabColors.muted)),
+                                  style:
+                                      const TextStyle(color: WabColors.muted)),
                               trailing: Column(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 crossAxisAlignment: CrossAxisAlignment.end,
                                 children: [
                                   Text(ghs(b['price_ghs']),
-                                      style:
-                                          const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.w800,
+                                          fontSize: 15)),
                                   const SizedBox(height: 4),
-                                  StatusChip(b['active'] == true ? 'active' : 'unpaid',
-                                      label: b['active'] == true ? 'active' : 'off'),
+                                  StatusChip(
+                                      b['active'] == true ? 'active' : 'unpaid',
+                                      label: b['active'] == true
+                                          ? 'active'
+                                          : 'off'),
                                 ],
                               ),
                               onTap: () => _edit(b),
@@ -158,9 +174,12 @@ class BundleEditScreen extends StatefulWidget {
 }
 
 class _BundleEditScreenState extends State<BundleEditScreen> {
-  late final _name = TextEditingController(text: widget.bundle?['name']?.toString());
-  late final _price = TextEditingController(text: widget.bundle?['price_ghs']?.toString());
-  late final _desc = TextEditingController(text: widget.bundle?['description']?.toString());
+  late final _name =
+      TextEditingController(text: widget.bundle?['name']?.toString());
+  late final _price =
+      TextEditingController(text: widget.bundle?['price_ghs']?.toString());
+  late final _desc =
+      TextEditingController(text: widget.bundle?['description']?.toString());
   late bool _active = widget.bundle?['active'] != false;
   final Map<String, int> _quantities = {}; // product_id -> quantity
   List<Map<String, dynamic>> _products = [];
@@ -173,19 +192,29 @@ class _BundleEditScreenState extends State<BundleEditScreen> {
   void initState() {
     super.initState();
     for (final it in (widget.bundle?['items'] as List? ?? [])) {
-      _quantities['${it['product_id']}'] = (it['quantity'] as num?)?.toInt() ?? 1;
+      _quantities['${it['product_id']}'] =
+          (it['quantity'] as num?)?.toInt() ?? 1;
     }
     _loadProducts();
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _price.dispose();
+    _desc.dispose();
+    super.dispose();
   }
 
   Future<void> _loadProducts() async {
     try {
       final session = context.read<Session>();
-      final res =
-          await session.api.get('/api/products', query: {'business_id': session.businessId});
+      final res = await session.api
+          .get('/api/products', query: {'business_id': session.businessId});
       if (!mounted) return;
       setState(() {
-        _products = ((res['products'] as List?) ?? []).cast<Map<String, dynamic>>();
+        _products =
+            ((res['products'] as List?) ?? []).cast<Map<String, dynamic>>();
         _loadingProducts = false;
       });
     } catch (e) {
@@ -198,12 +227,14 @@ class _BundleEditScreenState extends State<BundleEditScreen> {
     final price = double.tryParse(_price.text.trim());
     if (name.isEmpty || price == null || price < 0) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Name and a valid price are required'), backgroundColor: WabColors.danger));
+          content: Text('Name and a valid price are required'),
+          backgroundColor: WabColors.danger));
       return;
     }
     if (_quantities.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Pick at least one product'), backgroundColor: WabColors.danger));
+          content: Text('Pick at least one product'),
+          backgroundColor: WabColors.danger));
       return;
     }
     setState(() => _busy = true);
@@ -230,8 +261,8 @@ class _BundleEditScreenState extends State<BundleEditScreen> {
       if (mounted) Navigator.pop(context, true);
     } on ApiException catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(e.message), backgroundColor: WabColors.danger));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(e.message), backgroundColor: WabColors.danger));
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -245,21 +276,27 @@ class _BundleEditScreenState extends State<BundleEditScreen> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
         children: [
-          TextField(controller: _name, decoration: const InputDecoration(labelText: 'Name')),
+          TextField(
+              controller: _name,
+              decoration: const InputDecoration(labelText: 'Name')),
           const SizedBox(height: 12),
           TextField(
               controller: _desc,
-              decoration: const InputDecoration(labelText: 'Description (optional)')),
+              decoration:
+                  const InputDecoration(labelText: 'Description (optional)')),
           const SizedBox(height: 12),
           TextField(
               controller: _price,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(labelText: 'Bundle price (GH₵)')),
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              decoration:
+                  const InputDecoration(labelText: 'Bundle price (GH₵)')),
           const SizedBox(height: 8),
           SwitchListTile(
             value: _active,
             onChanged: (v) => setState(() => _active = v),
-            title: const Text('Active', style: TextStyle(fontWeight: FontWeight.w600)),
+            title: const Text('Active',
+                style: TextStyle(fontWeight: FontWeight.w600)),
             activeThumbColor: WabColors.accent,
             contentPadding: EdgeInsets.zero,
           ),
@@ -270,12 +307,14 @@ class _BundleEditScreenState extends State<BundleEditScreen> {
           if (_loadingProducts)
             const Padding(
               padding: EdgeInsets.symmetric(vertical: 24),
-              child: Center(child: CircularProgressIndicator(color: WabColors.accent)),
+              child: Center(
+                  child: CircularProgressIndicator(color: WabColors.accent)),
             )
           else if (_products.isEmpty)
             const Padding(
               padding: EdgeInsets.symmetric(vertical: 16),
-              child: Text('Add products first, then come back to build a bundle.',
+              child: Text(
+                  'Add products first, then come back to build a bundle.',
                   style: TextStyle(color: WabColors.muted)),
             )
           else
@@ -293,7 +332,8 @@ class _BundleEditScreenState extends State<BundleEditScreen> {
                 ? const SizedBox(
                     width: 22,
                     height: 22,
-                    child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2.5, color: Colors.white))
                 : Text(isEdit ? 'Save changes' : 'Create bundle'),
           ),
         ],
@@ -307,8 +347,10 @@ class _BundleEditScreenState extends State<BundleEditScreen> {
     final selected = qty != null;
     return ListTile(
       dense: true,
-      title: Text('${p['name']}', style: const TextStyle(fontWeight: FontWeight.w600)),
-      subtitle: Text(ghs(p['price_ghs']), style: const TextStyle(color: WabColors.muted, fontSize: 12)),
+      title: Text('${p['name']}',
+          style: const TextStyle(fontWeight: FontWeight.w600)),
+      subtitle: Text(ghs(p['price_ghs']),
+          style: const TextStyle(color: WabColors.muted, fontSize: 12)),
       leading: Checkbox(
         value: selected,
         activeColor: WabColors.accent,
@@ -325,13 +367,23 @@ class _BundleEditScreenState extends State<BundleEditScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 IconButton(
+                  tooltip: 'Decrease quantity',
                   visualDensity: VisualDensity.compact,
-                  onPressed: qty > 1 ? () => setState(() => _quantities[id] = qty - 1) : null,
-                  icon: const Icon(Icons.remove_circle_outline_rounded, size: 20),
+                  constraints:
+                      const BoxConstraints(minWidth: 44, minHeight: 44),
+                  onPressed: qty > 1
+                      ? () => setState(() => _quantities[id] = qty - 1)
+                      : null,
+                  icon:
+                      const Icon(Icons.remove_circle_outline_rounded, size: 20),
                 ),
-                Text('$qty', style: const TextStyle(fontWeight: FontWeight.w700)),
+                Text('$qty',
+                    style: const TextStyle(fontWeight: FontWeight.w700)),
                 IconButton(
+                  tooltip: 'Increase quantity',
                   visualDensity: VisualDensity.compact,
+                  constraints:
+                      const BoxConstraints(minWidth: 44, minHeight: 44),
                   onPressed: () => setState(() => _quantities[id] = qty + 1),
                   icon: const Icon(Icons.add_circle_outline_rounded, size: 20),
                 ),

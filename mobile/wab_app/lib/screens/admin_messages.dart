@@ -31,7 +31,11 @@ class _AdminMessagesTabState extends State<AdminMessagesTab> {
   void _onSearch(String value) {
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 450), () {
-      if (mounted) setState(() { _search = value.trim(); _reloadKey++; });
+      if (mounted)
+        setState(() {
+          _search = value.trim();
+          _reloadKey++;
+        });
     });
   }
 
@@ -44,6 +48,7 @@ class _AdminMessagesTabState extends State<AdminMessagesTab> {
           child: TextField(
             onChanged: _onSearch,
             decoration: InputDecoration(
+              labelText: 'Search messages',
               hintText: 'Search message text…',
               prefixIcon: const Icon(Icons.search_rounded, size: 20),
               isDense: true,
@@ -68,8 +73,10 @@ class _AdminMessagesTabState extends State<AdminMessagesTab> {
                   icon: Icon(Icons.call_made_rounded, size: 16)),
             ],
             selected: {_direction},
-            onSelectionChanged: (s) =>
-                setState(() { _direction = s.first; _reloadKey++; }),
+            onSelectionChanged: (s) => setState(() {
+              _direction = s.first;
+              _reloadKey++;
+            }),
           ),
         ),
         Expanded(
@@ -77,13 +84,14 @@ class _AdminMessagesTabState extends State<AdminMessagesTab> {
             key: ValueKey(_reloadKey),
             child: AsyncList<Map<String, dynamic>>(
               load: () async {
-                final res =
-                    await context.read<Session>().api.get('/api/admin/messages',
-                        query: {
-                      'limit': 150,
-                      if (_direction != 'all') 'direction': _direction,
-                      if (_search.isNotEmpty) 'q': _search,
-                    });
+                final res = await context
+                    .read<Session>()
+                    .api
+                    .get('/api/admin/messages', query: {
+                  'limit': 150,
+                  if (_direction != 'all') 'direction': _direction,
+                  if (_search.isNotEmpty) 'q': _search,
+                });
                 return ((res['messages'] as List?) ?? [])
                     .cast<Map<String, dynamic>>();
               },
@@ -96,18 +104,21 @@ class _AdminMessagesTabState extends State<AdminMessagesTab> {
                   child: ListTile(
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(14)),
-                    leading: CircleAvatar(
-                      radius: 16,
-                      backgroundColor: inbound
-                          ? WabColors.gold.withValues(alpha: 0.15)
-                          : WabColors.accentSoft,
-                      child: Icon(
-                        inbound
-                            ? Icons.call_received_rounded
-                            : Icons.call_made_rounded,
-                        size: 16,
-                        color:
-                            inbound ? WabColors.goldInk : WabColors.accentInk,
+                    leading: Semantics(
+                      label: inbound ? 'Inbound message' : 'Outbound message',
+                      child: CircleAvatar(
+                        radius: 16,
+                        backgroundColor: inbound
+                            ? WabColors.gold.withValues(alpha: 0.15)
+                            : WabColors.accentSoft,
+                        child: Icon(
+                          inbound
+                              ? Icons.call_received_rounded
+                              : Icons.call_made_rounded,
+                          size: 16,
+                          color:
+                              inbound ? WabColors.goldInk : WabColors.accentInk,
+                        ),
                       ),
                     ),
                     title: Text('${m['content'] ?? '[${m['message_type']}]'}',

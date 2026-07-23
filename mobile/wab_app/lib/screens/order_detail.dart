@@ -37,8 +37,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
 
   Future<void> _load() async {
     try {
-      final res =
-          await context.read<Session>().api.get('/api/orders/${widget.orderId}');
+      final res = await context
+          .read<Session>()
+          .api
+          .get('/api/orders/${widget.orderId}');
       if (!mounted) return;
       setState(() {
         _order = res['order'] as Map<String, dynamic>?;
@@ -51,9 +53,19 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     }
   }
 
-  double get _refundedTotal => _refunds
-      .where((r) => r['status'] == 'processed')
-      .fold<double>(0, (sum, r) => sum + (double.tryParse('${r['amount_ghs']}') ?? 0));
+  /// Shows a SnackBar with its message wrapped for screen-reader
+  /// announcement, so status updates and errors aren't silently missed.
+  void _toast(String message, {Color? backgroundColor}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Semantics(liveRegion: true, child: Text(message)),
+      backgroundColor: backgroundColor,
+    ));
+  }
+
+  double get _refundedTotal =>
+      _refunds.where((r) => r['status'] == 'processed').fold<double>(
+          0, (sum, r) => sum + (double.tryParse('${r['amount_ghs']}') ?? 0));
 
   double get _refundable {
     final total = double.tryParse('${_order?['total_ghs'] ?? 0}') ?? 0;
@@ -73,8 +85,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       setState(() => _order = res['order'] as Map<String, dynamic>?);
       await OfflineCache.patchCachedOrder(widget.orderId, body);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Order marked $status — customer notified')));
+      _toast('Order marked $status — customer notified');
       _load();
     } on ApiException catch (e) {
       if (e.status == 0) {
@@ -90,12 +101,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         await OfflineCache.patchCachedOrder(widget.orderId, body);
         if (mounted) {
           setState(() => _order = {...?_order, 'status': status});
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-              content: Text('Offline — queued, will sync when back online')));
+          _toast('Offline — queued, will sync when back online');
         }
       } else if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(e.message), backgroundColor: WabColors.danger));
+        _toast(e.message, backgroundColor: WabColors.danger);
       }
     } finally {
       if (mounted) setState(() => _updating = false);
@@ -109,12 +118,12 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           .read<Session>()
           .api
           .updateDeliveryStatus(widget.orderId, status);
-      if (mounted) setState(() => _order = res['order'] as Map<String, dynamic>?);
+      if (mounted)
+        setState(() => _order = res['order'] as Map<String, dynamic>?);
       _load();
     } on ApiException catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(e.message), backgroundColor: WabColors.danger));
+        _toast(e.message, backgroundColor: WabColors.danger);
       }
     } finally {
       if (mounted) setState(() => _updating = false);
@@ -125,8 +134,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     final updated = await showMarkPaidSheet(context, _order!);
     if (updated == null || !mounted) return;
     setState(() => _order = updated);
-    ScaffoldMessenger.of(context)
-        .showSnackBar(const SnackBar(content: Text('Marked as paid')));
+    _toast('Marked as paid');
     _load();
   }
 
@@ -145,10 +153,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   }
 
   Future<void> _openRefund() async {
-    final refund = await showRefundSheet(context, _order!, maxRefundable: _refundable);
+    final refund =
+        await showRefundSheet(context, _order!, maxRefundable: _refundable);
     if (refund == null || !mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(const SnackBar(content: Text('Refund recorded')));
+    _toast('Refund recorded');
     _load();
   }
 
@@ -163,14 +171,12 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     try {
       await context.read<Session>().api.sendPaymentReminder(widget.orderId);
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('Reminder sent ✓')));
+        _toast('Reminder sent ✓');
       }
       _load();
     } on ApiException catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(e.message), backgroundColor: WabColors.danger));
+        _toast(e.message, backgroundColor: WabColors.danger);
       }
     } finally {
       if (mounted) setState(() => _sendingReminder = false);
@@ -201,19 +207,20 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
 
   void _copyReceiptLink() {
     Clipboard.setData(ClipboardData(text: _receiptUrl));
-    ScaffoldMessenger.of(context)
-        .showSnackBar(const SnackBar(content: Text('Receipt link copied')));
+    _toast('Receipt link copied');
   }
 
   @override
   Widget build(BuildContext context) {
     final o = _order;
     return Scaffold(
-      appBar: AppBar(title: Text(o == null ? 'Order' : '#${o['order_number']}')),
+      appBar:
+          AppBar(title: Text(o == null ? 'Order' : '#${o['order_number']}')),
       body: o == null
           ? _error != null
               ? ErrorRetry(message: _error!, onRetry: _load)
-              : const Center(child: CircularProgressIndicator(color: WabColors.accent))
+              : const Center(
+                  child: CircularProgressIndicator(color: WabColors.accent))
           : RefreshIndicator(
               onRefresh: _load,
               color: WabColors.accent,
@@ -263,7 +270,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                     // happens through the dedicated "Mark as paid" action
                     // above, which keeps stock/loyalty/GMV correct.
                     children: orderStatuses
-                        .where((s) => s != 'pending' && s != 'paid' && s != '${o['status']}')
+                        .where((s) =>
+                            s != 'pending' &&
+                            s != 'paid' &&
+                            s != '${o['status']}')
                         .map((s) => ActionChip(
                               label: Text(s),
                               onPressed: _updating ? null : () => _setStatus(s),
@@ -282,7 +292,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                   const SizedBox(height: 8),
                   const Text(
                     'The customer gets a WhatsApp update automatically when you change the status.',
-                    style: TextStyle(color: WabColors.muted2, fontSize: 13),
+                    style: TextStyle(color: WabColors.muted, fontSize: 13),
                   ),
                 ],
               ),
@@ -290,8 +300,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     );
   }
 
-  Widget _sectionTitle(String text) =>
-      Text(text, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800));
+  Widget _sectionTitle(String text) => Text(text,
+      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800));
 
   Widget _summaryCard(Map<String, dynamic> o) {
     return Card(
@@ -304,7 +314,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(ghs(o['total_ghs']),
-                    style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w800)),
+                    style: const TextStyle(
+                        fontSize: 26, fontWeight: FontWeight.w800)),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
@@ -317,11 +328,13 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
               ],
             ),
             const SizedBox(height: 8),
-            Text(shortDate(o['created_at']), style: const TextStyle(color: WabColors.muted)),
+            Text(shortDate(o['created_at']),
+                style: const TextStyle(color: WabColors.muted)),
             if (o['delivery_address'] != null) ...[
               const SizedBox(height: 12),
               Row(children: [
-                const Icon(Icons.location_on_outlined, size: 18, color: WabColors.muted),
+                const Icon(Icons.location_on_outlined,
+                    size: 18, color: WabColors.muted),
                 const SizedBox(width: 6),
                 Expanded(
                     child: Text('${o['delivery_address']}',
@@ -346,18 +359,22 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           for (final item in (o['items'] as List? ?? []))
             ListTile(
               dense: true,
-              title:
-                  Text('${item['name']}', style: const TextStyle(fontWeight: FontWeight.w600)),
+              title: Text('${item['name']}',
+                  style: const TextStyle(fontWeight: FontWeight.w600)),
               leading: Text('×${item['quantity']}',
                   style: const TextStyle(
-                      color: WabColors.accentInk, fontWeight: FontWeight.w800, fontSize: 15)),
-              trailing: Text(ghs((item['price_ghs'] ?? 0) * (item['quantity'] ?? 1)),
+                      color: WabColors.accentInk,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 15)),
+              trailing: Text(
+                  ghs((item['price_ghs'] ?? 0) * (item['quantity'] ?? 1)),
                   style: const TextStyle(fontWeight: FontWeight.w600)),
             ),
           const Divider(height: 1),
           _row('Subtotal', ghs(o['subtotal_ghs'])),
           if ((num.tryParse('${o['discount_ghs'] ?? 0}') ?? 0) > 0)
-            _row('Discount (${o['promo_code'] ?? ''})', '-${ghs(o['discount_ghs'])}'),
+            _row('Discount (${o['promo_code'] ?? ''})',
+                '-${ghs(o['discount_ghs'])}'),
           _row('Delivery', ghs(o['delivery_fee'])),
           _row('Total', ghs(o['total_ghs']), bold: true),
         ],
@@ -401,7 +418,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Text(_friendlyFailureReason(_lastFailureReasonCode),
-                    style: const TextStyle(color: WabColors.danger, fontWeight: FontWeight.w600)),
+                    style: const TextStyle(
+                        color: WabColors.danger, fontWeight: FontWeight.w600)),
               ),
             ],
             const SizedBox(height: 14),
@@ -420,16 +438,22 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                     onPressed: _sendingReminder ? null : _sendReminder,
                     icon: _sendingReminder
                         ? const SizedBox(
-                            width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Icon(Icons.notifications_active_outlined, size: 18),
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.notifications_active_outlined,
+                            size: 18),
                     label: const Text('Send reminder'),
                   ),
                 if (canRefund)
                   OutlinedButton.icon(
                     onPressed: _openRefund,
-                    icon: const Icon(Icons.undo_rounded, size: 18, color: WabColors.danger),
-                    label: const Text('Refund', style: TextStyle(color: WabColors.danger)),
-                    style: OutlinedButton.styleFrom(side: const BorderSide(color: WabColors.danger)),
+                    icon: const Icon(Icons.undo_rounded,
+                        size: 18, color: WabColors.danger),
+                    label: const Text('Refund',
+                        style: TextStyle(color: WabColors.danger)),
+                    style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: WabColors.danger)),
                   ),
               ],
             ),
@@ -438,19 +462,20 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
             const SizedBox(height: 10),
             Row(
               children: [
-                const Icon(Icons.link_rounded, size: 18, color: WabColors.muted),
+                const Icon(Icons.link_rounded,
+                    size: 18, color: WabColors.muted),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(_receiptUrl,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: WabColors.muted, fontSize: 13)),
+                      style: const TextStyle(
+                          color: WabColors.muted, fontSize: 13)),
                 ),
                 IconButton(
                   onPressed: _copyReceiptLink,
                   icon: const Icon(Icons.copy_rounded, size: 18),
                   tooltip: 'Copy receipt link',
-                  visualDensity: VisualDensity.compact,
                 ),
               ],
             ),
@@ -460,14 +485,17 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
               const SizedBox(height: 10),
               const Text('Payment attempts',
                   style: TextStyle(
-                      fontWeight: FontWeight.w700, color: WabColors.muted2, fontSize: 12)),
+                      fontWeight: FontWeight.w700,
+                      color: WabColors.muted,
+                      fontSize: 12)),
               const SizedBox(height: 6),
               for (final a in _paymentAttempts)
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 2),
                   child: Text(
                       '${a['method'] ?? 'unknown'} · ${a['reference']} · ${timeAgo(a['created_at'])}',
-                      style: const TextStyle(color: WabColors.muted, fontSize: 12)),
+                      style: const TextStyle(
+                          color: WabColors.muted, fontSize: 12)),
                 ),
             ],
           ],
@@ -505,10 +533,12 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
               const SizedBox(height: 8),
               if (readyAt != null)
                 Text('Ready by: ${shortDate(readyAt)}',
-                    style: const TextStyle(color: WabColors.muted, fontSize: 13)),
+                    style:
+                        const TextStyle(color: WabColors.muted, fontSize: 13)),
               if (deliveryAt != null)
                 Text('Out for delivery by: ${shortDate(deliveryAt)}',
-                    style: const TextStyle(color: WabColors.muted, fontSize: 13)),
+                    style:
+                        const TextStyle(color: WabColors.muted, fontSize: 13)),
             ],
             const SizedBox(height: 14),
             Wrap(
@@ -523,12 +553,16 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                 ),
                 if (deliveryStatus == 'assigned')
                   FilledButton(
-                    onPressed: _updating ? null : () => _markDeliveryStatus('picked_up'),
+                    onPressed: _updating
+                        ? null
+                        : () => _markDeliveryStatus('picked_up'),
                     child: const Text('Rider picked up'),
                   ),
                 if (deliveryStatus == 'picked_up')
                   FilledButton(
-                    onPressed: _updating ? null : () => _markDeliveryStatus('delivered'),
+                    onPressed: _updating
+                        ? null
+                        : () => _markDeliveryStatus('delivered'),
                     child: const Text('Mark delivered'),
                   ),
                 OutlinedButton(
@@ -548,7 +582,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       return const Card(
         child: Padding(
           padding: EdgeInsets.all(16),
-          child: Text('No activity yet.', style: TextStyle(color: WabColors.muted)),
+          child: Text('No activity yet.',
+              style: TextStyle(color: WabColors.muted)),
         ),
       );
     }
@@ -567,7 +602,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     final meta = _eventMeta('${e['event']}');
     final changedBy = '${e['changed_by'] ?? 'system'}';
     final isFailure = e['event'] == 'payment:failed';
-    final note = isFailure ? _friendlyFailureReason(e['note'] as String?) : '${e['note'] ?? ''}';
+    final note = isFailure
+        ? _friendlyFailureReason(e['note'] as String?)
+        : '${e['note'] ?? ''}';
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       child: Row(
@@ -579,19 +616,22 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(meta.$3, style: const TextStyle(fontWeight: FontWeight.w700)),
+                Text(meta.$3,
+                    style: const TextStyle(fontWeight: FontWeight.w700)),
                 if (note.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.only(top: 2),
                     child: Text(note,
-                        style: const TextStyle(color: WabColors.muted, fontSize: 13)),
+                        style: const TextStyle(
+                            color: WabColors.muted, fontSize: 13)),
                   ),
                 const SizedBox(height: 2),
                 Text(
                     changedBy == 'system'
                         ? timeAgo(e['created_at'])
                         : '${timeAgo(e['created_at'])} · $changedBy',
-                    style: const TextStyle(color: WabColors.muted2, fontSize: 12)),
+                    style:
+                        const TextStyle(color: WabColors.muted, fontSize: 12)),
               ],
             ),
           ),
@@ -602,13 +642,21 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
 
   (IconData, Color, String) _eventMeta(String event) {
     if (event.startsWith('payment:paid')) {
-      return (Icons.check_circle_rounded, WabColors.accentInk, 'Payment received');
+      return (
+        Icons.check_circle_rounded,
+        WabColors.accentInk,
+        'Payment received'
+      );
     }
     if (event.startsWith('payment:failed')) {
       return (Icons.error_rounded, WabColors.danger, 'Payment failed');
     }
     if (event == 'payment:reminder_sent') {
-      return (Icons.notifications_active_outlined, WabColors.muted, 'Reminder sent');
+      return (
+        Icons.notifications_active_outlined,
+        WabColors.muted,
+        'Reminder sent'
+      );
     }
     if (event.startsWith('refund:processed')) {
       return (Icons.undo_rounded, WabColors.danger, 'Refund processed');
@@ -629,7 +677,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       return (Icons.schedule_rounded, WabColors.muted, 'Estimate updated');
     }
     if (event.startsWith('status:')) {
-      return (Icons.sync_alt_rounded, WabColors.muted, 'Status: ${event.split(':').last}');
+      return (
+        Icons.sync_alt_rounded,
+        WabColors.muted,
+        'Status: ${event.split(':').last}'
+      );
     }
     if (event == 'note') {
       return (Icons.sticky_note_2_outlined, WabColors.muted, 'Note added');
@@ -643,7 +695,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: notes.isEmpty
-            ? const Text('No notes yet.', style: TextStyle(color: WabColors.muted))
+            ? const Text('No notes yet.',
+                style: TextStyle(color: WabColors.muted))
             : Text(notes, style: const TextStyle(height: 1.5)),
       ),
     );

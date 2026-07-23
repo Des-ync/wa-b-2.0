@@ -50,7 +50,8 @@ class Session extends ChangeNotifier {
   }
 
   Future<void> requestOtp(String whatsappNumber) async {
-    await api.post('/api/auth/mobile/request', body: {'whatsapp_number': whatsappNumber});
+    await api.post('/api/auth/mobile/request',
+        body: {'whatsapp_number': whatsappNumber});
   }
 
   Future<void> verifyOtp(String whatsappNumber, String code) async {
@@ -98,7 +99,8 @@ class Session extends ChangeNotifier {
     if (remote) {
       try {
         if (fcmToken != null) {
-          await api.post('/api/devices/unregister', body: {'fcm_token': fcmToken});
+          await api
+              .post('/api/devices/unregister', body: {'fcm_token': fcmToken});
         }
         await api.post('/api/auth/mobile/logout');
       } catch (_) {

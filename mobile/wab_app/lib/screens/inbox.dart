@@ -89,8 +89,11 @@ class _InboxScreenState extends State<InboxScreen> {
                         if (paused)
                           const Padding(
                             padding: EdgeInsets.only(left: 6),
-                            child: Icon(Icons.front_hand_rounded,
-                                size: 16, color: WabColors.warning),
+                            child: Tooltip(
+                              message: 'Bot paused for this conversation',
+                              child: Icon(Icons.front_hand_rounded,
+                                  size: 16, color: WabColors.warning),
+                            ),
                           ),
                       ],
                     ),
@@ -103,7 +106,7 @@ class _InboxScreenState extends State<InboxScreen> {
                     trailing: Text(
                         timeAgo(c['last_message_at'] ?? c['last_seen_at']),
                         style: const TextStyle(
-                            color: WabColors.muted2, fontSize: 12)),
+                            color: WabColors.muted, fontSize: 12)),
                     onTap: () => Navigator.of(ctx)
                         .push(MaterialPageRoute(
                             builder: (_) => ChatScreen(

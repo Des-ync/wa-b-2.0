@@ -361,6 +361,7 @@ class SearchField extends StatelessWidget {
           suffixIcon: controller.text.isEmpty
               ? null
               : IconButton(
+                  tooltip: 'Clear search',
                   icon: const Icon(Icons.close_rounded, size: 18),
                   onPressed: () {
                     controller.clear();

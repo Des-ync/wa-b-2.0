@@ -43,7 +43,7 @@ class _Gate extends StatefulWidget {
 class _GateState extends State<_Gate> {
   bool? _seenOnboarding;
   bool _pushStarted = false;
-  bool _showSplash = true;
+  bool _minSplashElapsed = false;
 
   @override
   void initState() {
@@ -66,17 +66,17 @@ class _GateState extends State<_Gate> {
 
   @override
   Widget build(BuildContext context) {
-    if (_showSplash) {
-      return SplashScreen(onDone: () => setState(() => _showSplash = false));
-    }
-
     final session = context.watch<Session>();
-
-    if (_seenOnboarding == null || session.restoring) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator(color: WabColors.accent)),
-      );
+    // Keep the branded splash up until BOTH the minimum animation time and
+    // the actual boot work (prefs + session restore, which can include a
+    // network round trip) are done — one continuous loading screen instead
+    // of a splash that hands off to a second, unbranded spinner screen.
+    final bootDone = _seenOnboarding != null && !session.restoring;
+    if (!_minSplashElapsed || !bootDone) {
+      return SplashScreen(
+          onDone: () => setState(() => _minSplashElapsed = true));
     }
+
     if (!_seenOnboarding!) {
       return WelcomeCarouselScreen(onDone: _finishOnboarding);
     }

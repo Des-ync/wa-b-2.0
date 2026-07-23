@@ -28,9 +28,11 @@ class _AdminIssuesTabState extends State<AdminIssuesTab> {
 
   Future<void> _loadIncompleteCount() async {
     try {
-      final res = await context.read<Session>().api.getIncompleteSetupBusinesses();
+      final res =
+          await context.read<Session>().api.getIncompleteSetupBusinesses();
       if (mounted) {
-        setState(() => _incompleteSetupCount = ((res['businesses'] as List?) ?? []).length);
+        setState(() => _incompleteSetupCount =
+            ((res['businesses'] as List?) ?? []).length);
       }
     } catch (_) {
       // Non-fatal — the banner just doesn't show.
@@ -41,14 +43,16 @@ class _AdminIssuesTabState extends State<AdminIssuesTab> {
     try {
       await context.read<Session>().api.post('/api/admin/webhooks/$id/retry');
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Webhook requeued ✓'),
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Semantics(
+              liveRegion: true, child: const Text('Webhook requeued ✓')),
           backgroundColor: WabColors.accentInk));
       setState(() => _reloadKey++);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$e'), backgroundColor: WabColors.danger));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Semantics(liveRegion: true, child: Text('$e')),
+          backgroundColor: WabColors.danger));
     }
   }
 
@@ -60,22 +64,45 @@ class _AdminIssuesTabState extends State<AdminIssuesTab> {
           .post('/api/admin/webhooks/retry-failed');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('${res['requeued'] ?? 0} webhook(s) requeued'),
+          content: Semantics(
+              liveRegion: true,
+              child: Text('${res['requeued'] ?? 0} webhook(s) requeued')),
           backgroundColor: WabColors.accentInk));
       setState(() => _reloadKey++);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$e'), backgroundColor: WabColors.danger));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Semantics(liveRegion: true, child: Text('$e')),
+          backgroundColor: WabColors.danger));
     }
   }
 
   (IconData, Color, String) _style(String kind) => switch (kind) {
-        'server_error' => (Icons.bug_report_rounded, WabColors.danger, 'Server'),
-        'webhook_failed' => (Icons.webhook_rounded, WabColors.danger, 'Webhook'),
-        'webhook_stuck' => (Icons.hourglass_bottom_rounded, WabColors.warning, 'Webhook'),
-        'message_failed' => (Icons.sms_failed_rounded, WabColors.warning, 'Message'),
-        'billing_failed' => (Icons.credit_card_off_rounded, WabColors.brick, 'Billing'),
+        'server_error' => (
+            Icons.bug_report_rounded,
+            WabColors.danger,
+            'Server'
+          ),
+        'webhook_failed' => (
+            Icons.webhook_rounded,
+            WabColors.danger,
+            'Webhook'
+          ),
+        'webhook_stuck' => (
+            Icons.hourglass_bottom_rounded,
+            WabColors.warning,
+            'Webhook'
+          ),
+        'message_failed' => (
+            Icons.sms_failed_rounded,
+            WabColors.warning,
+            'Message'
+          ),
+        'billing_failed' => (
+            Icons.credit_card_off_rounded,
+            WabColors.brick,
+            'Billing'
+          ),
         _ => (Icons.error_outline_rounded, WabColors.muted, 'Issue'),
       };
 
@@ -91,20 +118,24 @@ class _AdminIssuesTabState extends State<AdminIssuesTab> {
               borderRadius: BorderRadius.circular(14),
               child: InkWell(
                 borderRadius: BorderRadius.circular(14),
-                onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const AdminIncompleteSetupScreen())),
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => const AdminIncompleteSetupScreen())),
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                   child: Row(
                     children: [
-                      const Icon(Icons.checklist_rounded, size: 18, color: WabColors.warning),
+                      const Icon(Icons.checklist_rounded,
+                          size: 18, color: WabColors.warning),
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text('$_incompleteSetupCount shop(s) mid-setup',
                             style: const TextStyle(
-                                fontWeight: FontWeight.w700, color: WabColors.warning)),
+                                fontWeight: FontWeight.w700,
+                                color: WabColors.warning)),
                       ),
-                      const Icon(Icons.chevron_right_rounded, size: 18, color: WabColors.warning),
+                      const Icon(Icons.chevron_right_rounded,
+                          size: 18, color: WabColors.warning),
                     ],
                   ),
                 ),
@@ -169,7 +200,7 @@ class _AdminIssuesTabState extends State<AdminIssuesTab> {
                             const Spacer(),
                             Text(timeAgo(issue['at']),
                                 style: const TextStyle(
-                                    color: WabColors.muted2, fontSize: 12)),
+                                    color: WabColors.muted, fontSize: 12)),
                           ],
                         ),
                         const SizedBox(height: 8),
@@ -196,7 +227,7 @@ class _AdminIssuesTabState extends State<AdminIssuesTab> {
                               icon: const Icon(Icons.replay_rounded, size: 16),
                               label: const Text('Retry'),
                               style: OutlinedButton.styleFrom(
-                                  visualDensity: VisualDensity.compact),
+                                  minimumSize: const Size(44, 44)),
                             ),
                           ),
                         ],

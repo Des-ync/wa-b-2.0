@@ -23,12 +23,14 @@ class OfflineCache {
   static Future<void> saveProducts(List<Map<String, dynamic>> products) =>
       _save(_productsKey, products, _maxProducts);
 
-  static Future<List<Map<String, dynamic>>?> loadProducts() => _load(_productsKey);
+  static Future<List<Map<String, dynamic>>?> loadProducts() =>
+      _load(_productsKey);
 
   /// Applies an optimistic patch to a cached product (by id) so an offline
   /// edit — queued for later sync — is reflected immediately if the merchant
   /// looks at the (offline) list again before the queue flushes.
-  static Future<void> patchCachedProduct(String id, Map<String, dynamic> patch) async {
+  static Future<void> patchCachedProduct(
+      String id, Map<String, dynamic> patch) async {
     final items = await loadProducts();
     if (items == null) return;
     final idx = items.indexWhere((p) => '${p['id']}' == id);
@@ -38,7 +40,8 @@ class OfflineCache {
   }
 
   /// Same as [patchCachedProduct] but for the cached orders list.
-  static Future<void> patchCachedOrder(String id, Map<String, dynamic> patch) async {
+  static Future<void> patchCachedOrder(
+      String id, Map<String, dynamic> patch) async {
     final items = await loadOrders();
     if (items == null) return;
     final idx = items.indexWhere((o) => '${o['id']}' == id);
@@ -47,7 +50,8 @@ class OfflineCache {
     await saveOrders(items);
   }
 
-  static Future<void> _save(String key, List<Map<String, dynamic>> items, int cap) async {
+  static Future<void> _save(
+      String key, List<Map<String, dynamic>> items, int cap) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final capped = items.length > cap ? items.sublist(0, cap) : items;

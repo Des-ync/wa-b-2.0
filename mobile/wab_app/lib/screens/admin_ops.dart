@@ -85,7 +85,9 @@ class _HealthPanelState extends State<_HealthPanel> {
   }
 
   String _uptime(int seconds) {
-    final d = seconds ~/ 86400, h = (seconds % 86400) ~/ 3600, m = (seconds % 3600) ~/ 60;
+    final d = seconds ~/ 86400,
+        h = (seconds % 86400) ~/ 3600,
+        m = (seconds % 3600) ~/ 60;
     if (d > 0) return '${d}d ${h}h';
     if (h > 0) return '${h}h ${m}m';
     return '${m}m';
@@ -101,18 +103,38 @@ class _HealthPanelState extends State<_HealthPanel> {
     }
     final failed = (h['webhooks_failed'] ?? 0) as num;
     final tiles = [
-      ('DB latency', '${h['db_latency_ms'] ?? '—'} ms',
-          (h['db_latency_ms'] ?? 0) > 250 ? WabColors.warning : WabColors.accentInk),
+      (
+        'DB latency',
+        '${h['db_latency_ms'] ?? '—'} ms',
+        (h['db_latency_ms'] ?? 0) > 250
+            ? WabColors.warning
+            : WabColors.accentInk
+      ),
       ('Uptime', _uptime((h['uptime_seconds'] ?? 0) as int), WabColors.ink),
       ('Memory', '${h['memory_rss_mb'] ?? '—'} MB', WabColors.ink),
       ('Msgs last hour', '${h['messages_last_hour'] ?? 0}', WabColors.ink),
-      ('Failed sends 24h', '${h['messages_failed_24h'] ?? 0}',
-          (h['messages_failed_24h'] ?? 0) > 0 ? WabColors.warning : WabColors.accentInk),
-      ('Webhooks pending', '${h['webhooks_pending'] ?? 0}',
-          (h['webhooks_pending'] ?? 0) > 20 ? WabColors.warning : WabColors.ink),
-      ('Webhooks failed', '$failed',
-          failed > 0 ? WabColors.danger : WabColors.accentInk),
-      ('Node', '${h['node_version'] ?? ''} · ${h['env'] ?? ''}', WabColors.muted),
+      (
+        'Failed sends 24h',
+        '${h['messages_failed_24h'] ?? 0}',
+        (h['messages_failed_24h'] ?? 0) > 0
+            ? WabColors.warning
+            : WabColors.accentInk
+      ),
+      (
+        'Webhooks pending',
+        '${h['webhooks_pending'] ?? 0}',
+        (h['webhooks_pending'] ?? 0) > 20 ? WabColors.warning : WabColors.ink
+      ),
+      (
+        'Webhooks failed',
+        '$failed',
+        failed > 0 ? WabColors.danger : WabColors.accentInk
+      ),
+      (
+        'Node',
+        '${h['node_version'] ?? ''} · ${h['env'] ?? ''}',
+        WabColors.muted
+      ),
     ];
     return RefreshIndicator(
       onRefresh: _load,
@@ -195,14 +217,21 @@ class _WebhookQueueState extends State<_WebhookQueue> {
                   scrollDirection: Axis.horizontal,
                   child: Row(
                     children: [
-                      for (final s in ['failed', 'pending', 'processing', 'done'])
+                      for (final s in [
+                        'failed',
+                        'pending',
+                        'processing',
+                        'done'
+                      ])
                         Padding(
                           padding: const EdgeInsets.only(right: 8),
                           child: ChoiceChip(
                             label: Text(s),
                             selected: _status == s,
-                            onSelected: (_) =>
-                                setState(() { _status = s; _reloadKey++; }),
+                            onSelected: (_) => setState(() {
+                              _status = s;
+                              _reloadKey++;
+                            }),
                           ),
                         ),
                     ],
@@ -236,8 +265,7 @@ class _WebhookQueueState extends State<_WebhookQueue> {
                 child: ListTile(
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(14)),
-                  title: Text(
-                      '${w['source']} · ${w['attempts']} attempt(s)',
+                  title: Text('${w['source']} · ${w['attempts']} attempt(s)',
                       style: const TextStyle(fontWeight: FontWeight.w700)),
                   subtitle: Text(
                     '${w['last_error'] ?? w['external_id'] ?? ''}\n${timeAgo(w['received_at'])}',
@@ -248,12 +276,15 @@ class _WebhookQueueState extends State<_WebhookQueue> {
                   ),
                   trailing: w['status'] == 'failed'
                       ? IconButton(
+                          tooltip: 'Retry webhook',
                           icon: const Icon(Icons.replay_rounded,
                               color: WabColors.accentInk),
                           onPressed: () async {
                             try {
-                              await context.read<Session>().api.post(
-                                  '/api/admin/webhooks/${w['id']}/retry');
+                              await context
+                                  .read<Session>()
+                                  .api
+                                  .post('/api/admin/webhooks/${w['id']}/retry');
                               if (context.mounted) {
                                 setState(() => _reloadKey++);
                               }
@@ -282,13 +313,15 @@ class _BillingList extends StatelessWidget {
             .read<Session>()
             .api
             .get('/api/admin/billing', query: {'limit': 100});
-        return ((res['transactions'] as List?) ?? []).cast<Map<String, dynamic>>();
+        return ((res['transactions'] as List?) ?? [])
+            .cast<Map<String, dynamic>>();
       },
       emptyTitle: 'No billing activity',
       emptyIcon: Icons.payments_rounded,
       itemBuilder: (ctx, t) => Card(
         child: ListTile(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
           title: Text('${t['business_name'] ?? t['business_id'] ?? ''}',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,

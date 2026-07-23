@@ -66,7 +66,8 @@ class _WelcomeCarouselScreenState extends State<WelcomeCarouselScreen> {
                 padding: const EdgeInsets.only(top: 8, right: 8),
                 child: TextButton(
                   onPressed: widget.onDone,
-                  child: const Text('Skip', style: TextStyle(color: WabColors.muted)),
+                  child: const Text('Skip',
+                      style: TextStyle(color: WabColors.muted)),
                 ),
               ),
             ),

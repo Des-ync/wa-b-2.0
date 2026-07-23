@@ -10,7 +10,8 @@ import 'order_detail.dart';
 /// Order numbers look like `ORD-2026-A3F9K2` (see server's generateOrderNumber
 /// in src/utils/helpers.js) — used to tell an order-lookup scan apart from a
 /// product search scan.
-final _orderNumberPattern = RegExp(r'^ORD-\d{4}-[A-Z0-9]{4,10}$', caseSensitive: false);
+final _orderNumberPattern =
+    RegExp(r'^ORD-\d{4}-[A-Z0-9]{4,10}$', caseSensitive: false);
 
 /// Camera scanner reachable from the Products screen. Two honest use cases,
 /// scoped to what the backend actually supports today:
@@ -76,7 +77,8 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
         content: Text(
             'This code opens your customer-facing storefront:\n\n$url\n\nIt\'s meant for customers to scan — there\'s nothing to do with it here.'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('OK')),
         ],
       ),
     );
@@ -87,11 +89,13 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
     try {
       final res = await session.api.get('/api/orders',
           query: {'business_id': session.businessId, 'limit': 100});
-      final orders = ((res['orders'] as List?) ?? []).cast<Map<String, dynamic>>();
-      final match = orders.where(
-          (o) => '${o['order_number']}'.toUpperCase() == orderNumber.toUpperCase());
+      final orders =
+          ((res['orders'] as List?) ?? []).cast<Map<String, dynamic>>();
+      final match = orders.where((o) =>
+          '${o['order_number']}'.toUpperCase() == orderNumber.toUpperCase());
       if (match.isEmpty) {
-        _toast('No matching order found among your recent orders for "$orderNumber".');
+        _toast(
+            'No matching order found among your recent orders for "$orderNumber".');
         return;
       }
       if (!mounted) return;
@@ -107,7 +111,9 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
     final matches = widget.products.where((p) {
       final name = '${p['name'] ?? ''}'.toLowerCase();
       final category = '${p['category'] ?? ''}'.toLowerCase();
-      return name.contains(needle) || category.contains(needle) || needle.contains(name);
+      return name.contains(needle) ||
+          category.contains(needle) ||
+          needle.contains(name);
     }).toList();
 
     if (matches.isEmpty) {
@@ -137,7 +143,8 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
               child: Align(
                 alignment: Alignment.centerLeft,
                 child: Text('Multiple matches — pick one',
-                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+                    style:
+                        TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
               ),
             ),
             ...matches.map((p) => ListTile(
@@ -161,8 +168,9 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
 
   void _toast(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message), backgroundColor: WabColors.danger));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Semantics(liveRegion: true, child: Text(message)),
+        backgroundColor: WabColors.danger));
   }
 
   @override
@@ -174,9 +182,17 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
         foregroundColor: Colors.white,
         title: const Text('Scan'),
         actions: [
-          IconButton(
-            onPressed: () => _controller.toggleTorch(),
-            icon: const Icon(Icons.flash_on_rounded),
+          ValueListenableBuilder<MobileScannerState>(
+            valueListenable: _controller,
+            builder: (context, state, _) {
+              final on = state.torchState == TorchState.on;
+              return IconButton(
+                tooltip: on ? 'Turn off flashlight' : 'Turn on flashlight',
+                onPressed: () => _controller.toggleTorch(),
+                icon:
+                    Icon(on ? Icons.flash_on_rounded : Icons.flash_off_rounded),
+              );
+            },
           ),
         ],
       ),
@@ -194,7 +210,8 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.no_photography_rounded, color: Colors.white54, size: 40),
+                    const Icon(Icons.no_photography_rounded,
+                        color: Colors.white54, size: 40),
                     const SizedBox(height: 14),
                     Text(error.errorCode.name,
                         textAlign: TextAlign.center,
@@ -216,10 +233,13 @@ class _BarcodeScannerScreenState extends State<BarcodeScannerScreen> {
             bottom: 32,
             child: Center(
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 decoration: BoxDecoration(
-                    color: Colors.black54, borderRadius: BorderRadius.circular(999)),
-                child: const Text('Point the camera at a barcode, QR code, or product label',
+                    color: Colors.black54,
+                    borderRadius: BorderRadius.circular(999)),
+                child: const Text(
+                    'Point the camera at a barcode, QR code, or product label',
                     style: TextStyle(color: Colors.white, fontSize: 13)),
               ),
             ),

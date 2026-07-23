@@ -23,12 +23,15 @@ class AdminIncompleteSetupScreen extends StatefulWidget {
   const AdminIncompleteSetupScreen({super.key});
 
   @override
-  State<AdminIncompleteSetupScreen> createState() => _AdminIncompleteSetupScreenState();
+  State<AdminIncompleteSetupScreen> createState() =>
+      _AdminIncompleteSetupScreenState();
 }
 
-class _AdminIncompleteSetupScreenState extends State<AdminIncompleteSetupScreen> {
+class _AdminIncompleteSetupScreenState
+    extends State<AdminIncompleteSetupScreen> {
   Future<List<Map<String, dynamic>>> _load() async {
-    final res = await context.read<Session>().api.getIncompleteSetupBusinesses();
+    final res =
+        await context.read<Session>().api.getIncompleteSetupBusinesses();
     return ((res['businesses'] as List?) ?? []).cast<Map<String, dynamic>>();
   }
 
@@ -44,8 +47,10 @@ class _AdminIncompleteSetupScreenState extends State<AdminIncompleteSetupScreen>
           final missing = ((b['missing_steps'] as List?) ?? []).cast<String>();
           return Card(
             child: ListTile(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-              title: Text('${b['name']}', style: const TextStyle(fontWeight: FontWeight.w700)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14)),
+              title: Text('${b['name']}',
+                  style: const TextStyle(fontWeight: FontWeight.w700)),
               subtitle: Padding(
                 padding: const EdgeInsets.only(top: 6),
                 child: Wrap(
@@ -54,22 +59,27 @@ class _AdminIncompleteSetupScreenState extends State<AdminIncompleteSetupScreen>
                   children: [
                     for (final key in missing)
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 3),
                         decoration: BoxDecoration(
                             color: WabColors.warning.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(999)),
                         child: Text(_stepLabels[key] ?? key,
                             style: const TextStyle(
-                                fontSize: 11, fontWeight: FontWeight.w600, color: WabColors.warning)),
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: WabColors.warning)),
                       ),
                   ],
                 ),
               ),
               isThreeLine: missing.length > 2,
               trailing: Text('${b['percent']}%',
-                  style: const TextStyle(fontWeight: FontWeight.w800, color: WabColors.muted)),
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w800, color: WabColors.muted)),
               onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) => AdminBusinessDetailScreen(businessId: '${b['id']}'))),
+                  builder: (_) =>
+                      AdminBusinessDetailScreen(businessId: '${b['id']}'))),
             ),
           );
         },

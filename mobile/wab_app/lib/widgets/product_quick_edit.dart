@@ -49,8 +49,9 @@ class _ProductQuickEditSheetState extends State<ProductQuickEditSheet> {
   Future<void> _save() async {
     final price = double.tryParse(_price.text.trim());
     if (price == null || price < 0) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Enter a valid price'),
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Semantics(
+              liveRegion: true, child: const Text('Enter a valid price')),
           backgroundColor: WabColors.danger));
       return;
     }
@@ -81,14 +82,17 @@ class _ProductQuickEditSheetState extends State<ProductQuickEditSheet> {
         await OfflineCache.patchCachedProduct(id, body);
         if (mounted) {
           Navigator.pop(context, true);
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-              content:
-                  Text('Offline — saved locally, will sync when back online')));
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Semantics(
+                  liveRegion: true,
+                  child: const Text(
+                      'Offline — saved locally, will sync when back online'))));
         }
       } else {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-              content: Text(e.message), backgroundColor: WabColors.danger));
+              content: Semantics(liveRegion: true, child: Text(e.message)),
+              backgroundColor: WabColors.danger));
         }
       }
     } finally {

@@ -34,7 +34,8 @@ class _MarkPaidSheet extends StatefulWidget {
 }
 
 class _MarkPaidSheetState extends State<_MarkPaidSheet> {
-  late final _amount = TextEditingController(text: '${widget.order['total_ghs'] ?? ''}');
+  late final _amount =
+      TextEditingController(text: '${widget.order['total_ghs'] ?? ''}');
   String _method = 'cash';
   bool _busy = false;
 
@@ -47,8 +48,10 @@ class _MarkPaidSheetState extends State<_MarkPaidSheet> {
   Future<void> _save() async {
     final amount = double.tryParse(_amount.text.trim());
     if (amount == null || amount <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Enter a valid amount'), backgroundColor: WabColors.danger));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Semantics(
+              liveRegion: true, child: const Text('Enter a valid amount')),
+          backgroundColor: WabColors.danger));
       return;
     }
     final id = '${widget.order['id']}';
@@ -56,10 +59,12 @@ class _MarkPaidSheetState extends State<_MarkPaidSheet> {
     setState(() => _busy = true);
     final session = context.read<Session>();
     try {
-      final res = await session.api.markOrderPaid(id, method: _method, amountGhs: amount);
+      final res = await session.api
+          .markOrderPaid(id, method: _method, amountGhs: amount);
       final updated = res['order'] as Map<String, dynamic>?;
       await OfflineCache.patchCachedOrder(id, patch);
-      if (mounted) Navigator.pop(context, updated ?? {...widget.order, ...patch});
+      if (mounted)
+        Navigator.pop(context, updated ?? {...widget.order, ...patch});
     } on ApiException catch (e) {
       if (e.status == 0) {
         await OfflineQueue.enqueue(QueuedAction(
@@ -72,12 +77,16 @@ class _MarkPaidSheetState extends State<_MarkPaidSheet> {
         await OfflineCache.patchCachedOrder(id, patch);
         if (mounted) {
           Navigator.pop(context, {...widget.order, ...patch});
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-              content: Text('Offline — queued, will sync when back online')));
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Semantics(
+                  liveRegion: true,
+                  child: const Text(
+                      'Offline — queued, will sync when back online'))));
         }
       } else if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(e.message), backgroundColor: WabColors.danger));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Semantics(liveRegion: true, child: Text(e.message)),
+            backgroundColor: WabColors.danger));
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -87,7 +96,8 @@ class _MarkPaidSheetState extends State<_MarkPaidSheet> {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: EdgeInsets.fromLTRB(24, 24, 24, MediaQuery.of(context).viewInsets.bottom + 24),
+      padding: EdgeInsets.fromLTRB(
+          24, 24, 24, MediaQuery.of(context).viewInsets.bottom + 24),
       child: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -97,19 +107,26 @@ class _MarkPaidSheetState extends State<_MarkPaidSheet> {
                 style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
             const SizedBox(height: 4),
             Text('Order #${widget.order['order_number']}',
-                style: const TextStyle(color: WabColors.muted, fontWeight: FontWeight.w600)),
+                style: const TextStyle(
+                    color: WabColors.muted, fontWeight: FontWeight.w600)),
             const SizedBox(height: 20),
             Wrap(
               spacing: 8,
               children: [
-                for (final m in const [('cash', 'Cash'), ('momo', 'MoMo'), ('card', 'Card')])
+                for (final m in const [
+                  ('cash', 'Cash'),
+                  ('momo', 'MoMo'),
+                  ('card', 'Card')
+                ])
                   ChoiceChip(
                     label: Text(m.$2),
                     selected: _method == m.$1,
                     onSelected: (_) => setState(() => _method = m.$1),
                     selectedColor: WabColors.accentSoft,
                     labelStyle: TextStyle(
-                        color: _method == m.$1 ? WabColors.accentInk : WabColors.muted,
+                        color: _method == m.$1
+                            ? WabColors.accentInk
+                            : WabColors.muted,
                         fontWeight: FontWeight.w600),
                     side: const BorderSide(color: WabColors.line),
                     showCheckmark: false,
@@ -119,8 +136,10 @@ class _MarkPaidSheetState extends State<_MarkPaidSheet> {
             const SizedBox(height: 16),
             TextField(
               controller: _amount,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(labelText: 'Amount received (GH₵)'),
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              decoration:
+                  const InputDecoration(labelText: 'Amount received (GH₵)'),
             ),
             const SizedBox(height: 20),
             FilledButton(
@@ -129,7 +148,8 @@ class _MarkPaidSheetState extends State<_MarkPaidSheet> {
                   ? const SizedBox(
                       width: 22,
                       height: 22,
-                      child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2.5, color: Colors.white))
                   : const Text('Confirm payment received'),
             ),
           ],
@@ -160,8 +180,10 @@ class _AssignRiderSheet extends StatefulWidget {
 }
 
 class _AssignRiderSheetState extends State<_AssignRiderSheet> {
-  late final _name = TextEditingController(text: '${widget.order['rider_name'] ?? ''}');
-  late final _phone = TextEditingController(text: '${widget.order['rider_phone'] ?? ''}');
+  late final _name =
+      TextEditingController(text: '${widget.order['rider_name'] ?? ''}');
+  late final _phone =
+      TextEditingController(text: '${widget.order['rider_phone'] ?? ''}');
   bool _busy = false;
 
   @override
@@ -174,8 +196,10 @@ class _AssignRiderSheetState extends State<_AssignRiderSheet> {
   Future<void> _save() async {
     final name = _name.text.trim();
     if (name.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text("Enter the rider's name"), backgroundColor: WabColors.danger));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Semantics(
+              liveRegion: true, child: const Text("Enter the rider's name")),
+          backgroundColor: WabColors.danger));
       return;
     }
     final phone = _phone.text.trim();
@@ -188,28 +212,37 @@ class _AssignRiderSheetState extends State<_AssignRiderSheet> {
     setState(() => _busy = true);
     final session = context.read<Session>();
     try {
-      final res = await session.api.assignRider(id, riderName: name, riderPhone: phone);
+      final res =
+          await session.api.assignRider(id, riderName: name, riderPhone: phone);
       final updated = res['order'] as Map<String, dynamic>?;
       await OfflineCache.patchCachedOrder(id, patch);
-      if (mounted) Navigator.pop(context, updated ?? {...widget.order, ...patch});
+      if (mounted)
+        Navigator.pop(context, updated ?? {...widget.order, ...patch});
     } on ApiException catch (e) {
       if (e.status == 0) {
         await OfflineQueue.enqueue(QueuedAction(
           id: 'order-rider-$id-${DateTime.now().microsecondsSinceEpoch}',
           method: 'PATCH',
           path: '/api/orders/$id/delivery',
-          body: {'rider_name': name, if (phone.isNotEmpty) 'rider_phone': phone},
+          body: {
+            'rider_name': name,
+            if (phone.isNotEmpty) 'rider_phone': phone
+          },
           description: 'Assign rider to order #${widget.order['order_number']}',
         ));
         await OfflineCache.patchCachedOrder(id, patch);
         if (mounted) {
           Navigator.pop(context, {...widget.order, ...patch});
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-              content: Text('Offline — queued, will sync when back online')));
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Semantics(
+                  liveRegion: true,
+                  child: const Text(
+                      'Offline — queued, will sync when back online'))));
         }
       } else if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(e.message), backgroundColor: WabColors.danger));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Semantics(liveRegion: true, child: Text(e.message)),
+            backgroundColor: WabColors.danger));
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -219,7 +252,8 @@ class _AssignRiderSheetState extends State<_AssignRiderSheet> {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: EdgeInsets.fromLTRB(24, 24, 24, MediaQuery.of(context).viewInsets.bottom + 24),
+      padding: EdgeInsets.fromLTRB(
+          24, 24, 24, MediaQuery.of(context).viewInsets.bottom + 24),
       child: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -229,7 +263,8 @@ class _AssignRiderSheetState extends State<_AssignRiderSheet> {
                 style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
             const SizedBox(height: 4),
             Text('Order #${widget.order['order_number']}',
-                style: const TextStyle(color: WabColors.muted, fontWeight: FontWeight.w600)),
+                style: const TextStyle(
+                    color: WabColors.muted, fontWeight: FontWeight.w600)),
             const SizedBox(height: 20),
             TextField(
               controller: _name,
@@ -240,7 +275,8 @@ class _AssignRiderSheetState extends State<_AssignRiderSheet> {
             TextField(
               controller: _phone,
               keyboardType: TextInputType.phone,
-              decoration: const InputDecoration(labelText: 'Rider phone (optional)'),
+              decoration:
+                  const InputDecoration(labelText: 'Rider phone (optional)'),
             ),
             const SizedBox(height: 20),
             FilledButton(
@@ -249,7 +285,8 @@ class _AssignRiderSheetState extends State<_AssignRiderSheet> {
                   ? const SizedBox(
                       width: 22,
                       height: 22,
-                      child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2.5, color: Colors.white))
                   : const Text('Save'),
             ),
           ],
@@ -288,28 +325,34 @@ class _SetEstimatesSheetState extends State<_SetEstimatesSheet> {
   void initState() {
     super.initState();
     _readyAt = DateTime.tryParse('${widget.order['estimated_ready_at'] ?? ''}');
-    _deliveryAt = DateTime.tryParse('${widget.order['estimated_delivery_at'] ?? ''}');
+    _deliveryAt =
+        DateTime.tryParse('${widget.order['estimated_delivery_at'] ?? ''}');
   }
 
   Future<void> _save() async {
     if (_readyAt == null && _deliveryAt == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Pick at least one estimate'), backgroundColor: WabColors.danger));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Semantics(
+              liveRegion: true,
+              child: const Text('Pick at least one estimate')),
+          backgroundColor: WabColors.danger));
       return;
     }
     final id = '${widget.order['id']}';
     final patch = {
       if (_readyAt != null) 'estimated_ready_at': _readyAt!.toIso8601String(),
-      if (_deliveryAt != null) 'estimated_delivery_at': _deliveryAt!.toIso8601String(),
+      if (_deliveryAt != null)
+        'estimated_delivery_at': _deliveryAt!.toIso8601String(),
     };
     setState(() => _busy = true);
     final session = context.read<Session>();
     try {
-      final res =
-          await session.api.setOrderEstimates(id, readyAt: _readyAt, deliveryAt: _deliveryAt);
+      final res = await session.api
+          .setOrderEstimates(id, readyAt: _readyAt, deliveryAt: _deliveryAt);
       final updated = res['order'] as Map<String, dynamic>?;
       await OfflineCache.patchCachedOrder(id, patch);
-      if (mounted) Navigator.pop(context, updated ?? {...widget.order, ...patch});
+      if (mounted)
+        Navigator.pop(context, updated ?? {...widget.order, ...patch});
     } on ApiException catch (e) {
       if (e.status == 0) {
         await OfflineQueue.enqueue(QueuedAction(
@@ -322,20 +365,26 @@ class _SetEstimatesSheetState extends State<_SetEstimatesSheet> {
         await OfflineCache.patchCachedOrder(id, patch);
         if (mounted) {
           Navigator.pop(context, {...widget.order, ...patch});
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-              content: Text('Offline — queued, will sync when back online')));
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Semantics(
+                  liveRegion: true,
+                  child: const Text(
+                      'Offline — queued, will sync when back online'))));
         }
       } else if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(e.message), backgroundColor: WabColors.danger));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Semantics(liveRegion: true, child: Text(e.message)),
+            backgroundColor: WabColors.danger));
       }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
-  Widget _offsetRow(String label, DateTime? value, void Function(DateTime?) onChange) {
-    final picked = value == null ? null : TimeOfDay.fromDateTime(value).format(context);
+  Widget _offsetRow(
+      String label, DateTime? value, void Function(DateTime?) onChange) {
+    final picked =
+        value == null ? null : TimeOfDay.fromDateTime(value).format(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -346,7 +395,8 @@ class _SetEstimatesSheetState extends State<_SetEstimatesSheet> {
             if (picked != null)
               TextButton(
                 onPressed: () => onChange(null),
-                child: Text('Clear ($picked)', style: const TextStyle(color: WabColors.muted)),
+                child: Text('Clear ($picked)',
+                    style: const TextStyle(color: WabColors.muted)),
               ),
           ],
         ),
@@ -357,10 +407,11 @@ class _SetEstimatesSheetState extends State<_SetEstimatesSheet> {
             for (final mins in const [15, 30, 45, 60])
               ActionChip(
                 label: Text('+$mins min'),
-                onPressed: () => onChange(DateTime.now().add(Duration(minutes: mins))),
+                onPressed: () =>
+                    onChange(DateTime.now().add(Duration(minutes: mins))),
                 backgroundColor: WabColors.accentSoft,
-                labelStyle:
-                    const TextStyle(color: WabColors.accentInk, fontWeight: FontWeight.w700),
+                labelStyle: const TextStyle(
+                    color: WabColors.accentInk, fontWeight: FontWeight.w700),
                 side: BorderSide.none,
               ),
           ],
@@ -372,7 +423,8 @@ class _SetEstimatesSheetState extends State<_SetEstimatesSheet> {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: EdgeInsets.fromLTRB(24, 24, 24, MediaQuery.of(context).viewInsets.bottom + 24),
+      padding: EdgeInsets.fromLTRB(
+          24, 24, 24, MediaQuery.of(context).viewInsets.bottom + 24),
       child: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -381,12 +433,16 @@ class _SetEstimatesSheetState extends State<_SetEstimatesSheet> {
             const Text('Set estimate',
                 style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
             const SizedBox(height: 4),
-            const Text("The customer isn't notified automatically when you set this yet",
-                style: TextStyle(color: WabColors.muted, fontWeight: FontWeight.w600)),
+            const Text(
+                "The customer isn't notified automatically when you set this yet",
+                style: TextStyle(
+                    color: WabColors.muted, fontWeight: FontWeight.w600)),
             const SizedBox(height: 20),
-            _offsetRow('Ready by', _readyAt, (v) => setState(() => _readyAt = v)),
+            _offsetRow(
+                'Ready by', _readyAt, (v) => setState(() => _readyAt = v)),
             const SizedBox(height: 20),
-            _offsetRow('Out for delivery by', _deliveryAt, (v) => setState(() => _deliveryAt = v)),
+            _offsetRow('Out for delivery by', _deliveryAt,
+                (v) => setState(() => _deliveryAt = v)),
             const SizedBox(height: 20),
             FilledButton(
               onPressed: _busy ? null : _save,
@@ -394,7 +450,8 @@ class _SetEstimatesSheetState extends State<_SetEstimatesSheet> {
                   ? const SizedBox(
                       width: 22,
                       height: 22,
-                      child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2.5, color: Colors.white))
                   : const Text('Save estimate'),
             ),
           ],
@@ -429,7 +486,8 @@ class _RefundSheet extends StatefulWidget {
 }
 
 class _RefundSheetState extends State<_RefundSheet> {
-  late final _amount = TextEditingController(text: widget.maxRefundable.toStringAsFixed(2));
+  late final _amount =
+      TextEditingController(text: widget.maxRefundable.toStringAsFixed(2));
   final _reason = TextEditingController();
   bool _busy = false;
 
@@ -443,13 +501,18 @@ class _RefundSheetState extends State<_RefundSheet> {
   Future<void> _save() async {
     final amount = double.tryParse(_amount.text.trim());
     if (amount == null || amount <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Enter a valid amount'), backgroundColor: WabColors.danger));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Semantics(
+              liveRegion: true, child: const Text('Enter a valid amount')),
+          backgroundColor: WabColors.danger));
       return;
     }
     if (amount > widget.maxRefundable + 0.01) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Cannot exceed the refundable balance of ${ghs(widget.maxRefundable)}'),
+          content: Semantics(
+              liveRegion: true,
+              child: Text(
+                  'Cannot exceed the refundable balance of ${ghs(widget.maxRefundable)}')),
           backgroundColor: WabColors.danger));
       return;
     }
@@ -457,9 +520,10 @@ class _RefundSheetState extends State<_RefundSheet> {
     setState(() => _busy = true);
     final session = context.read<Session>();
     try {
-      final res =
-          await session.api.refundOrder(id, amountGhs: amount, reason: _reason.text.trim());
-      if (mounted) Navigator.pop(context, res['refund'] as Map<String, dynamic>?);
+      final res = await session.api
+          .refundOrder(id, amountGhs: amount, reason: _reason.text.trim());
+      if (mounted)
+        Navigator.pop(context, res['refund'] as Map<String, dynamic>?);
     } on ApiException catch (e) {
       // Refunds hit a live gateway call and a server-side "already refunded"
       // ceiling check — unlike the other sheets here, this one is NOT queued
@@ -469,8 +533,9 @@ class _RefundSheetState extends State<_RefundSheet> {
         final msg = e.status == 0
             ? "Refunds need a connection — try again once you're back online."
             : e.message;
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(msg), backgroundColor: WabColors.danger));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Semantics(liveRegion: true, child: Text(msg)),
+            backgroundColor: WabColors.danger));
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -480,22 +545,27 @@ class _RefundSheetState extends State<_RefundSheet> {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: EdgeInsets.fromLTRB(24, 24, 24, MediaQuery.of(context).viewInsets.bottom + 24),
+      padding: EdgeInsets.fromLTRB(
+          24, 24, 24, MediaQuery.of(context).viewInsets.bottom + 24),
       child: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Refund', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+            const Text('Refund',
+                style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
             const SizedBox(height: 4),
             Text(
                 'Order #${widget.order['order_number']} — up to ${ghs(widget.maxRefundable)} refundable',
-                style: const TextStyle(color: WabColors.muted, fontWeight: FontWeight.w600)),
+                style: const TextStyle(
+                    color: WabColors.muted, fontWeight: FontWeight.w600)),
             const SizedBox(height: 20),
             TextField(
               controller: _amount,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(labelText: 'Amount to refund (GH₵)'),
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              decoration:
+                  const InputDecoration(labelText: 'Amount to refund (GH₵)'),
             ),
             const SizedBox(height: 12),
             TextField(
@@ -510,7 +580,8 @@ class _RefundSheetState extends State<_RefundSheet> {
                   ? const SizedBox(
                       width: 22,
                       height: 22,
-                      child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2.5, color: Colors.white))
                   : const Text('Issue refund'),
             ),
           ],
@@ -571,12 +642,16 @@ class _AddNoteSheetState extends State<_AddNoteSheet> {
         ));
         if (mounted) {
           Navigator.pop(context, null);
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-              content: Text('Offline — queued, will sync when back online')));
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Semantics(
+                  liveRegion: true,
+                  child: const Text(
+                      'Offline — queued, will sync when back online'))));
         }
       } else if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(e.message), backgroundColor: WabColors.danger));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Semantics(liveRegion: true, child: Text(e.message)),
+            backgroundColor: WabColors.danger));
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -586,16 +661,19 @@ class _AddNoteSheetState extends State<_AddNoteSheet> {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: EdgeInsets.fromLTRB(24, 24, 24, MediaQuery.of(context).viewInsets.bottom + 24),
+      padding: EdgeInsets.fromLTRB(
+          24, 24, 24, MediaQuery.of(context).viewInsets.bottom + 24),
       child: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Add note', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+            const Text('Add note',
+                style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
             const SizedBox(height: 4),
             const Text('Merchant-only — never shown to the customer',
-                style: TextStyle(color: WabColors.muted, fontWeight: FontWeight.w600)),
+                style: TextStyle(
+                    color: WabColors.muted, fontWeight: FontWeight.w600)),
             const SizedBox(height: 20),
             TextField(
               controller: _note,
@@ -610,7 +688,8 @@ class _AddNoteSheetState extends State<_AddNoteSheet> {
                   ? const SizedBox(
                       width: 22,
                       height: 22,
-                      child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2.5, color: Colors.white))
                   : const Text('Save note'),
             ),
           ],

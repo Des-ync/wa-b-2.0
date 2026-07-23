@@ -27,7 +27,8 @@ extension OrderApi on ApiClient {
   }) {
     return patch('/api/orders/$orderId/delivery', body: {
       'rider_name': riderName,
-      if (riderPhone != null && riderPhone.isNotEmpty) 'rider_phone': riderPhone,
+      if (riderPhone != null && riderPhone.isNotEmpty)
+        'rider_phone': riderPhone,
     });
   }
 
@@ -47,7 +48,8 @@ extension OrderApi on ApiClient {
   }) {
     final body = <String, dynamic>{};
     if (readyAt != null) body['estimated_ready_at'] = readyAt.toIso8601String();
-    if (deliveryAt != null) body['estimated_delivery_at'] = deliveryAt.toIso8601String();
+    if (deliveryAt != null)
+      body['estimated_delivery_at'] = deliveryAt.toIso8601String();
     return patch('/api/orders/$orderId/estimates', body: body);
   }
 

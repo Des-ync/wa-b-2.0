@@ -50,7 +50,8 @@ class _PromosScreenState extends State<PromosScreen> {
     } on ApiException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(e.message), backgroundColor: WabColors.danger));
+            content: Semantics(liveRegion: true, child: Text(e.message)),
+            backgroundColor: WabColors.danger));
       }
     }
   }
@@ -175,7 +176,8 @@ class _PromosScreenState extends State<PromosScreen> {
                   } on ApiException catch (e) {
                     if (ctx.mounted) {
                       ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
-                          content: Text(e.message),
+                          content: Semantics(
+                              liveRegion: true, child: Text(e.message)),
                           backgroundColor: WabColors.danger));
                     }
                   }
@@ -187,6 +189,9 @@ class _PromosScreenState extends State<PromosScreen> {
         ),
       ),
     );
+    codeCtrl.dispose();
+    valueCtrl.dispose();
+    maxUsesCtrl.dispose();
     if (created == true) setState(() => _reloadKey++);
   }
 

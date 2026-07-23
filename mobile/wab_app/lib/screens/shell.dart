@@ -45,8 +45,8 @@ class _MainShellState extends State<MainShell> {
       case 'order':
         final id = data['order_id'];
         if (id != null) {
-          Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => OrderDetailScreen(orderId: id)));
+          Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => OrderDetailScreen(orderId: id)));
         } else {
           setState(() => _index = 1);
         }
@@ -56,8 +56,8 @@ class _MainShellState extends State<MainShell> {
         // a plain message tap: open the chat thread with that customer.
         final customerId = data['customer_id'];
         if (customerId != null) {
-          Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => ChatScreen(customerId: customerId)));
+          Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => ChatScreen(customerId: customerId)));
         } else {
           setState(() => _index = 2);
         }
@@ -91,7 +91,9 @@ class _MainShellState extends State<MainShell> {
         onDestinationSelected: (i) => setState(() => _index = i),
         destinations: const [
           NavigationDestination(
-              icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home_rounded), label: 'Home'),
+              icon: Icon(Icons.home_outlined),
+              selectedIcon: Icon(Icons.home_rounded),
+              label: 'Home'),
           NavigationDestination(
               icon: Icon(Icons.receipt_long_outlined),
               selectedIcon: Icon(Icons.receipt_long_rounded),
@@ -105,7 +107,9 @@ class _MainShellState extends State<MainShell> {
               selectedIcon: Icon(Icons.inventory_2_rounded),
               label: 'Products'),
           NavigationDestination(
-              icon: Icon(Icons.menu_rounded), selectedIcon: Icon(Icons.menu_rounded), label: 'More'),
+              icon: Icon(Icons.menu_rounded),
+              selectedIcon: Icon(Icons.menu_rounded),
+              label: 'More'),
         ],
       ),
     );

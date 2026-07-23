@@ -60,7 +60,8 @@ RegExp _stockRegex(List<String> phrases) {
 /// Attempts to parse [heard] (a raw speech transcription) into a product
 /// update. Returns `null` if nothing was understood confidently — the
 /// caller should tell the merchant to try again rather than guess.
-VoiceCommand? parseVoiceCommand(String heard, List<Map<String, dynamic>> products) {
+VoiceCommand? parseVoiceCommand(
+    String heard, List<Map<String, dynamic>> products) {
   final text = heard.trim().toLowerCase();
   if (text.isEmpty || products.isEmpty) return null;
 
@@ -113,7 +114,8 @@ VoiceCommand? parseVoiceCommand(String heard, List<Map<String, dynamic>> product
 /// normalized Levenshtein distance covers the rest (mishearings, plurals,
 /// etc). Below the confidence threshold, we'd rather say "didn't catch that"
 /// than silently act on the wrong product.
-Map<String, dynamic>? _bestMatch(String phrase, List<Map<String, dynamic>> products) {
+Map<String, dynamic>? _bestMatch(
+    String phrase, List<Map<String, dynamic>> products) {
   final needle = phrase.trim().toLowerCase();
   if (needle.length < 2) return null;
 
@@ -161,7 +163,8 @@ int _levenshtein(String a, String b) {
       final deletion = prev[j] + 1;
       final insertion = curr[j - 1] + 1;
       final substitution = prev[j - 1] + cost;
-      curr[j] = [deletion, insertion, substitution].reduce((x, y) => x < y ? x : y);
+      curr[j] =
+          [deletion, insertion, substitution].reduce((x, y) => x < y ? x : y);
     }
     final tmp = prev;
     prev = curr;

@@ -5,7 +5,9 @@ extension BusinessApi on ApiClient {
     return get('/api/business/settings', query: {'business_id': businessId});
   }
 
-  Future<Map<String, dynamic>> updateBusinessSettings(String businessId, Map<String, dynamic> fields) {
-    return patch('/api/business/settings', body: {'business_id': businessId, ...fields});
+  Future<Map<String, dynamic>> updateBusinessSettings(
+      String businessId, Map<String, dynamic> fields) {
+    return patch('/api/business/settings',
+        body: {'business_id': businessId, ...fields});
   }
 }

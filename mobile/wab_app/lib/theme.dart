@@ -17,7 +17,10 @@ class WabColors {
   static const bg = Color(0xFFFAF6ED); // warm market paper
   static const bg2 = Color(0xFFF3EEE0);
   static const paper = Color(0xFFFFFDF8);
-  static const warning = Color(0xFFC97A1D);
+  // Darkened from the original C97A1D — that shade only hit 3.3:1 against
+  // the app's paper/bg surfaces, failing WCAG AA (4.5:1) for the small
+  // status-chip and label text it's used for. This hits ~5:1.
+  static const warning = Color(0xFFA95A00);
   static const danger = Color(0xFFC24234);
 }
 
@@ -97,9 +100,12 @@ ThemeData wabTheme() {
       labelTextStyle: WidgetStateProperty.resolveWith(
         (states) => TextStyle(
           fontSize: 12,
-          fontWeight:
-              states.contains(WidgetState.selected) ? FontWeight.w700 : FontWeight.w500,
-          color: states.contains(WidgetState.selected) ? WabColors.accentInk : WabColors.muted,
+          fontWeight: states.contains(WidgetState.selected)
+              ? FontWeight.w700
+              : FontWeight.w500,
+          color: states.contains(WidgetState.selected)
+              ? WabColors.accentInk
+              : WabColors.muted,
         ),
       ),
     ),
@@ -117,7 +123,7 @@ String ghs(dynamic v) {
   final n = v is num ? v.toDouble() : double.tryParse('$v') ?? 0;
   final s = n.toStringAsFixed(2);
   final parts = s.split('.');
-  final withCommas = parts[0].replaceAllMapped(
-      RegExp(r'\B(?=(\d{3})+(?!\d))'), (m) => ',');
+  final withCommas =
+      parts[0].replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (m) => ',');
   return 'GH₵$withCommas.${parts[1]}';
 }

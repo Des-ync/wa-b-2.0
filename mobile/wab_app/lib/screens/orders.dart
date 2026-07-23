@@ -12,7 +12,13 @@ import '../widgets/common.dart';
 import 'order_detail.dart';
 
 const orderStatuses = [
-  'pending', 'confirmed', 'paid', 'preparing', 'ready', 'delivered', 'cancelled'
+  'pending',
+  'confirmed',
+  'paid',
+  'preparing',
+  'ready',
+  'delivered',
+  'cancelled'
 ];
 
 class OrdersScreen extends StatefulWidget {
@@ -61,15 +67,17 @@ class _OrdersScreenState extends State<OrdersScreen> {
         'limit': 100,
         if (_filter != null) 'status': _filter,
       });
-      final orders = ((res['orders'] as List?) ?? []).cast<Map<String, dynamic>>();
+      final orders =
+          ((res['orders'] as List?) ?? []).cast<Map<String, dynamic>>();
       unawaited(OfflineCache.saveOrders(orders));
       if (mounted) setState(() => _offline = false);
       return orders;
     } catch (e) {
       final cached = await OfflineCache.loadOrders();
       if (cached != null) {
-        final filtered =
-            _filter == null ? cached : cached.where((o) => o['status'] == _filter).toList();
+        final filtered = _filter == null
+            ? cached
+            : cached.where((o) => o['status'] == _filter).toList();
         if (mounted) setState(() => _offline = true);
         return filtered;
       }
@@ -116,11 +124,13 @@ class _OrdersScreenState extends State<OrdersScreen> {
               key: ValueKey(_reloadKey),
               load: _load,
               emptyTitle: 'No orders here',
-              emptySubtitle: 'Orders placed through your WhatsApp bot appear here.',
+              emptySubtitle:
+                  'Orders placed through your WhatsApp bot appear here.',
               emptyIcon: Icons.receipt_long_rounded,
               itemBuilder: (ctx, o) => Card(
                 child: ListTile(
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14)),
                   title: Text('#${o['order_number']}',
                       style: const TextStyle(fontWeight: FontWeight.w700)),
                   subtitle: Text(
@@ -131,14 +141,16 @@ class _OrdersScreenState extends State<OrdersScreen> {
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
                       Text(ghs(o['total_ghs']),
-                          style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                          style: const TextStyle(
+                              fontWeight: FontWeight.w800, fontSize: 15)),
                       const SizedBox(height: 4),
                       StatusChip('${o['status']}'),
                     ],
                   ),
                   onTap: () => Navigator.of(ctx)
                       .push(MaterialPageRoute(
-                          builder: (_) => OrderDetailScreen(orderId: '${o['id']}')))
+                          builder: (_) =>
+                              OrderDetailScreen(orderId: '${o['id']}')))
                       .then((_) => setState(() => _reloadKey++)),
                 ),
               ),

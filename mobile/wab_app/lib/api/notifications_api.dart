@@ -20,6 +20,7 @@ extension NotificationsApi on ApiClient {
   }
 
   Future<Map<String, dynamic>> markAllNotificationsRead(String businessId) {
-    return post('/api/notifications/mark-all-read', body: {'business_id': businessId});
+    return post('/api/notifications/mark-all-read',
+        body: {'business_id': businessId});
   }
 }

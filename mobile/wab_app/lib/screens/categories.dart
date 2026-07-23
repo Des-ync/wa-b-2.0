@@ -41,7 +41,8 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
       final res = await session.api.getCategories(session.businessId!);
       if (!mounted) return;
       setState(() {
-        _categories = ((res['categories'] as List?) ?? []).cast<Map<String, dynamic>>();
+        _categories =
+            ((res['categories'] as List?) ?? []).cast<Map<String, dynamic>>();
         _loading = false;
       });
     } catch (e) {
@@ -58,16 +59,16 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
     final newHidden = !(cat['hidden'] == true);
     try {
       if (cat['id'] == null) {
-        await session.api
-            .createCategory(session.businessId!, '${cat['name']}', hidden: newHidden);
+        await session.api.createCategory(session.businessId!, '${cat['name']}',
+            hidden: newHidden);
       } else {
         await session.api.updateCategory('${cat['id']}', hidden: newHidden);
       }
       _load();
     } on ApiException catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(e.message), backgroundColor: WabColors.danger));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(e.message), backgroundColor: WabColors.danger));
       }
     }
   }
@@ -78,22 +79,30 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Rename category'),
-        content: TextField(controller: ctrl, autofocus: true),
+        content: TextField(
+            controller: ctrl,
+            autofocus: true,
+            decoration: const InputDecoration(labelText: 'Category name')),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           TextButton(
-              onPressed: () => Navigator.pop(ctx, ctrl.text.trim()), child: const Text('Save')),
+              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+              child: const Text('Save')),
         ],
       ),
     );
     if (name == null || name.isEmpty || !mounted) return;
     try {
-      await context.read<Session>().api.updateCategory('${cat['id']}', name: name);
+      await context
+          .read<Session>()
+          .api
+          .updateCategory('${cat['id']}', name: name);
       _load();
     } on ApiException catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(e.message), backgroundColor: WabColors.danger));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(e.message), backgroundColor: WabColors.danger));
       }
     }
   }
@@ -106,10 +115,13 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
         content: Text(
             'This only removes the display settings for "${cat['name']}" — products keep their category.'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
           TextButton(
               onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Delete', style: TextStyle(color: WabColors.danger))),
+              child: const Text('Delete',
+                  style: TextStyle(color: WabColors.danger))),
         ],
       ),
     );
@@ -119,8 +131,8 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
       _load();
     } on ApiException catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(e.message), backgroundColor: WabColors.danger));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(e.message), backgroundColor: WabColors.danger));
       }
     }
   }
@@ -132,23 +144,28 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
       builder: (ctx) => AlertDialog(
         title: const Text('New category'),
         content: TextField(
-            controller: ctrl, autofocus: true, decoration: const InputDecoration(labelText: 'Name')),
+            controller: ctrl,
+            autofocus: true,
+            decoration: const InputDecoration(labelText: 'Name')),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           TextButton(
-              onPressed: () => Navigator.pop(ctx, ctrl.text.trim()), child: const Text('Add')),
+              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+              child: const Text('Add')),
         ],
       ),
     );
     if (name == null || name.isEmpty || !mounted) return;
     try {
       final session = context.read<Session>();
-      await session.api.createCategory(session.businessId!, name, sortOrder: _categories.length);
+      await session.api.createCategory(session.businessId!, name,
+          sortOrder: _categories.length);
       _load();
     } on ApiException catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(e.message), backgroundColor: WabColors.danger));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(e.message), backgroundColor: WabColors.danger));
       }
     }
   }
@@ -160,12 +177,12 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
     });
     final session = context.read<Session>();
     try {
-      await session.api
-          .reorderCategories(session.businessId!, _categories.map((c) => '${c['name']}').toList());
+      await session.api.reorderCategories(
+          session.businessId!, _categories.map((c) => '${c['name']}').toList());
     } on ApiException catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(e.message), backgroundColor: WabColors.danger));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(e.message), backgroundColor: WabColors.danger));
       }
       _load();
     }
@@ -183,7 +200,8 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
         label: const Text('Add category'),
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator(color: WabColors.accent))
+          ? const Center(
+              child: CircularProgressIndicator(color: WabColors.accent))
           : _error != null
               ? ErrorRetry(message: _error!, onRetry: _load)
               : _categories.isEmpty
@@ -191,7 +209,8 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
                       child: EmptyState(
                           icon: Icons.category_rounded,
                           title: 'No categories yet',
-                          subtitle: 'Categories on your products show up here automatically.'))
+                          subtitle:
+                              'Categories on your products show up here automatically.'))
                   : ReorderableListView.builder(
                       padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
                       itemCount: _categories.length,
@@ -204,12 +223,15 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
                           key: ValueKey('${c['name']}'),
                           margin: const EdgeInsets.only(bottom: 10),
                           child: ListTile(
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14)),
                             title: Text('${c['name']}',
-                                style: const TextStyle(fontWeight: FontWeight.w700)),
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.w700)),
                             subtitle: virtual
                                 ? const Text('Not customized yet',
-                                    style: TextStyle(color: WabColors.muted, fontSize: 12))
+                                    style: TextStyle(
+                                        color: WabColors.muted, fontSize: 12))
                                 : null,
                             onTap: virtual ? null : () => _rename(c),
                             trailing: Row(
@@ -222,9 +244,12 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
                                 ),
                                 if (!virtual)
                                   IconButton(
+                                    tooltip: 'Delete category',
                                     onPressed: () => _delete(c),
-                                    icon: const Icon(Icons.delete_outline_rounded,
-                                        color: WabColors.danger, size: 20),
+                                    icon: const Icon(
+                                        Icons.delete_outline_rounded,
+                                        color: WabColors.danger,
+                                        size: 20),
                                   )
                                 else
                                   const SizedBox(width: 12),

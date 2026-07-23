@@ -27,7 +27,14 @@ class _AdminOnboardScreenState extends State<AdminOnboardScreen> {
   bool _saving = false;
 
   static const _industries = [
-    'retail', 'food', 'fashion', 'beauty', 'electronics', 'pharmacy', 'services', 'other'
+    'retail',
+    'food',
+    'fashion',
+    'beauty',
+    'electronics',
+    'pharmacy',
+    'services',
+    'other'
   ];
 
   @override
@@ -58,7 +65,10 @@ class _AdminOnboardScreenState extends State<AdminOnboardScreen> {
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('${res['business']?['name'] ?? 'Business'} onboarded 🎉'),
+        content: Semantics(
+          liveRegion: true,
+          child: Text('${res['business']?['name'] ?? 'Business'} onboarded 🎉'),
+        ),
         backgroundColor: WabColors.accentInk,
       ));
       Navigator.pop(context, true);
@@ -66,7 +76,7 @@ class _AdminOnboardScreenState extends State<AdminOnboardScreen> {
       if (!mounted) return;
       setState(() => _saving = false);
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('$e'),
+        content: Semantics(liveRegion: true, child: Text('$e')),
         backgroundColor: WabColors.danger,
       ));
     }
@@ -81,15 +91,17 @@ class _AdminOnboardScreenState extends State<AdminOnboardScreen> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            const KenteStrip(borderRadius: BorderRadius.all(Radius.circular(4))),
+            const KenteStrip(
+                borderRadius: BorderRadius.all(Radius.circular(4))),
             const SizedBox(height: 18),
             TextFormField(
               controller: _name,
               textCapitalization: TextCapitalization.words,
               decoration: const InputDecoration(
                   labelText: 'Business name *', hintText: 'Ama\'s Kitchen'),
-              validator: (v) =>
-                  (v == null || v.trim().isEmpty) ? 'Business name is required' : null,
+              validator: (v) => (v == null || v.trim().isEmpty)
+                  ? 'Business name is required'
+                  : null,
             ),
             const SizedBox(height: 14),
             TextFormField(
@@ -124,7 +136,8 @@ class _AdminOnboardScreenState extends State<AdminOnboardScreen> {
               controller: _waPhoneId,
               decoration: const InputDecoration(
                 labelText: 'Meta phone number ID (optional)',
-                helperText: 'Only if they have their own WhatsApp Cloud API number',
+                helperText:
+                    'Only if they have their own WhatsApp Cloud API number',
               ),
             ),
             const SizedBox(height: 18),
@@ -140,7 +153,8 @@ class _AdminOnboardScreenState extends State<AdminOnboardScreen> {
                     ButtonSegment(value: 30, label: Text('30d')),
                   ],
                   selected: {_trialDays},
-                  onSelectionChanged: (s) => setState(() => _trialDays = s.first),
+                  onSelectionChanged: (s) =>
+                      setState(() => _trialDays = s.first),
                 ),
               ],
             ),
@@ -160,7 +174,8 @@ class _AdminOnboardScreenState extends State<AdminOnboardScreen> {
                   padding: const EdgeInsets.symmetric(vertical: 16)),
               child: _saving
                   ? const SizedBox(
-                      width: 20, height: 20,
+                      width: 20,
+                      height: 20,
                       child: CircularProgressIndicator(
                           strokeWidth: 2, color: Colors.white))
                   : const Text('Create business & start trial'),

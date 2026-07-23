@@ -11,37 +11,42 @@ class WabLogo extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final strokeWidth = height * 0.16;
-    return SizedBox(
-      height: height,
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          SizedBox(
-            width: height * 1.15,
-            height: height,
-            child: CustomPaint(
-              painter: _WabMarkPainter(color: color, strokeWidth: strokeWidth),
+    return Semantics(
+      label: 'WA-B',
+      excludeSemantics: true,
+      child: SizedBox(
+        height: height,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            SizedBox(
+              width: height * 1.15,
+              height: height,
+              child: CustomPaint(
+                painter:
+                    _WabMarkPainter(color: color, strokeWidth: strokeWidth),
+              ),
             ),
-          ),
-          SizedBox(width: height * 0.14),
-          Container(
-            width: height * 0.32,
-            height: strokeWidth,
-            color: color,
-          ),
-          SizedBox(width: height * 0.14),
-          Text(
-            'B',
-            style: TextStyle(
-              fontSize: height * 1.05,
-              fontWeight: FontWeight.w900,
-              height: 1,
+            SizedBox(width: height * 0.14),
+            Container(
+              width: height * 0.32,
+              height: strokeWidth,
               color: color,
-              letterSpacing: -1,
             ),
-          ),
-        ],
+            SizedBox(width: height * 0.14),
+            Text(
+              'B',
+              style: TextStyle(
+                fontSize: height * 1.05,
+                fontWeight: FontWeight.w900,
+                height: 1,
+                color: color,
+                letterSpacing: -1,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -67,7 +72,8 @@ class _WabMarkPainter extends CustomPainter {
 
     // Zigzag "WA" ligature: W's last upstroke doubles as A's left leg,
     // with one extra downstroke closing A's apex on the right.
-    final xs = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0].map((f) => f * size.width).toList();
+    final xs =
+        [0.0, 0.2, 0.4, 0.6, 0.8, 1.0].map((f) => f * size.width).toList();
     final ys = [top, bottom, top, bottom, top, bottom];
 
     final path = Path()..moveTo(xs[0], ys[0]);

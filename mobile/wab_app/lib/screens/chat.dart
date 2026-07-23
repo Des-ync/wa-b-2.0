@@ -14,7 +14,10 @@ class ChatScreen extends StatefulWidget {
   final String? customerName;
   final bool botPaused;
   const ChatScreen(
-      {super.key, required this.customerId, this.customerName, this.botPaused = false});
+      {super.key,
+      required this.customerId,
+      this.customerName,
+      this.botPaused = false});
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -35,7 +38,8 @@ class _ChatScreenState extends State<ChatScreen> {
     _paused = widget.botPaused;
     _load();
     // Light polling keeps the thread fresh while the merchant is looking at it.
-    _poll = Timer.periodic(const Duration(seconds: 8), (_) => _load(quiet: true));
+    _poll =
+        Timer.periodic(const Duration(seconds: 8), (_) => _load(quiet: true));
   }
 
   @override
@@ -54,17 +58,20 @@ class _ChatScreenState extends State<ChatScreen> {
           query: {'business_id': session.businessId, 'limit': 200});
       if (!mounted) return;
       final wasAtBottom = !_scrollCtrl.hasClients ||
-          _scrollCtrl.position.pixels >= _scrollCtrl.position.maxScrollExtent - 60;
+          _scrollCtrl.position.pixels >=
+              _scrollCtrl.position.maxScrollExtent - 60;
       setState(() {
-        _messages = ((res['messages'] as List?) ?? []).cast<Map<String, dynamic>>();
+        _messages =
+            ((res['messages'] as List?) ?? []).cast<Map<String, dynamic>>();
         _customer = res['customer'] as Map<String, dynamic>?;
         _paused = _customer?['bot_paused'] == true;
       });
       if (wasAtBottom) _jumpToBottom();
     } catch (e) {
       if (!quiet && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('$e'), backgroundColor: WabColors.danger));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Semantics(liveRegion: true, child: Text('$e')),
+            backgroundColor: WabColors.danger));
       }
     }
   }
@@ -82,17 +89,17 @@ class _ChatScreenState extends State<ChatScreen> {
     if (text.isEmpty || _sending) return;
     setState(() => _sending = true);
     try {
-      await context
-          .read<Session>()
-          .api
-          .post('/api/conversations/${widget.customerId}/reply', body: {'text': text});
+      await context.read<Session>().api.post(
+          '/api/conversations/${widget.customerId}/reply',
+          body: {'text': text});
       _textCtrl.clear();
       setState(() => _paused = true); // replying pauses the bot server-side
       await _load(quiet: true);
     } on ApiException catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(e.message), backgroundColor: WabColors.danger));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Semantics(liveRegion: true, child: Text(e.message)),
+            backgroundColor: WabColors.danger));
       }
     } finally {
       if (mounted) setState(() => _sending = false);
@@ -103,7 +110,10 @@ class _ChatScreenState extends State<ChatScreen> {
     Map<String, dynamic>? summary;
     String? error;
     try {
-      final res = await context.read<Session>().api.getConversationSummary(widget.customerId);
+      final res = await context
+          .read<Session>()
+          .api
+          .getConversationSummary(widget.customerId);
       summary = res['summary'] as Map<String, dynamic>?;
     } on ApiException catch (e) {
       error = e.message;
@@ -134,7 +144,9 @@ class _ChatScreenState extends State<ChatScreen> {
                 Row(
                   children: [
                     StatusChip(
-                        summary['needs_attention'] == true ? 'failed' : 'active',
+                        summary['needs_attention'] == true
+                            ? 'failed'
+                            : 'active',
                         label: '${summary['headline']}'),
                   ],
                 ),
@@ -149,7 +161,9 @@ class _ChatScreenState extends State<ChatScreen> {
                     ),
                     child: Text(
                         'Mentioned: ${(summary['attention_keywords'] as List? ?? []).join(', ')}',
-                        style: const TextStyle(color: WabColors.danger, fontWeight: FontWeight.w600)),
+                        style: const TextStyle(
+                            color: WabColors.danger,
+                            fontWeight: FontWeight.w600)),
                   ),
                 ],
                 const SizedBox(height: 16),
@@ -161,9 +175,12 @@ class _ChatScreenState extends State<ChatScreen> {
                       children: [
                         const Padding(
                           padding: EdgeInsets.only(top: 6, right: 8),
-                          child: Icon(Icons.circle, size: 5, color: WabColors.muted2),
+                          child: Icon(Icons.circle,
+                              size: 5, color: WabColors.muted2),
                         ),
-                        Expanded(child: Text('$b', style: const TextStyle(height: 1.4))),
+                        Expanded(
+                            child: Text('$b',
+                                style: const TextStyle(height: 1.4))),
                       ],
                     ),
                   ),
@@ -185,22 +202,27 @@ class _ChatScreenState extends State<ChatScreen> {
       setState(() => _paused = !_paused);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(_paused
-                ? 'Bot paused — you\'re handling this chat'
-                : 'Bot resumed for this customer')));
+            content: Semantics(
+                liveRegion: true,
+                child: Text(_paused
+                    ? 'Bot paused — you\'re handling this chat'
+                    : 'Bot resumed for this customer'))));
       }
     } on ApiException catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(e.message), backgroundColor: WabColors.danger));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Semantics(liveRegion: true, child: Text(e.message)),
+            backgroundColor: WabColors.danger));
       }
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final name =
-        widget.customerName ?? _customer?['display_name'] ?? _customer?['whatsapp_number'] ?? 'Chat';
+    final name = widget.customerName ??
+        _customer?['display_name'] ??
+        _customer?['whatsapp_number'] ??
+        'Chat';
     return Scaffold(
       backgroundColor: WabColors.bg2,
       appBar: AppBar(
@@ -213,8 +235,10 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
           TextButton.icon(
             onPressed: _togglePause,
-            icon: Icon(_paused ? Icons.smart_toy_outlined : Icons.front_hand_rounded,
-                size: 18, color: _paused ? WabColors.accentInk : WabColors.warning),
+            icon: Icon(
+                _paused ? Icons.smart_toy_outlined : Icons.front_hand_rounded,
+                size: 18,
+                color: _paused ? WabColors.accentInk : WabColors.warning),
             label: Text(_paused ? 'Resume bot' : 'Take over',
                 style: TextStyle(
                     color: _paused ? WabColors.accentInk : WabColors.warning,
@@ -229,9 +253,12 @@ class _ChatScreenState extends State<ChatScreen> {
               width: double.infinity,
               color: WabColors.warning.withValues(alpha: 0.1),
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: const Text('Bot paused — the customer only hears from you.',
+              child: const Text(
+                  'Bot paused — the customer only hears from you.',
                   style: TextStyle(
-                      color: WabColors.warning, fontSize: 13, fontWeight: FontWeight.w600)),
+                      color: WabColors.warning,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600)),
             ),
           Expanded(
             child: ListView.builder(
@@ -241,33 +268,39 @@ class _ChatScreenState extends State<ChatScreen> {
               itemBuilder: (_, i) {
                 final m = _messages[i];
                 final out = m['direction'] == 'outbound';
-                return Align(
-                  alignment: out ? Alignment.centerRight : Alignment.centerLeft,
-                  child: Container(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                    constraints: BoxConstraints(
-                        maxWidth: MediaQuery.of(context).size.width * 0.78),
-                    decoration: BoxDecoration(
-                      color: out ? const Color(0xFFD9FDD3) : Colors.white,
-                      borderRadius: BorderRadius.only(
-                        topLeft: const Radius.circular(14),
-                        topRight: const Radius.circular(14),
-                        bottomLeft: Radius.circular(out ? 14 : 4),
-                        bottomRight: Radius.circular(out ? 4 : 14),
+                return Semantics(
+                  label: '${out ? 'You' : 'Customer'}: ${m['content'] ?? ''}',
+                  child: Align(
+                    alignment:
+                        out ? Alignment.centerRight : Alignment.centerLeft,
+                    child: Container(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 10),
+                      constraints: BoxConstraints(
+                          maxWidth: MediaQuery.of(context).size.width * 0.78),
+                      decoration: BoxDecoration(
+                        color: out ? const Color(0xFFD9FDD3) : Colors.white,
+                        borderRadius: BorderRadius.only(
+                          topLeft: const Radius.circular(14),
+                          topRight: const Radius.circular(14),
+                          bottomLeft: Radius.circular(out ? 14 : 4),
+                          bottomRight: Radius.circular(out ? 4 : 14),
+                        ),
+                        border: Border.all(color: WabColors.line),
                       ),
-                      border: Border.all(color: WabColors.line),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text('${m['content'] ?? ''}',
-                            style: const TextStyle(fontSize: 15, height: 1.35)),
-                        const SizedBox(height: 3),
-                        Text(timeAgo(m['created_at']),
-                            style: const TextStyle(
-                                fontSize: 11, color: WabColors.muted2)),
-                      ],
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text('${m['content'] ?? ''}',
+                              style:
+                                  const TextStyle(fontSize: 15, height: 1.35)),
+                          const SizedBox(height: 3),
+                          Text(timeAgo(m['created_at']),
+                              style: const TextStyle(
+                                  fontSize: 11, color: WabColors.muted)),
+                        ],
+                      ),
                     ),
                   ),
                 );
@@ -287,6 +320,7 @@ class _ChatScreenState extends State<ChatScreen> {
                       maxLines: 4,
                       textCapitalization: TextCapitalization.sentences,
                       decoration: const InputDecoration(
+                        labelText: 'Reply',
                         hintText: 'Reply as the shop…',
                         contentPadding:
                             EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -296,12 +330,15 @@ class _ChatScreenState extends State<ChatScreen> {
                   ),
                   const SizedBox(width: 8),
                   IconButton.filled(
+                    tooltip: 'Send message',
                     onPressed: _sending ? null : _send,
                     style: IconButton.styleFrom(
-                        backgroundColor: WabColors.accent, minimumSize: const Size(48, 48)),
+                        backgroundColor: WabColors.accent,
+                        minimumSize: const Size(48, 48)),
                     icon: _sending
                         ? const SizedBox(
-                            width: 18, height: 18,
+                            width: 18,
+                            height: 18,
                             child: CircularProgressIndicator(
                                 strokeWidth: 2, color: Colors.white))
                         : const Icon(Icons.send_rounded, color: Colors.white),

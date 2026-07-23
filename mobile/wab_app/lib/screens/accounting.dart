@@ -81,60 +81,84 @@ class _AccountingScreenState extends State<AccountingScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Payouts & settlement')),
       body: _loading
-          ? const Center(child: CircularProgressIndicator(color: WabColors.accent))
+          ? const Center(
+              child: CircularProgressIndicator(color: WabColors.accent))
           : _error != null
               ? ErrorRetry(message: _error!, onRetry: _load)
               : RefreshIndicator(
                   onRefresh: _load,
                   color: WabColors.accent,
-                  child: ListView(
+                  child: CustomScrollView(
                     physics: const AlwaysScrollableScrollPhysics(),
-                    padding: const EdgeInsets.all(16),
-                    children: [
-                      _balanceCard(),
-                      const SizedBox(height: 16),
-                      if (_unmatchedCount > 0) ...[
-                        _unmatchedBanner(),
-                        const SizedBox(height: 16),
-                      ],
-                      _sectionTitle('Daily settlement report'),
-                      const SizedBox(height: 8),
-                      _dailyReportCard(),
-                      const SizedBox(height: 24),
-                      _sectionTitle('Payout history'),
-                      const SizedBox(height: 8),
-                      if (_payouts.isEmpty)
-                        const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 16),
-                          child: EmptyState(
-                              icon: Icons.account_balance_wallet_rounded,
-                              title: 'No payouts recorded yet'),
+                    slivers: [
+                      SliverPadding(
+                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                        sliver: SliverToBoxAdapter(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              _balanceCard(),
+                              const SizedBox(height: 16),
+                              if (_unmatchedCount > 0) ...[
+                                _unmatchedBanner(),
+                                const SizedBox(height: 16),
+                              ],
+                              _sectionTitle('Daily settlement report'),
+                              const SizedBox(height: 8),
+                              _dailyReportCard(),
+                              const SizedBox(height: 24),
+                              _sectionTitle('Payout history'),
+                              const SizedBox(height: 8),
+                              if (_payouts.isEmpty)
+                                const Padding(
+                                  padding: EdgeInsets.symmetric(vertical: 16),
+                                  child: EmptyState(
+                                      icon:
+                                          Icons.account_balance_wallet_rounded,
+                                      title: 'No payouts recorded yet'),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      if (_payouts.isNotEmpty)
+                        SliverPadding(
+                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                          sliver: SliverList.builder(
+                            itemCount: _payouts.length,
+                            itemBuilder: (context, index) => _payoutTile(
+                                _payouts[index] as Map<String, dynamic>),
+                          ),
                         )
                       else
-                        for (final p in _payouts) _payoutTile(p as Map<String, dynamic>),
+                        const SliverToBoxAdapter(child: SizedBox(height: 16)),
                     ],
                   ),
                 ),
     );
   }
 
-  Widget _sectionTitle(String t) =>
-      Text(t, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800));
+  Widget _sectionTitle(String t) => Text(t,
+      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800));
 
   Widget _balanceCard() {
     final b = _balance ?? {};
     return Container(
-      decoration: BoxDecoration(color: WabColors.ink, borderRadius: BorderRadius.circular(20)),
+      decoration: BoxDecoration(
+          color: WabColors.ink, borderRadius: BorderRadius.circular(20)),
       padding: const EdgeInsets.all(20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text('Owed to you',
-              style: TextStyle(color: Color(0xB3FFFFFF), fontWeight: FontWeight.w600)),
+              style: TextStyle(
+                  color: Color(0xB3FFFFFF), fontWeight: FontWeight.w600)),
           const SizedBox(height: 6),
           Text(ghs(b['balance_ghs'] ?? 0),
               style: const TextStyle(
-                  color: WabColors.gold, fontSize: 32, fontWeight: FontWeight.w800)),
+                  color: WabColors.gold,
+                  fontSize: 32,
+                  fontWeight: FontWeight.w800)),
           const SizedBox(height: 16),
           Row(
             children: [
@@ -156,8 +180,11 @@ class _AccountingScreenState extends State<AccountingScreen> {
         children: [
           Text(value,
               style: const TextStyle(
-                  color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16)),
-          Text(label, style: const TextStyle(color: Color(0xB3FFFFFF), fontSize: 12)),
+                  color: Colors.white,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 16)),
+          Text(label,
+              style: const TextStyle(color: Color(0xB3FFFFFF), fontSize: 12)),
         ],
       );
 
@@ -165,7 +192,8 @@ class _AccountingScreenState extends State<AccountingScreen> {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-          color: WabColors.warning.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(14)),
+          color: WabColors.warning.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(14)),
       child: Row(
         children: [
           const Icon(Icons.warning_amber_rounded, color: WabColors.warning),
@@ -173,7 +201,8 @@ class _AccountingScreenState extends State<AccountingScreen> {
           Expanded(
             child: Text(
                 '$_unmatchedCount paid order(s) have no matching gateway record — worth a manual check.',
-                style: const TextStyle(color: WabColors.warning, fontWeight: FontWeight.w600)),
+                style: const TextStyle(
+                    color: WabColors.warning, fontWeight: FontWeight.w600)),
           ),
         ],
       ),
@@ -182,7 +211,8 @@ class _AccountingScreenState extends State<AccountingScreen> {
 
   Widget _dailyReportCard() {
     final r = _dailyReport ?? {};
-    final isToday = DateFormat('yyyy-MM-dd').format(DateTime.now()) == _reportDateParam;
+    final isToday =
+        DateFormat('yyyy-MM-dd').format(DateTime.now()) == _reportDateParam;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -192,7 +222,10 @@ class _AccountingScreenState extends State<AccountingScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(isToday ? 'Today' : DateFormat('d MMM yyyy').format(_reportDate),
+                Text(
+                    isToday
+                        ? 'Today'
+                        : DateFormat('d MMM yyyy').format(_reportDate),
                     style: const TextStyle(fontWeight: FontWeight.w700)),
                 TextButton.icon(
                   onPressed: _pickDate,
@@ -228,7 +261,8 @@ class _AccountingScreenState extends State<AccountingScreen> {
                   color: bold ? WabColors.ink : WabColors.muted,
                   fontWeight: bold ? FontWeight.w800 : FontWeight.w500)),
           Text(value,
-              style: TextStyle(fontWeight: bold ? FontWeight.w800 : FontWeight.w600)),
+              style: TextStyle(
+                  fontWeight: bold ? FontWeight.w800 : FontWeight.w600)),
         ],
       ),
     );
@@ -241,7 +275,8 @@ class _AccountingScreenState extends State<AccountingScreen> {
       margin: const EdgeInsets.only(bottom: 10),
       child: ListTile(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        title: Text(ghs(p['amount_ghs']), style: const TextStyle(fontWeight: FontWeight.w700)),
+        title: Text(ghs(p['amount_ghs']),
+            style: const TextStyle(fontWeight: FontWeight.w700)),
         subtitle: Text(
             '${auto ? 'Automatic' : 'Manual'} · ${p['momo_number'] ?? ''} · ${shortDate(p['created_at'])}',
             style: const TextStyle(color: WabColors.muted, fontSize: 12)),

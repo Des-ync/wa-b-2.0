@@ -16,7 +16,8 @@ class OnboardingChecklistScreen extends StatefulWidget {
   const OnboardingChecklistScreen({super.key});
 
   @override
-  State<OnboardingChecklistScreen> createState() => _OnboardingChecklistScreenState();
+  State<OnboardingChecklistScreen> createState() =>
+      _OnboardingChecklistScreenState();
 }
 
 class _OnboardingChecklistScreenState extends State<OnboardingChecklistScreen> {
@@ -59,7 +60,8 @@ class _OnboardingChecklistScreenState extends State<OnboardingChecklistScreen> {
   }
 
   Future<void> _editProfile() async {
-    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsScreen()));
+    await Navigator.of(context)
+        .push(MaterialPageRoute(builder: (_) => const SettingsScreen()));
     _load();
   }
 
@@ -69,14 +71,18 @@ class _OnboardingChecklistScreenState extends State<OnboardingChecklistScreen> {
     try {
       await session.api.sendOnboardingTestMessage(session.businessId!);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Test message sent — check your shop\'s WhatsApp ✓')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Semantics(
+                liveRegion: true,
+                child: const Text(
+                    'Test message sent — check your shop\'s WhatsApp ✓'))));
       }
       _load();
     } on ApiException catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(e.message), backgroundColor: WabColors.danger));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Semantics(liveRegion: true, child: Text(e.message)),
+            backgroundColor: WabColors.danger));
       }
     } finally {
       if (mounted) setState(() => _busyAction = null);
@@ -90,13 +96,17 @@ class _OnboardingChecklistScreenState extends State<OnboardingChecklistScreen> {
       final res = await session.api.loadSampleCatalog(session.businessId!);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('${res['products_added'] ?? 0} sample products added ✓')));
+            content: Semantics(
+                liveRegion: true,
+                child: Text(
+                    '${res['products_added'] ?? 0} sample products added ✓'))));
       }
       _load();
     } on ApiException catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(e.message), backgroundColor: WabColors.danger));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Semantics(liveRegion: true, child: Text(e.message)),
+            backgroundColor: WabColors.danger));
       }
     } finally {
       if (mounted) setState(() => _busyAction = null);
@@ -121,14 +131,20 @@ class _OnboardingChecklistScreenState extends State<OnboardingChecklistScreen> {
       case 'payment_provider':
         return OutlinedButton(
           onPressed: _editProfile,
-          child: Text(key == 'payment_provider' ? 'Add payout details' : 'Edit business profile'),
+          child: Text(key == 'payment_provider'
+              ? 'Add payout details'
+              : 'Edit business profile'),
         );
       case 'first_products':
         return OutlinedButton(
           onPressed: busy ? null : _loadSampleCatalog,
           child: busy
-              ? const SizedBox(
-                  width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+              ? Semantics(
+                  label: 'Loading sample catalog',
+                  child: const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2)))
               : const Text('Load a sample catalog'),
         );
       case 'test_message':
@@ -138,7 +154,8 @@ class _OnboardingChecklistScreenState extends State<OnboardingChecklistScreen> {
               ? const SizedBox(
                   width: 16,
                   height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: Colors.white))
               : const Icon(Icons.send_rounded, size: 18),
           label: const Text('Test my shop'),
         );
@@ -152,7 +169,8 @@ class _OnboardingChecklistScreenState extends State<OnboardingChecklistScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Setup checklist')),
       body: _loading
-          ? const Center(child: CircularProgressIndicator(color: WabColors.accent))
+          ? const Center(
+              child: CircularProgressIndicator(color: WabColors.accent))
           : _error != null
               ? ErrorRetry(message: _error!, onRetry: _load)
               : RefreshIndicator(
@@ -183,14 +201,20 @@ class _OnboardingChecklistScreenState extends State<OnboardingChecklistScreen> {
     final percent = ((_status?['percent'] ?? 0) as num) / 100;
     final allComplete = _status?['all_complete'] == true;
     return Container(
-      decoration: BoxDecoration(color: WabColors.ink, borderRadius: BorderRadius.circular(20)),
+      decoration: BoxDecoration(
+          color: WabColors.ink, borderRadius: BorderRadius.circular(20)),
       padding: const EdgeInsets.all(20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(allComplete ? 'You\'re all set 🎉' : 'Finish setting up your shop',
+          Text(
+              allComplete
+                  ? 'You\'re all set 🎉'
+                  : 'Finish setting up your shop',
               style: const TextStyle(
-                  color: Colors.white, fontSize: 20, fontWeight: FontWeight.w800)),
+                  color: Colors.white,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800)),
           const SizedBox(height: 4),
           Text('$completed of $total steps complete',
               style: const TextStyle(color: Color(0xB3FFFFFF))),
@@ -220,7 +244,9 @@ class _OnboardingChecklistScreenState extends State<OnboardingChecklistScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Icon(
-              complete ? Icons.check_circle_rounded : _iconFor('${step['key']}'),
+              complete
+                  ? Icons.check_circle_rounded
+                  : _iconFor('${step['key']}'),
               color: complete ? WabColors.accentInk : WabColors.muted2,
             ),
             const SizedBox(width: 14),
@@ -234,20 +260,26 @@ class _OnboardingChecklistScreenState extends State<OnboardingChecklistScreen> {
                         child: Text('${step['label']}',
                             style: TextStyle(
                                 fontWeight: FontWeight.w700,
-                                decoration: complete ? TextDecoration.lineThrough : null,
-                                color: complete ? WabColors.muted : WabColors.ink)),
+                                decoration: complete
+                                    ? TextDecoration.lineThrough
+                                    : null,
+                                color: complete
+                                    ? WabColors.muted
+                                    : WabColors.ink)),
                       ),
                       if (optional)
                         const Padding(
                           padding: EdgeInsets.only(left: 6),
                           child: Text('optional',
-                              style: TextStyle(color: WabColors.muted2, fontSize: 11)),
+                              style: TextStyle(
+                                  color: WabColors.muted, fontSize: 11)),
                         ),
                     ],
                   ),
                   const SizedBox(height: 4),
                   Text('${step['description']}',
-                      style: const TextStyle(color: WabColors.muted, fontSize: 13, height: 1.35)),
+                      style: const TextStyle(
+                          color: WabColors.muted, fontSize: 13, height: 1.35)),
                   if (action != null) ...[
                     const SizedBox(height: 12),
                     action,
@@ -267,7 +299,8 @@ class _OnboardingChecklistScreenState extends State<OnboardingChecklistScreen> {
     final waStatus = '${wa['status'] ?? 'not_connected'}';
     final waLabel = switch (waStatus) {
       'healthy' => 'Receiving messages normally',
-      'no_inbound_received' => 'Connected, but no messages received yet — check your Meta webhook setup',
+      'no_inbound_received' =>
+        'Connected, but no messages received yet — check your Meta webhook setup',
       'unknown' => 'Just connected — give it a little time',
       _ => 'Not connected yet',
     };
@@ -282,12 +315,18 @@ class _OnboardingChecklistScreenState extends State<OnboardingChecklistScreen> {
             const SizedBox(height: 12),
             Row(
               children: [
-                StatusChip(waStatus == 'healthy' ? 'active' : waStatus == 'not_connected' ? 'failed' : 'pending',
+                StatusChip(
+                    waStatus == 'healthy'
+                        ? 'active'
+                        : waStatus == 'not_connected'
+                            ? 'failed'
+                            : 'pending',
                     label: 'WhatsApp'),
                 const SizedBox(width: 8),
                 Expanded(
                     child: Text(waLabel,
-                        style: const TextStyle(color: WabColors.muted, fontSize: 13))),
+                        style: const TextStyle(
+                            color: WabColors.muted, fontSize: 13))),
               ],
             ),
             const SizedBox(height: 10),
@@ -297,7 +336,8 @@ class _OnboardingChecklistScreenState extends State<OnboardingChecklistScreen> {
                     label: 'Paystack (${ps['mode'] ?? 'unconfigured'})'),
                 const SizedBox(width: 8),
                 const Expanded(
-                  child: Text('Shared across every shop on the platform — nothing to set up per shop.',
+                  child: Text(
+                      'Shared across every shop on the platform — nothing to set up per shop.',
                       style: TextStyle(color: WabColors.muted, fontSize: 13)),
                 ),
               ],

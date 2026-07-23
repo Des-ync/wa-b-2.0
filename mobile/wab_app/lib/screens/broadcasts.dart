@@ -195,13 +195,16 @@ class _ComposeSheetState extends State<_ComposeSheet> {
       if (mounted) {
         Navigator.pop(context, true);
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(
-                'Broadcast queued to ${res['target_count']} customer(s)')));
+            content: Semantics(
+                liveRegion: true,
+                child: Text(
+                    'Broadcast queued to ${res['target_count']} customer(s)'))));
       }
     } on ApiException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(e.message), backgroundColor: WabColors.danger));
+            content: Semantics(liveRegion: true, child: Text(e.message)),
+            backgroundColor: WabColors.danger));
       }
     } finally {
       if (mounted) setState(() => _sending = false);
@@ -225,7 +228,7 @@ class _ComposeSheetState extends State<_ComposeSheet> {
                 style: TextStyle(
                     fontWeight: FontWeight.w700,
                     fontSize: 13,
-                    color: WabColors.muted2)),
+                    color: WabColors.muted)),
             const SizedBox(height: 8),
             Wrap(
               spacing: 8,
@@ -252,6 +255,7 @@ class _ComposeSheetState extends State<_ComposeSheet> {
               maxLength: 1024,
               textCapitalization: TextCapitalization.sentences,
               decoration: const InputDecoration(
+                  labelText: 'Message',
                   hintText:
                       'e.g. Fresh stock just arrived! Reply MENU to see what\'s new 🎉'),
             ),
@@ -260,7 +264,7 @@ class _ComposeSheetState extends State<_ComposeSheet> {
                 style: TextStyle(
                     fontWeight: FontWeight.w700,
                     fontSize: 13,
-                    color: WabColors.muted2)),
+                    color: WabColors.muted)),
             const SizedBox(height: 8),
             Wrap(
               spacing: 8,
@@ -308,7 +312,7 @@ class _ComposeSheetState extends State<_ComposeSheet> {
             const SizedBox(height: 10),
             const Text(
                 'Only customers who haven\'t opted out are ever included. Sends are rate-limited in the background.',
-                style: TextStyle(color: WabColors.muted2, fontSize: 12)),
+                style: TextStyle(color: WabColors.muted, fontSize: 12)),
             const SizedBox(height: 16),
             FilledButton(
               onPressed: _sending ? null : _send,
