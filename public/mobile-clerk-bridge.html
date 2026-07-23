@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Sign in · WA-B Solutions</title>
+<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png" />
+<link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16.png" />
+<link rel="apple-touch-icon" sizes="180x180" href="assets/favicon-180.png" />
+<link rel="stylesheet" href="styles.css" />
+<script
+  async
+  crossorigin="anonymous"
+  data-clerk-publishable-key="pk_live_Y2xlcmsuc2tlcy50ZWNoJA"
+  src="https://clerk.skes.tech/npm/@clerk/clerk-js@5/dist/clerk.browser.js"
+  type="text/javascript"
+></script>
+<style>
+  /*
+    This page only ever runs inside the mobile app's in-app browser tab
+    (ASWebAuthenticationSession on iOS / Chrome Custom Tabs on Android),
+    opened by flutter_web_auth_2 during "Continue with Clerk" login. It
+    has no nav/footer chrome — the user sees it for a few seconds, either
+    already signed in (straight through) or signing in right here, then
+    it hands a Clerk session token back to the app via a wabapp:// redirect
+    and the tab closes itself automatically.
+  */
+  .auth-shell {
+    min-height: 100dvh;
+    display: grid;
+    place-items: center;
+    padding: clamp(32px, 6vw, 64px) var(--gutter);
+  }
+  .auth-box { width: 100%; max-width: 420px; text-align: center; }
+  .auth-head { margin-bottom: 24px; }
+  .auth-head h1 { font-size: 22px; letter-spacing: -0.02em; font-weight: 600; }
+  .auth-head p { color: var(--muted); font-size: 14.5px; margin: 8px 0 0; }
+  #clerk-signin { display: grid; justify-content: center; min-height: 380px; text-align: left; }
+  .auth-skeleton {
+    width: 100%;
+    max-width: 400px;
+    height: 380px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-lg);
+    background: linear-gradient(100deg, var(--bg-2) 40%, var(--paper) 50%, var(--bg-2) 60%);
+    background-size: 200% 100%;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .auth-skeleton { animation: authShimmer 1.4s linear infinite; }
+  }
+  @keyframes authShimmer {
+    from { background-position: 120% 0; }
+    to { background-position: -80% 0; }
+  }
+  .auth-error { color: var(--danger); font-size: 14px; margin-top: 16px; }
+</style>
+</head>
+<body>
+<main class="auth-shell">
+  <div class="auth-box">
+    <div class="auth-head">
+      <h1>Signing in to WA-B</h1>
+      <p id="auth-status">Connecting…</p>
+    </div>
+    <div id="clerk-signin"><div class="auth-skeleton" aria-hidden="true"></div></div>
+    <p class="auth-error" id="auth-error" hidden></p>
+  </div>
+</main>
+
+<script src="clerk-theme.js"></script>
+<script>
+(async () => {
+  const statusEl = document.getElementById('auth-status');
+  const errorEl = document.getElementById('auth-error');
+  const CALLBACK_SCHEME = 'wabapp://clerk-callback';
+
+  function showError(message) {
+    statusEl.textContent = 'Something went wrong.';
+    errorEl.textContent = message;
+    errorEl.hidden = false;
+  }
+
+  async function handOff() {
+    try {
+      const token = await window.Clerk.session.getToken();
+      if (!token) throw new Error('no session token');
+      statusEl.textContent = 'Signed in — returning to the app…';
+      window.location.replace(`${CALLBACK_SCHEME}?token=${encodeURIComponent(token)}`);
+    } catch (err) {
+      showError('Could not complete sign-in. Close this and try again.');
+    }
+  }
+
+  try {
+    await waitForClerk();
+    await window.Clerk.load();
+  } catch (err) {
+    showError('Could not reach the sign-in service. Check your connection and try again.');
+    return;
+  }
+
+  if (window.Clerk.user) {
+    await handOff();
+    return;
+  }
+
+  const el = document.getElementById('clerk-signin');
+  el.innerHTML = '';
+  statusEl.textContent = 'Sign in with your WA-B account.';
+  window.Clerk.mountSignIn(el, { appearance: window.WAB_CLERK_APPEARANCE });
+  window.Clerk.addListener(({ user }) => {
+    if (user) handOff();
+  });
+})();
+</script>
+</body>
+</html>

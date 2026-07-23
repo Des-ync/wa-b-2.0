@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:passkeys/exceptions.dart';
 import 'package:provider/provider.dart';
 
 import '../api/client.dart';
@@ -43,7 +45,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   void _toast(String msg, {bool error = false}) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(msg),
+      content: Semantics(liveRegion: true, child: Text(msg)),
       backgroundColor: error ? WabColors.danger : WabColors.ink,
     ));
   }
@@ -79,6 +81,52 @@ class _LoginScreenState extends State<LoginScreen> {
       // _Gate rebuilds into the main shell.
     } on ApiException catch (e) {
       _toast(e.message, error: true);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _continueWithClerk() async {
+    setState(() => _busy = true);
+    try {
+      await context.read<Session>().loginViaClerk();
+      // _Gate rebuilds into the main shell.
+    } on ApiException catch (e) {
+      if (e.code == 'link_required') {
+        _toast('Finish setup on the web dashboard first, then log in here.',
+            error: true);
+      } else {
+        _toast(e.message, error: true);
+      }
+    } on PlatformException catch (e) {
+      // 'CANCELED' means the merchant just closed the browser tab — no
+      // need to scold them for it.
+      if (e.code != 'CANCELED') {
+        _toast('Could not complete sign-in with Clerk.', error: true);
+      }
+    } catch (_) {
+      _toast('Could not complete sign-in with Clerk.', error: true);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _continueWithPasskey() async {
+    setState(() => _busy = true);
+    try {
+      await context.read<Session>().loginViaPasskey();
+      // _Gate rebuilds into the main shell.
+    } on PasskeyAuthCancelledException {
+      // Backed out of the OS sheet — no need to scold them for it.
+    } on NoCredentialsAvailableException {
+      _toast('No passkey found for this device. Use another sign-in method.',
+          error: true);
+    } on DomainNotAssociatedException {
+      _toast('Passkeys aren\'t set up for this app yet.', error: true);
+    } on ApiException catch (e) {
+      _toast(e.message, error: true);
+    } catch (_) {
+      _toast('Could not sign in with a passkey.', error: true);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -214,6 +262,32 @@ class _LoginScreenState extends State<LoginScreen> {
                           child: CircularProgressIndicator(
                               strokeWidth: 2.5, color: Colors.white))
                       : const Text('Send login code'),
+                ),
+                const SizedBox(height: 20),
+                Row(
+                  children: [
+                    const Expanded(child: Divider(color: WabColors.line)),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      child: Text('or',
+                          style: TextStyle(
+                              color: WabColors.muted.withValues(alpha: 0.8),
+                              fontSize: 13)),
+                    ),
+                    const Expanded(child: Divider(color: WabColors.line)),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                OutlinedButton.icon(
+                  onPressed: _busy ? null : _continueWithClerk,
+                  icon: const Icon(Icons.link_rounded, size: 18),
+                  label: const Text('Continue with Clerk'),
+                ),
+                const SizedBox(height: 12),
+                OutlinedButton.icon(
+                  onPressed: _busy ? null : _continueWithPasskey,
+                  icon: const Icon(Icons.fingerprint_rounded, size: 18),
+                  label: const Text('Sign in with a passkey'),
                 ),
               ] else ...[
                 TextField(

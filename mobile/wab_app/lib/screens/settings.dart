@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:passkeys/exceptions.dart';
 import 'package:provider/provider.dart';
 
 import '../api/business_api.dart';
@@ -31,6 +32,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Map<String, dynamic>? _subscription;
   String? _error;
   bool _saving = false;
+  bool _settingUpPasskey = false;
 
   final _welcome = TextEditingController();
   final _supportPhone = TextEditingController();
@@ -203,6 +205,46 @@ class _SettingsScreenState extends State<SettingsScreen> {
       }
     } finally {
       if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _setUpPasskey() async {
+    setState(() => _settingUpPasskey = true);
+    try {
+      await context.read<Session>().registerPasskey();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Semantics(
+                liveRegion: true,
+                child: const Text('Passkey added for this device ✓'))));
+      }
+    } on PasskeyAuthCancelledException {
+      // Backed out of the OS sheet — nothing to report.
+    } on DomainNotAssociatedException {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Semantics(
+                liveRegion: true,
+                child: const Text('Passkeys aren\'t set up for this app yet.')),
+            backgroundColor: WabColors.danger));
+      }
+    } on ApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Semantics(liveRegion: true, child: Text(e.message)),
+            backgroundColor: WabColors.danger));
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Semantics(
+                liveRegion: true,
+                child:
+                    const Text('Could not set up a passkey on this device.')),
+            backgroundColor: WabColors.danger));
+      }
+    } finally {
+      if (mounted) setState(() => _settingUpPasskey = false);
     }
   }
 
@@ -405,6 +447,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       decoration: const InputDecoration(
                           labelText: 'Support phone',
                           hintText: 'Given out on "Talk to us"'),
+                    ),
+                    const SizedBox(height: 24),
+                    _sectionTitle('Security'),
+                    // Takes effect immediately — not part of the "Save
+                    // settings" form submit below.
+                    OutlinedButton.icon(
+                      onPressed: _settingUpPasskey ? null : _setUpPasskey,
+                      icon: _settingUpPasskey
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2.5, color: WabColors.ink))
+                          : const Icon(Icons.fingerprint_rounded, size: 18),
+                      label: const Text('Set up a passkey for this device'),
                     ),
                     const SizedBox(height: 28),
                     FilledButton(

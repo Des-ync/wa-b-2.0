@@ -1,8 +1,14 @@
 const crypto = require('crypto');
 const express = require('express');
+const {
+  generateRegistrationOptions,
+  verifyRegistrationResponse,
+  generateAuthenticationOptions,
+  verifyAuthenticationResponse
+} = require('@simplewebauthn/server');
 const logger = require('../utils/logger');
 const { query } = require('../config/database');
-const { verifyClerkSession, JWT_SHAPE_RE, requireAuth, issueKey, revokeKey } = require('../middleware/auth');
+const { verifyClerkSession, JWT_SHAPE_RE, requireAuth, requirePermission, issueKey, revokeKey } = require('../middleware/auth');
 const { normalizeGhanaPhone, generateOtp, sanitizeBusiness } = require('../utils/helpers');
 const wa = require('../services/whatsapp.service');
 
@@ -13,6 +19,17 @@ const OTP_RESEND_COOLDOWN_SECONDS = 60;
 const OTP_MAX_ATTEMPTS = 5;
 
 const hashOtp = code => crypto.createHash('sha256').update(String(code), 'utf8').digest('hex');
+
+// See .env.example for what these mean and why Android/iOS both need real
+// deployment credentials (an Apple Developer Team ID; an Android release
+// signing cert) this project doesn't have yet before native passkeys work.
+const WEBAUTHN_RP_ID = process.env.WEBAUTHN_RP_ID || 'skes.tech';
+const WEBAUTHN_RP_NAME = process.env.WEBAUTHN_RP_NAME || 'WA-B';
+const WEBAUTHN_ORIGINS = (process.env.WEBAUTHN_ORIGINS || 'https://skes.tech')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean);
+const WEBAUTHN_CHALLENGE_TTL_MINUTES = 5;
 
 /**
  * Look up a business by whatsapp_number and gate it against the two ways a
@@ -355,6 +372,51 @@ router.post('/mobile/verify', async (req, res) => {
 });
 
 /**
+ * POST /api/auth/mobile/clerk-exchange
+ * Body: { clerk_session_token, device_name? }
+ * Alternative to the OTP flow above for a merchant who's already signed in
+ * with Clerk on the web: the app hands over a Clerk session token (obtained
+ * via an in-app-browser round trip to Clerk's hosted sign-in) instead of a
+ * WhatsApp code, and gets back the same tenant-scoped API key /mobile/verify
+ * issues. Reuses verifyClerkSession() as-is — no new Clerk logic, just a
+ * second way to reach issueKey().
+ */
+router.post('/mobile/clerk-exchange', async (req, res) => {
+  try {
+    const token = String(req.body?.clerk_session_token || '').trim();
+    if (!token || !JWT_SHAPE_RE.test(token)) {
+      return res.status(400).json({ success: false, error: 'Missing or invalid clerk_session_token' });
+    }
+
+    let business;
+    try {
+      ({ business } = await verifyClerkSession(token));
+    } catch (err) {
+      if (err.code === 'not_linked') {
+        return res.status(403).json({
+          success: false,
+          error: 'link_required',
+          message: 'Finish setting up your account on the web dashboard first, then log in here.'
+        });
+      }
+      return res.status(401).json({ success: false, error: 'Invalid or expired Clerk session' });
+    }
+
+    const deviceName = String(req.body?.device_name || 'device').slice(0, 80);
+    const key = await issueKey({
+      name: `mobile: ${deviceName}`,
+      businessId: business.id,
+      scope: 'tenant'
+    });
+
+    res.json({ success: true, api_key: key.plaintext, business: sanitize(business) });
+  } catch (err) {
+    logger.error('POST /auth/mobile/clerk-exchange failed: %s', err.message, { stack: err.stack });
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+/**
  * POST /api/auth/mobile/logout
  * Revokes the API key used to make this request (mobile sign-out).
  */
@@ -368,6 +430,261 @@ router.post('/mobile/logout', requireAuth('any'), async (req, res) => {
     res.json({ success: true, revoked });
   } catch (err) {
     logger.error('POST /auth/mobile/logout failed: %s', err.message, { stack: err.stack });
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+// =========================================================================
+// Mobile app login: native passkeys (WebAuthn), as an alternative to OTP.
+// Registration is "usernamed" (the merchant is already logged in, adding a
+// passkey to their own account); login is "usernameless" — the OS shows
+// whichever of the device's passkeys match our RP ID, so the server doesn't
+// know which business is signing in until the credential_id comes back.
+// =========================================================================
+
+/**
+ * Persist a one-time ceremony challenge. Opportunistically sweeps expired
+ * rows first — these have no natural upper bound the way business_link_otps
+ * does (one row per business), since every options call mints a fresh one.
+ */
+async function storeWebauthnChallenge(challenge, purpose, businessId = null) {
+  await query(`DELETE FROM webauthn_challenges WHERE expires_at <= NOW()`);
+  await query(
+    `INSERT INTO webauthn_challenges (business_id, challenge, purpose, expires_at)
+     VALUES ($1, $2, $3, NOW() + ($4 || ' minutes')::interval)`,
+    [businessId, challenge, purpose, String(WEBAUTHN_CHALLENGE_TTL_MINUTES)]
+  );
+}
+
+/**
+ * Atomically consume a challenge (delete-and-return in one statement, so two
+ * concurrent verify calls can't both succeed against the same challenge).
+ * Returns null if it's missing, expired, or for the wrong purpose — the
+ * caller treats that as "ceremony expired, start over."
+ */
+async function consumeWebauthnChallenge(challenge, purpose) {
+  const result = await query(
+    `DELETE FROM webauthn_challenges
+      WHERE challenge = $1 AND purpose = $2 AND expires_at > NOW()
+      RETURNING business_id`,
+    [challenge, purpose]
+  );
+  return result.rowCount > 0 ? result.rows[0] : null;
+}
+
+/**
+ * POST /api/auth/passkey/register/options
+ * Owner-only — same as issuing a new API key (POST /api/keys), which is
+ * exactly what this ends up doing: /passkey/login/verify later mints a key
+ * carrying whatever role gets stored alongside this credential. A read-only
+ * admin impersonation session or a restricted staff key (support/accountant/
+ * manager) must NOT be able to plant a passkey that later self-escalates —
+ * requirePermission('staff') is the same gate POST /api/keys uses, and
+ * blocks impersonation (role:'readonly' has no 'staff' capability) too.
+ */
+router.post('/passkey/register/options', requireAuth('any'), requirePermission('staff'), async (req, res) => {
+  try {
+    if (req.auth.scope !== 'tenant' || !req.auth.businessId) {
+      return res.status(403).json({ success: false, error: 'Passkeys are only available for a business account.' });
+    }
+    const businessId = req.auth.businessId;
+
+    const [bizResult, existing] = await Promise.all([
+      query('SELECT id, name, owner_name FROM businesses WHERE id = $1', [businessId]),
+      query('SELECT credential_id, transports FROM webauthn_credentials WHERE business_id = $1', [businessId])
+    ]);
+    const business = bizResult.rows[0];
+    if (!business) return res.status(404).json({ success: false, error: 'Business not found' });
+
+    const options = await generateRegistrationOptions({
+      rpName: WEBAUTHN_RP_NAME,
+      rpID: WEBAUTHN_RP_ID,
+      // Stable per-business handle (not secret — just needs to be a stable
+      // ID so a second passkey on another device is recognized as the same
+      // account), derived from the business's own UUID.
+      userID: Uint8Array.from(Buffer.from(String(business.id).replace(/-/g, ''), 'hex')),
+      userName: business.name || String(business.id),
+      userDisplayName: business.owner_name || business.name || 'WA-B merchant',
+      attestationType: 'none',
+      excludeCredentials: existing.rows.map(r => ({
+        id: r.credential_id,
+        transports: r.transports || undefined
+      })),
+      authenticatorSelection: { residentKey: 'required', userVerification: 'preferred' }
+    });
+
+    await storeWebauthnChallenge(options.challenge, 'register', businessId);
+    res.json({ success: true, options });
+  } catch (err) {
+    logger.error('POST /auth/passkey/register/options failed: %s', err.message, { stack: err.stack });
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+/**
+ * POST /api/auth/passkey/register/verify
+ * Body: { challenge, response, device_name? } — `challenge` is the exact
+ * options.challenge the app got back from /register/options; `response` is
+ * the platform's RegisterResponseType.toJson(). Same owner-only gate as
+ * /register/options — see the comment there.
+ */
+router.post('/passkey/register/verify', requireAuth('any'), requirePermission('staff'), async (req, res) => {
+  try {
+    if (req.auth.scope !== 'tenant' || !req.auth.businessId) {
+      return res.status(403).json({ success: false, error: 'Passkeys are only available for a business account.' });
+    }
+    const businessId = req.auth.businessId;
+    const challenge = String(req.body?.challenge || '');
+    const response = req.body?.response;
+    const deviceName = String(req.body?.device_name || 'device').slice(0, 80);
+    if (!challenge || !response) {
+      return res.status(400).json({ success: false, error: 'Missing challenge or response' });
+    }
+
+    const consumed = await consumeWebauthnChallenge(challenge, 'register');
+    if (!consumed || consumed.business_id !== businessId) {
+      return res.status(400).json({ success: false, error: 'This passkey setup request expired. Try again.' });
+    }
+
+    let verification;
+    try {
+      verification = await verifyRegistrationResponse({
+        response,
+        expectedChallenge: challenge,
+        expectedOrigin: WEBAUTHN_ORIGINS,
+        expectedRPID: WEBAUTHN_RP_ID
+      });
+    } catch (err) {
+      logger.warn('passkey registration verification threw: %s', err.message);
+      return res.status(400).json({ success: false, error: 'Could not verify that passkey. Try again.' });
+    }
+    if (!verification.verified || !verification.registrationInfo) {
+      return res.status(400).json({ success: false, error: 'Could not verify that passkey. Try again.' });
+    }
+
+    const { credential, credentialDeviceType, credentialBackedUp } = verification.registrationInfo;
+    await query(
+      `INSERT INTO webauthn_credentials
+         (business_id, credential_id, public_key, counter, transports, device_type, backed_up, role, device_name)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [
+        businessId,
+        credential.id,
+        Buffer.from(credential.publicKey),
+        credential.counter,
+        credential.transports && credential.transports.length ? credential.transports : null,
+        credentialDeviceType,
+        credentialBackedUp,
+        // requirePermission('staff') above means this is always 'owner'
+        // today — stored explicitly rather than hardcoded so a future
+        // change to who can register a passkey doesn't silently grant
+        // more than was actually authorized at registration time.
+        req.auth.role || 'owner',
+        deviceName
+      ]
+    );
+
+    res.json({ success: true });
+  } catch (err) {
+    logger.error('POST /auth/passkey/register/verify failed: %s', err.message, { stack: err.stack });
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+/**
+ * POST /api/auth/passkey/login/options
+ * No auth, no body — "usernameless" discoverable login: the OS shows
+ * whichever of the device's passkeys match WEBAUTHN_RP_ID.
+ */
+router.post('/passkey/login/options', async (req, res) => {
+  try {
+    const options = await generateAuthenticationOptions({
+      rpID: WEBAUTHN_RP_ID,
+      userVerification: 'preferred'
+    });
+    await storeWebauthnChallenge(options.challenge, 'login', null);
+    res.json({ success: true, options });
+  } catch (err) {
+    logger.error('POST /auth/passkey/login/options failed: %s', err.message, { stack: err.stack });
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+/**
+ * POST /api/auth/passkey/login/verify
+ * Body: { challenge, response, device_name? }. response.id identifies which
+ * stored credential (and so which business) is signing in — issues the
+ * same kind of tenant API key the OTP and Clerk-exchange flows do.
+ */
+router.post('/passkey/login/verify', async (req, res) => {
+  try {
+    const challenge = String(req.body?.challenge || '');
+    const response = req.body?.response;
+    const deviceName = String(req.body?.device_name || 'device').slice(0, 80);
+    if (!challenge || !response?.id) {
+      return res.status(400).json({ success: false, error: 'Missing challenge or response' });
+    }
+
+    const consumed = await consumeWebauthnChallenge(challenge, 'login');
+    if (!consumed) {
+      return res.status(400).json({ success: false, error: 'This sign-in request expired. Try again.' });
+    }
+
+    const credResult = await query('SELECT * FROM webauthn_credentials WHERE credential_id = $1', [response.id]);
+    const stored = credResult.rows[0];
+    if (!stored) {
+      return res.status(400).json({ success: false, error: 'That passkey is not recognized.' });
+    }
+
+    let verification;
+    try {
+      verification = await verifyAuthenticationResponse({
+        response,
+        expectedChallenge: challenge,
+        expectedOrigin: WEBAUTHN_ORIGINS,
+        expectedRPID: WEBAUTHN_RP_ID,
+        credential: {
+          id: stored.credential_id,
+          publicKey: new Uint8Array(stored.public_key),
+          counter: Number(stored.counter),
+          transports: stored.transports || undefined
+        }
+      });
+    } catch (err) {
+      logger.warn('passkey login verification threw: %s', err.message);
+      return res.status(400).json({ success: false, error: 'Could not verify that passkey.' });
+    }
+    if (!verification.verified) {
+      return res.status(400).json({ success: false, error: 'Could not verify that passkey.' });
+    }
+
+    const business = await (async () => {
+      await query('UPDATE webauthn_credentials SET counter = $1, last_used_at = NOW() WHERE id = $2', [
+        verification.authenticationInfo.newCounter,
+        stored.id
+      ]);
+      const bizResult = await query('SELECT * FROM businesses WHERE id = $1', [stored.business_id]);
+      return bizResult.rows[0];
+    })();
+    if (!business) {
+      return res.status(404).json({ success: false, error: 'Business not found' });
+    }
+
+    const key = await issueKey({
+      name: `mobile: ${deviceName}`,
+      businessId: business.id,
+      scope: 'tenant',
+      // The role this credential was actually granted at registration
+      // time (always 'owner' today, since registration is owner-only —
+      // see /register/verify) — never defaulted, so this key's privilege
+      // can't silently drift from what was authorized when the passkey
+      // was created.
+      role: stored.role
+    });
+
+    res.json({ success: true, api_key: key.plaintext, business: sanitize(business) });
+  } catch (err) {
+    logger.error('POST /auth/passkey/login/verify failed: %s', err.message, { stack: err.stack });
     res.status(500).json({ success: false, error: 'Internal server error' });
   }
 });

@@ -685,6 +685,60 @@ CREATE INDEX IF NOT EXISTS idx_device_tokens_business ON device_tokens(business_
 CREATE INDEX IF NOT EXISTS idx_device_tokens_scope ON device_tokens(scope);
 
 -- =========================================================================
+-- webauthn_credentials: passkeys a merchant has registered for mobile app
+-- login. One row per credential (a merchant can register more than one
+-- device/passkey). credential_id and public_key are exactly what
+-- @simplewebauthn/server needs to re-verify a signature; counter is the
+-- authenticator's signature counter, checked and updated on every login to
+-- catch a cloned authenticator.
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS webauthn_credentials (
+  id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  business_id     UUID NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  credential_id   TEXT NOT NULL UNIQUE,
+  public_key      BYTEA NOT NULL,
+  counter         BIGINT NOT NULL DEFAULT 0,
+  transports      TEXT[],
+  device_type     TEXT NOT NULL DEFAULT 'singleDevice' CHECK (device_type IN ('singleDevice', 'multiDevice')),
+  backed_up       BOOLEAN NOT NULL DEFAULT FALSE,
+  -- The role of the credential that was used to REGISTER this passkey
+  -- (registration is owner-only today, requirePermission('staff') in
+  -- auth.routes.js — see VALID_ROLES above). Logging in with this passkey
+  -- later issues a new key with THIS role, not a hardcoded one, so the
+  -- issued key's privilege always traces back to what was actually granted
+  -- at registration time rather than silently defaulting to 'owner'.
+  role            TEXT NOT NULL DEFAULT 'owner' CHECK (role IN ('owner', 'manager', 'support', 'accountant')),
+  device_name     TEXT,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_used_at    TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_webauthn_credentials_business ON webauthn_credentials(business_id);
+-- Upgrade path for the table as it shipped before the role column existed.
+ALTER TABLE webauthn_credentials ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'owner';
+ALTER TABLE webauthn_credentials DROP CONSTRAINT IF EXISTS webauthn_credentials_role_check;
+ALTER TABLE webauthn_credentials ADD CONSTRAINT webauthn_credentials_role_check
+  CHECK (role IN ('owner', 'manager', 'support', 'accountant'));
+
+-- =========================================================================
+-- webauthn_challenges: the one-time server-generated challenge for an
+-- in-flight passkey registration or login ceremony. Deleted the moment it's
+-- consumed (or once expired) — never reused, which is what stops a replayed
+-- assertion from verifying twice. business_id is NULL for a login challenge
+-- (passkey login is "usernameless": we don't know who's signing in until
+-- the credential_id comes back in the response) and set for a registration
+-- challenge (the merchant is already logged in when adding a passkey).
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS webauthn_challenges (
+  id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  business_id   UUID REFERENCES businesses(id) ON DELETE CASCADE,
+  challenge     TEXT NOT NULL UNIQUE,
+  purpose       TEXT NOT NULL CHECK (purpose IN ('register', 'login')),
+  expires_at    TIMESTAMPTZ NOT NULL,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_webauthn_challenges_expires ON webauthn_challenges(expires_at);
+
+-- =========================================================================
 -- dashboard_notifications: in-app notification center feed (separate from
 -- FCM mobile push — this is what the web dashboard's bell icon reads).
 -- =========================================================================

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../services/biometric_gate.dart';
 import '../state/session.dart';
 import '../theme.dart';
 import 'accounting.dart';
@@ -22,7 +23,8 @@ class MoreScreen extends StatelessWidget {
     final name = session.business?['name']?.toString() ?? '';
     final phone = session.business?['whatsapp_number']?.toString() ?? '';
 
-    Widget item(IconData icon, String title, String subtitle, Widget screen) {
+    Widget item(IconData icon, String title, String subtitle, Widget screen,
+        {bool requiresAuth = false}) {
       return Card(
         child: ListTile(
           shape:
@@ -43,8 +45,26 @@ class MoreScreen extends StatelessWidget {
               style: const TextStyle(color: WabColors.muted, fontSize: 13)),
           trailing:
               const Icon(Icons.chevron_right_rounded, color: WabColors.muted2),
-          onTap: () => Navigator.of(context)
-              .push(MaterialPageRoute(builder: (_) => screen)),
+          onTap: () async {
+            if (requiresAuth) {
+              final verified = await BiometricGate.authenticate(
+                  'Verify it\'s you to see your payouts and settlement details.');
+              if (!verified) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Semantics(
+                        liveRegion: true,
+                        child: const Text('Couldn\'t verify it\'s you.')),
+                    backgroundColor: WabColors.danger,
+                  ));
+                }
+                return;
+              }
+            }
+            if (!context.mounted) return;
+            Navigator.of(context)
+                .push(MaterialPageRoute(builder: (_) => screen));
+          },
         ),
       );
     }
@@ -89,7 +109,8 @@ class MoreScreen extends StatelessWidget {
               Icons.account_balance_wallet_rounded,
               'Payouts & settlement',
               'What you\'re owed, today\'s sales, payout history',
-              const AccountingScreen()),
+              const AccountingScreen(),
+              requiresAuth: true),
           const SizedBox(height: 10),
           item(Icons.people_alt_rounded, 'Customers',
               'Everyone who has chatted or ordered', const CustomersScreen()),

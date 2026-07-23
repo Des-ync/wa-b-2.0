@@ -191,6 +191,38 @@ app.get('/wa-b/storefront.html', async (req, res, next) => {
   }
 });
 
+// Native passkey domain association files. Both specs require these at the
+// true domain root (never under /wa-b, unlike everything else this app
+// serves) — Apple/Android won't look anywhere else.
+//
+// TODO(LIVE): TEAMID_PLACEHOLDER needs the real 10-character Apple Developer
+// Team ID once this project has an Apple Developer account (it doesn't yet —
+// see docs/MOBILE_SETUP.md). Never guess a real Team ID.
+app.get('/.well-known/apple-app-site-association', (req, res) => {
+  res.set('Content-Type', 'application/json');
+  res.json({
+    webcredentials: { apps: ['TEAMID_PLACEHOLDER.com.wab.wabApp'] }
+  });
+});
+// TODO(LIVE): sha256_cert_fingerprints needs the real SHA-256 fingerprint of
+// the app's RELEASE signing certificate (`keytool -list -v -keystore
+// <release>.jks`), which doesn't exist yet — the app currently only has an
+// auto-generated debug keystore that differs per machine and must never be
+// used here. Never guess a real fingerprint.
+app.get('/.well-known/assetlinks.json', (req, res) => {
+  res.set('Content-Type', 'application/json');
+  res.json([
+    {
+      relation: ['delegate_permission/common.handle_all_urls', 'delegate_permission/common.get_login_creds'],
+      target: {
+        namespace: 'android_app',
+        package_name: 'com.wab.wab_app',
+        sha256_cert_fingerprints: ['SHA256_CERT_FINGERPRINT_PLACEHOLDER']
+      }
+    }
+  ]);
+});
+
 // Marketing site (public/) — mounted at /wa-b so this app can live alongside
 // other projects on the same domain instead of owning the domain root.
 app.use('/wa-b', express.static(path.join(__dirname, '..', 'public')));
