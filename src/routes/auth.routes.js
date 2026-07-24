@@ -689,4 +689,56 @@ router.post('/passkey/login/verify', async (req, res) => {
   }
 });
 
+/**
+ * GET /api/auth/passkey
+ * List this business's registered passkeys for a "manage your passkeys" UI
+ * (web dashboard's Team tab, mirroring how it already lists API keys). Never
+ * returns credential_id/public_key/counter — nothing an attacker could use,
+ * just enough to show and let an owner revoke a device. Same owner-only gate
+ * as registration, since only an owner can add one in the first place.
+ */
+router.get('/passkey', requireAuth('any'), requirePermission('staff'), async (req, res) => {
+  try {
+    if (req.auth.scope !== 'tenant' || !req.auth.businessId) {
+      return res.status(403).json({ success: false, error: 'Passkeys are only available for a business account.' });
+    }
+    const result = await query(
+      `SELECT id, device_name, created_at, last_used_at
+       FROM webauthn_credentials
+       WHERE business_id = $1
+       ORDER BY created_at DESC`,
+      [req.auth.businessId]
+    );
+    res.json({ success: true, passkeys: result.rows });
+  } catch (err) {
+    logger.error('GET /auth/passkey failed: %s', err.message, { stack: err.stack });
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+/**
+ * DELETE /api/auth/passkey/:id
+ * Revoke one passkey. business_id is part of the WHERE clause (not just
+ * matched after the fact) so one tenant can never revoke another's
+ * credential by guessing/enumerating ids.
+ */
+router.delete('/passkey/:id', requireAuth('any'), requirePermission('staff'), async (req, res) => {
+  try {
+    if (req.auth.scope !== 'tenant' || !req.auth.businessId) {
+      return res.status(403).json({ success: false, error: 'Passkeys are only available for a business account.' });
+    }
+    const result = await query(
+      'DELETE FROM webauthn_credentials WHERE id = $1 AND business_id = $2',
+      [req.params.id, req.auth.businessId]
+    );
+    if (result.rowCount === 0) {
+      return res.status(404).json({ success: false, error: 'Passkey not found' });
+    }
+    res.json({ success: true });
+  } catch (err) {
+    logger.error('DELETE /auth/passkey/:id failed: %s', err.message, { stack: err.stack });
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
 module.exports = router;

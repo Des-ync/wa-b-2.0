@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -283,12 +284,18 @@ class _LoginScreenState extends State<LoginScreen> {
                   icon: const Icon(Icons.link_rounded, size: 18),
                   label: const Text('Continue with Clerk'),
                 ),
-                const SizedBox(height: 12),
-                OutlinedButton.icon(
-                  onPressed: _busy ? null : _continueWithPasskey,
-                  icon: const Icon(Icons.fingerprint_rounded, size: 18),
-                  label: const Text('Sign in with a passkey'),
-                ),
+                // Native passkey login needs an Apple Developer account we
+                // don't have yet on iOS (see docs/MOBILE_SETUP.md) — hidden
+                // there rather than shown disabled, since WhatsApp OTP and
+                // Clerk are both already right above as working options.
+                if (!Platform.isIOS) ...[
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: _busy ? null : _continueWithPasskey,
+                    icon: const Icon(Icons.fingerprint_rounded, size: 18),
+                    label: const Text('Sign in with a passkey'),
+                  ),
+                ],
               ] else ...[
                 TextField(
                   controller: _codeCtrl,

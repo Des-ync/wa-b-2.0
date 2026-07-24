@@ -29,6 +29,18 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0
+  flutter_launcher_icons: ^0.14.3
 
 flutter:
   uses-material-design: true
+
+# Generated via `dart run flutter_launcher_icons` — source art in
+# assets/icon/. Re-run that command any time icon.png/icon_foreground.png
+# change; it overwrites every platform size, nothing here is hand-edited.
+flutter_launcher_icons:
+  android: true
+  ios: true
+  remove_alpha_ios: true
+  image_path: "assets/icon/icon.png"
+  adaptive_icon_background: "#FAF6ED"
+  adaptive_icon_foreground: "assets/icon/icon_foreground.png"

@@ -204,11 +204,12 @@ app.get('/.well-known/apple-app-site-association', (req, res) => {
     webcredentials: { apps: ['TEAMID_PLACEHOLDER.com.wab.wabApp'] }
   });
 });
-// TODO(LIVE): sha256_cert_fingerprints needs the real SHA-256 fingerprint of
-// the app's RELEASE signing certificate (`keytool -list -v -keystore
-// <release>.jks`), which doesn't exist yet — the app currently only has an
-// auto-generated debug keystore that differs per machine and must never be
-// used here. Never guess a real fingerprint.
+// Fingerprint of mobile/wab_app/android/upload-keystore.jks (alias "upload",
+// generated 2026-07-24) — public by design, this file only exists to be
+// served here. If the keystore is ever rotated, regenerate with
+// `keytool -list -v -keystore upload-keystore.jks -alias upload` and update
+// this value (and WEBAUTHN_ORIGINS's android:apk-key-hash: entry — see
+// .env.example).
 app.get('/.well-known/assetlinks.json', (req, res) => {
   res.set('Content-Type', 'application/json');
   res.json([
@@ -217,7 +218,7 @@ app.get('/.well-known/assetlinks.json', (req, res) => {
       target: {
         namespace: 'android_app',
         package_name: 'com.wab.wab_app',
-        sha256_cert_fingerprints: ['SHA256_CERT_FINGERPRINT_PLACEHOLDER']
+        sha256_cert_fingerprints: ['6A:8F:24:7A:E7:06:1D:3F:44:DF:18:67:AD:83:D5:FC:D7:5B:0F:B7:8B:16:EC:57:F5:C2:20:D9:ED:A5:80:CE']
       }
     }
   ]);

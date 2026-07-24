@@ -32,6 +32,32 @@ localhost.)
    app keeps in secure storage (Keychain / Keystore).
 3. Logout revokes that key server-side.
 
+## Passkeys
+
+Merchants can add a passkey (Settings → Security, or "Sign in with a passkey"
+on login) instead of the WhatsApp OTP each time. Same account either way —
+a passkey added on the web dashboard or in the app is tied to the business's
+`whatsapp_number`, not the device.
+
+- **Android**: works today. `mobile/wab_app/android/upload-keystore.jks` is
+  the real release signing keystore (generated 2026-07-24, git-ignored —
+  make sure it's backed up outside this repo; losing it breaks future Play
+  Store updates under this app identity). Its SHA-256 fingerprint is wired
+  into `src/server.js`'s `/.well-known/assetlinks.json` handler and into
+  production's `WEBAUTHN_ORIGINS`. If the keystore is ever rotated, both
+  need updating together (see the comment above that handler).
+- **iOS**: still blocked. Passkeys need the **Associated Domains**
+  entitlement (already declared in `ios/Runner/Runner.entitlements` —
+  `webcredentials:skes.tech`) plus a real Apple Developer Team ID in
+  `src/server.js`'s `/.well-known/apple-app-site-association` handler, which
+  needs the same Apple Developer Program membership ($99/yr) as iOS push
+  (see below). Until then the passkey button is hidden on the login screen
+  and shown disabled ("coming soon") in Settings — `PasskeyAuthenticator`
+  would otherwise throw `DomainNotAssociatedException`.
+- **Testing on the iOS Simulator**: passkeys need Face ID "enrolled" first —
+  Simulator menu → Features → Face ID → Enrolled — even once the Apple
+  Developer side is sorted out.
+
 ## Team / admin login
 
 On the login screen tap **Team login** and paste an `sk_admin_...` key

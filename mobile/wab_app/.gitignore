@@ -43,3 +43,10 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Release signing — self-generated, never commit (losing the .jks breaks
+# future Play Store updates under the same app identity; back it up outside
+# this repo, not just here).
+/android/key.properties
+/android/*.jks
+/android/*.keystore

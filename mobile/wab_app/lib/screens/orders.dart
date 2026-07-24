@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../services/offline_cache.dart';
@@ -9,6 +10,7 @@ import '../services/offline_queue.dart';
 import '../state/session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
+import '../widgets/order_action_sheets.dart';
 import 'order_detail.dart';
 
 const orderStatuses = [
@@ -127,33 +129,69 @@ class _OrdersScreenState extends State<OrdersScreen> {
               emptySubtitle:
                   'Orders placed through your WhatsApp bot appear here.',
               emptyIcon: Icons.receipt_long_rounded,
-              itemBuilder: (ctx, o) => Card(
-                child: ListTile(
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14)),
-                  title: Text('#${o['order_number']}',
-                      style: const TextStyle(fontWeight: FontWeight.w700)),
-                  subtitle: Text(
-                      '${(o['items'] as List?)?.length ?? 0} item(s) · ${timeAgo(o['created_at'])}',
-                      style: const TextStyle(color: WabColors.muted)),
-                  trailing: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text(ghs(o['total_ghs']),
-                          style: const TextStyle(
-                              fontWeight: FontWeight.w800, fontSize: 15)),
-                      const SizedBox(height: 4),
-                      StatusChip('${o['status']}'),
-                    ],
+              itemBuilder: (ctx, o) {
+                final tile = Card(
+                  child: ListTile(
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14)),
+                    title: Text('#${o['order_number']}',
+                        style: const TextStyle(fontWeight: FontWeight.w700)),
+                    subtitle: Text(
+                        '${(o['items'] as List?)?.length ?? 0} item(s) · ${timeAgo(o['created_at'])}',
+                        style: const TextStyle(color: WabColors.muted)),
+                    trailing: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(ghs(o['total_ghs']),
+                            style: const TextStyle(
+                                fontWeight: FontWeight.w800, fontSize: 15)),
+                        const SizedBox(height: 4),
+                        StatusChip('${o['status']}'),
+                      ],
+                    ),
+                    onTap: () => Navigator.of(ctx)
+                        .push(MaterialPageRoute(
+                            builder: (_) =>
+                                OrderDetailScreen(orderId: '${o['id']}')))
+                        .then((_) => setState(() => _reloadKey++)),
                   ),
-                  onTap: () => Navigator.of(ctx)
-                      .push(MaterialPageRoute(
-                          builder: (_) =>
-                              OrderDetailScreen(orderId: '${o['id']}')))
-                      .then((_) => setState(() => _reloadKey++)),
-                ),
-              ),
+                );
+                // Only unpaid orders get the swipe shortcut — a paid order
+                // has nothing this gesture would do, and a dead swipe reads
+                // as broken rather than absent.
+                if (o['payment_status'] == 'paid') return tile;
+                return Dismissible(
+                  key: ValueKey('order-swipe-${o['id']}'),
+                  direction: DismissDirection.startToEnd,
+                  background: Container(
+                    margin: const EdgeInsets.symmetric(vertical: 0),
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    alignment: Alignment.centerLeft,
+                    decoration: BoxDecoration(
+                        color: WabColors.accentSoft,
+                        borderRadius: BorderRadius.circular(14)),
+                    child: const Row(children: [
+                      Icon(Icons.check_circle_rounded,
+                          color: WabColors.accentInk),
+                      SizedBox(width: 8),
+                      Text('Mark paid',
+                          style: TextStyle(
+                              color: WabColors.accentInk,
+                              fontWeight: FontWeight.w700)),
+                    ]),
+                  ),
+                  confirmDismiss: (_) async {
+                    HapticFeedback.lightImpact();
+                    final updated = await showMarkPaidSheet(ctx, o);
+                    if (updated != null && mounted) {
+                      setState(() => _reloadKey++);
+                    }
+                    return false; // reveal the action, never remove the row
+                  },
+                  child: tile,
+                );
+              },
             ),
           ),
         ],

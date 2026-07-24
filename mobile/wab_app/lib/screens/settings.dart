@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:passkeys/exceptions.dart';
 import 'package:provider/provider.dart';
@@ -452,17 +454,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     _sectionTitle('Security'),
                     // Takes effect immediately — not part of the "Save
                     // settings" form submit below.
-                    OutlinedButton.icon(
-                      onPressed: _settingUpPasskey ? null : _setUpPasskey,
-                      icon: _settingUpPasskey
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(
-                                  strokeWidth: 2.5, color: WabColors.ink))
-                          : const Icon(Icons.fingerprint_rounded, size: 18),
-                      label: const Text('Set up a passkey for this device'),
-                    ),
+                    if (Platform.isIOS) ...[
+                      OutlinedButton.icon(
+                        onPressed: null,
+                        icon: const Icon(Icons.fingerprint_rounded, size: 18),
+                        label: const Text('Passkeys — coming soon on iPhone'),
+                      ),
+                      const SizedBox(height: 6),
+                      const Text(
+                          'Already available on Android. iPhone support needs '
+                          'an Apple Developer account we haven\'t set up yet.',
+                          style:
+                              TextStyle(color: WabColors.muted, fontSize: 13)),
+                    ] else
+                      OutlinedButton.icon(
+                        onPressed: _settingUpPasskey ? null : _setUpPasskey,
+                        icon: _settingUpPasskey
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2.5, color: WabColors.ink))
+                            : const Icon(Icons.fingerprint_rounded, size: 18),
+                        label: const Text('Set up a passkey for this device'),
+                      ),
                     const SizedBox(height: 28),
                     FilledButton(
                       onPressed: _saving ? null : _save,

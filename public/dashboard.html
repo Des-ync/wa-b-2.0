@@ -15,6 +15,10 @@
   src="https://clerk.skes.tech/npm/@clerk/clerk-js@5/dist/clerk.browser.js"
   type="text/javascript"
 ></script>
+<!-- Client-side WebAuthn ceremonies (passkey add/manage below) — matches the
+     already-installed @simplewebauthn/server version on the backend. Exposes
+     window.SimpleWebAuthnBrowser.{startRegistration,startAuthentication}. -->
+<script src="https://cdn.jsdelivr.net/npm/@simplewebauthn/browser@13.3.0/dist/bundle/index.umd.min.js"></script>
 <style>
   .dash { max-width: var(--max, 1100px); margin: 0 auto; padding: 40px 20px 80px; }
   .dash h1 { margin-bottom: 4px; }
@@ -769,6 +773,21 @@
         </div>
       </div>
     </div>
+
+    <!-- Passkeys -->
+    <div class="dash-card">
+      <h2>Passkeys</h2>
+      <p class="muted" style="margin-bottom:14px;font-size:13px">Sign in with your face, fingerprint, or device PIN instead of a password — from this browser or the WA-B mobile app, on the same account.</p>
+      <div class="scroll-x">
+        <table id="passkeysTable">
+          <thead><tr><th>Device</th><th>Added</th><th>Last used</th><th></th></tr></thead>
+          <tbody><tr><td colspan="4" class="muted">Loading…</td></tr></tbody>
+        </table>
+      </div>
+      <div style="margin-top:16px">
+        <button class="btn btn-ghost btn-sm" id="addPasskeyBtn" onclick="addPasskey()">+ Add a passkey</button>
+      </div>
+    </div>
     </div><!-- /team -->
     </div><!-- /account section -->
 
@@ -782,6 +801,21 @@
   <div class="modal-box">
     <button class="btn btn-ghost btn-xs" style="float:right" onclick="closeOrderModal()">✕ Close</button>
     <div id="orderModalBody"><p class="muted">Loading…</p></div>
+  </div>
+</div>
+
+<div id="passkeyPromptOverlay" class="modal-overlay" style="display:none" onclick="if(event.target===this) skipPasskeyPrompt()">
+  <div class="modal-box" style="max-width:420px">
+    <h2 style="margin-bottom:8px">Sign in faster next time?</h2>
+    <p class="muted" style="font-size:14px;line-height:1.5">
+      Add a passkey and skip the password next time — sign in with your
+      face, fingerprint, or device PIN instead. It also works from the WA-B
+      mobile app on this same account.
+    </p>
+    <div style="display:flex;gap:10px;margin-top:20px">
+      <button class="btn btn-primary btn-sm" id="passkeyPromptAddBtn" onclick="addPasskeyFromPrompt()">Add passkey</button>
+      <button class="btn btn-ghost btn-sm" onclick="skipPasskeyPrompt()">Not now</button>
+    </div>
   </div>
 </div>
 
@@ -894,6 +928,7 @@ async function onAuthStateChange() {
       loadNotifications().catch(() => {}),
       loadLoyaltySettings().catch(() => {}),
       loadTeamKeys().catch(() => {}),
+      loadPasskeys().catch(() => {}),
       loadSuppliers().catch(() => {}),
       loadReorderSuggestions().catch(() => {}),
       loadStockHistory().catch(() => {}),
@@ -901,6 +936,7 @@ async function onAuthStateChange() {
       loadExpenses().catch(() => {})
     ]);
     if (!notifPollTimer) notifPollTimer = setInterval(() => loadNotifications().catch(() => {}), 30000);
+    maybeShowPasskeyPrompt();
   } catch (err) {
     if (err.code === 'not_linked') {
       showCard('linkCard');
@@ -2579,6 +2615,106 @@ async function rotateTeamKey(id) {
     alert(`Rotated. New key:\n\n${key.plaintext}\n\nCopy this now — it won't be shown again.`);
     await loadTeamKeys();
   } catch (err) { toast(err.message); }
+}
+
+/* ---------------- Passkeys ---------------- */
+
+let PASSKEYS = [];
+
+async function loadPasskeys() {
+  const tbody = document.querySelector('#passkeysTable tbody');
+  try {
+    const { passkeys } = await api('/auth/passkey');
+    PASSKEYS = passkeys;
+    tbody.innerHTML = passkeys.map(p => `
+      <tr>
+        <td><strong>${esc(p.device_name || 'Device')}</strong></td>
+        <td class="muted">${new Date(p.created_at).toLocaleDateString()}</td>
+        <td class="muted">${p.last_used_at ? new Date(p.last_used_at).toLocaleString() : 'Never'}</td>
+        <td style="white-space:nowrap"><button class="btn btn-ghost btn-xs" onclick="revokePasskey('${p.id}')">Remove</button></td>
+      </tr>`).join('') || '<tr><td colspan="4" class="muted">No passkeys yet — add one below.</td></tr>';
+  } catch (err) {
+    PASSKEYS = [];
+    tbody.innerHTML = '<tr><td colspan="4" class="muted">Could not load: ' + esc(err.message) + '</td></tr>';
+  }
+}
+
+async function revokePasskey(id) {
+  if (!confirm('Remove this passkey? That device will need another way to sign in.')) return;
+  try {
+    await api('/auth/passkey/' + id, { method: 'DELETE' });
+    toast('Passkey removed');
+    await loadPasskeys();
+  } catch (err) { toast(err.message); }
+}
+
+function guessDeviceName() {
+  const ua = navigator.userAgent;
+  if (/iPhone|iPad/.test(ua)) return 'iPhone/iPad browser';
+  if (/Macintosh/.test(ua)) return 'Mac browser';
+  if (/Android/.test(ua)) return 'Android browser';
+  if (/Windows/.test(ua)) return 'Windows browser';
+  return 'Browser';
+}
+
+/** Shared by both the Team-tab "Add a passkey" button and the post-login
+ * prompt — same ceremony, just called from two places. */
+async function registerPasskeyCeremony() {
+  const { options } = await api('/auth/passkey/register/options', { method: 'POST' });
+  const attResp = await SimpleWebAuthnBrowser.startRegistration({ optionsJSON: options });
+  await api('/auth/passkey/register/verify', {
+    method: 'POST',
+    body: JSON.stringify({ challenge: options.challenge, response: attResp, device_name: guessDeviceName() })
+  });
+}
+
+async function addPasskey() {
+  const btn = document.getElementById('addPasskeyBtn');
+  btn.disabled = true;
+  try {
+    await registerPasskeyCeremony();
+    toast('Passkey added');
+    await loadPasskeys();
+  } catch (err) {
+    // NotAllowedError covers both "user cancelled" and "timed out" — no
+    // need to scold them for backing out of the OS prompt.
+    if (err.name !== 'NotAllowedError') toast('Could not add passkey: ' + err.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function addPasskeyFromPrompt() {
+  const btn = document.getElementById('passkeyPromptAddBtn');
+  btn.disabled = true;
+  try {
+    await registerPasskeyCeremony();
+    closePasskeyPrompt();
+    toast('Passkey added — you can use it to sign in next time');
+    await loadPasskeys();
+  } catch (err) {
+    if (err.name !== 'NotAllowedError') toast('Could not add passkey: ' + err.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function closePasskeyPrompt() {
+  document.getElementById('passkeyPromptOverlay').style.display = 'none';
+}
+
+/** "Not now" — sessionStorage (not localStorage) so it comes back next
+ * real sign-in, per the confirmed "every login until they add one,
+ * skippable per-session" behavior. */
+function skipPasskeyPrompt() {
+  sessionStorage.setItem('wab_passkey_prompt_skipped', '1');
+  closePasskeyPrompt();
+}
+
+function maybeShowPasskeyPrompt() {
+  if (PASSKEYS.length > 0) return;
+  if (sessionStorage.getItem('wab_passkey_prompt_skipped')) return;
+  document.getElementById('passkeyPromptOverlay').style.display = 'flex';
 }
 
 async function saveSettings() {

@@ -1,6 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
+import '../api/client.dart';
+import '../services/offline_cache.dart';
 import '../state/session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
@@ -16,13 +21,41 @@ class InboxScreen extends StatefulWidget {
 class _InboxScreenState extends State<InboxScreen> {
   int _reloadKey = 0;
   String _query = '';
+  bool _offline = false;
   final _searchCtrl = TextEditingController();
 
   Future<List<Map<String, dynamic>>> _load() async {
     final session = context.read<Session>();
-    final res = await session.api.get('/api/conversations',
-        query: {'business_id': session.businessId, 'limit': 100});
-    return ((res['conversations'] as List?) ?? []).cast<Map<String, dynamic>>();
+    try {
+      final res = await session.api.get('/api/conversations',
+          query: {'business_id': session.businessId, 'limit': 100});
+      final conversations =
+          ((res['conversations'] as List?) ?? []).cast<Map<String, dynamic>>();
+      unawaited(OfflineCache.saveConversations(conversations));
+      if (mounted) setState(() => _offline = false);
+      return conversations;
+    } catch (e) {
+      final cached = await OfflineCache.loadConversations();
+      if (cached != null) {
+        if (mounted) setState(() => _offline = true);
+        return cached;
+      }
+      rethrow;
+    }
+  }
+
+  Future<void> _togglePause(String customerId, bool currentlyPaused) async {
+    final action = currentlyPaused ? 'resume' : 'pause';
+    HapticFeedback.lightImpact();
+    try {
+      await context.read<Session>().api.post('/api/conversations/$customerId/$action');
+      if (mounted) setState(() => _reloadKey++);
+    } on ApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Semantics(liveRegion: true, child: Text(e.message))));
+      }
+    }
   }
 
   List<Map<String, dynamic>> _filter(List<Map<String, dynamic>> items) {
@@ -53,6 +86,7 @@ class _InboxScreenState extends State<InboxScreen> {
             hint: 'Search conversations',
             onChanged: (v) => setState(() => _query = v),
           ),
+          if (_offline) const OfflineBanner(),
           Expanded(
             child: AsyncList<Map<String, dynamic>>(
               key: ValueKey(_reloadKey),
@@ -67,7 +101,7 @@ class _InboxScreenState extends State<InboxScreen> {
                 final name = (c['display_name'] ?? c['whatsapp_number'] ?? '?')
                     .toString();
                 final paused = c['bot_paused'] == true;
-                return Card(
+                final tile = Card(
                   child: ListTile(
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(14)),
@@ -115,6 +149,40 @@ class _InboxScreenState extends State<InboxScreen> {
                                 botPaused: paused)))
                         .then((_) => setState(() => _reloadKey++)),
                   ),
+                );
+                return Dismissible(
+                  key: ValueKey('inbox-swipe-${c['id']}'),
+                  direction: DismissDirection.startToEnd,
+                  background: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    alignment: Alignment.centerLeft,
+                    decoration: BoxDecoration(
+                        color: paused
+                            ? WabColors.accentSoft
+                            : WabColors.warning.withValues(alpha: 0.16),
+                        borderRadius: BorderRadius.circular(14)),
+                    child: Row(children: [
+                      Icon(
+                          paused
+                              ? Icons.smart_toy_outlined
+                              : Icons.front_hand_rounded,
+                          color: paused
+                              ? WabColors.accentInk
+                              : WabColors.warning),
+                      const SizedBox(width: 8),
+                      Text(paused ? 'Resume bot' : 'Take over',
+                          style: TextStyle(
+                              color: paused
+                                  ? WabColors.accentInk
+                                  : WabColors.warning,
+                              fontWeight: FontWeight.w700)),
+                    ]),
+                  ),
+                  confirmDismiss: (_) async {
+                    await _togglePause('${c['id']}', paused);
+                    return false; // reveal the action, never remove the row
+                  },
+                  child: tile,
                 );
               },
             ),

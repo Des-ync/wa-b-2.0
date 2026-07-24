@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../api/notifications_api.dart';
 import '../api/onboarding_api.dart';
+import '../services/offline_cache.dart';
 import '../state/session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
@@ -25,6 +28,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Map<String, dynamic>? _onboarding;
   String? _error;
   bool _loading = true;
+  bool _offline = false;
 
   @override
   void initState() {
@@ -63,9 +67,29 @@ class _HomeScreenState extends State<HomeScreen> {
             (results[3]['unread_count'] as num?)?.toInt() ?? 0;
         _onboarding = results[4];
         _loading = false;
+        _offline = false;
       });
+      unawaited(OfflineCache.saveHomeSnapshot(
+        stats: _stats ?? {},
+        recentOrders: _recentOrders,
+        lowStock: _lowStock,
+        unreadNotifications: _unreadNotifications,
+      ));
     } catch (e) {
       if (!mounted) return;
+      final cached = await OfflineCache.loadHomeSnapshot();
+      if (cached != null) {
+        setState(() {
+          _stats = cached['stats'] as Map<String, dynamic>?;
+          _recentOrders = (cached['recent_orders'] as List?) ?? [];
+          _lowStock = (cached['low_stock'] as List?) ?? [];
+          _unreadNotifications =
+              (cached['unread_notifications'] as num?)?.toInt() ?? 0;
+          _loading = false;
+          _offline = true;
+        });
+        return;
+      }
       setState(() {
         _error = '$e';
         _loading = false;
@@ -191,8 +215,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
       body: _loading
-          ? const Center(
-              child: CircularProgressIndicator(color: WabColors.accent))
+          ? _loadingBody()
           : _error != null
               ? ErrorRetry(message: _error!, onRetry: _load)
               : RefreshIndicator(
@@ -202,6 +225,10 @@ class _HomeScreenState extends State<HomeScreen> {
                     physics: const AlwaysScrollableScrollPhysics(),
                     padding: const EdgeInsets.all(16),
                     children: [
+                      if (_offline) ...[
+                        const OfflineBanner(),
+                        const SizedBox(height: 16),
+                      ],
                       if (_onboarding?['all_complete'] == false) ...[
                         _setupBanner(),
                         const SizedBox(height: 16),
@@ -231,6 +258,51 @@ class _HomeScreenState extends State<HomeScreen> {
                     ],
                   ),
                 ),
+    );
+  }
+
+  /// Mirrors _statGrid + a few recent-order rows so the first paint reads as
+  /// "content on the way" instead of a bare spinner — same idea as
+  /// AsyncList's SkeletonCard, sized for this screen's own layout.
+  Widget _loadingBody() {
+    Widget block({double height = 66}) => Container(
+          height: height,
+          decoration: BoxDecoration(
+            color: WabColors.paper,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: WabColors.line),
+          ),
+        );
+    return ListView(
+      physics: const NeverScrollableScrollPhysics(),
+      padding: const EdgeInsets.all(16),
+      children: [
+        Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+              color: WabColors.ink, borderRadius: BorderRadius.circular(20)),
+          child: const Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Skeleton(width: 90, height: 12),
+              SizedBox(height: 10),
+              Skeleton(width: 140, height: 30),
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
+        block(),
+        const SizedBox(height: 10),
+        block(),
+        const SizedBox(height: 24),
+        const Skeleton(width: 120, height: 17),
+        const SizedBox(height: 12),
+        const SkeletonCard(),
+        const SizedBox(height: 10),
+        const SkeletonCard(),
+        const SizedBox(height: 10),
+        const SkeletonCard(),
+      ],
     );
   }
 
