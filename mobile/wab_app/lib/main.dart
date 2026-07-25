@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -6,6 +8,7 @@ import 'screens/login.dart';
 import 'screens/welcome_carousel.dart';
 import 'screens/shell.dart';
 import 'screens/splash.dart';
+import 'services/offline_cache.dart';
 import 'services/push.dart';
 import 'state/session.dart';
 import 'theme.dart';
@@ -52,6 +55,11 @@ class _GateState extends State<_Gate> {
   }
 
   Future<void> _boot() async {
+    // Older builds cached orders/products (customer names and phone numbers
+    // among them) as cleartext shared_preferences. Those entries are dead
+    // weight now that OfflineCache uses secure storage — drop them on the
+    // first run of this build.
+    unawaited(OfflineCache.purgeLegacyPlaintextCache());
     final prefs = await SharedPreferences.getInstance();
     final seen = prefs.getBool('seen_onboarding') ?? false;
     if (mounted) setState(() => _seenOnboarding = seen);

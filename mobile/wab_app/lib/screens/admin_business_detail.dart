@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -23,6 +25,11 @@ class _AdminBusinessDetailScreenState extends State<AdminBusinessDetailScreen> {
   Map<String, dynamic>? _counters;
   List<Map<String, dynamic>> _messages = [];
   String? _error;
+
+  // Static, and deliberately NOT cancelled in dispose(): the wipe has to
+  // happen even if the admin navigates away from this screen straight after
+  // copying — that's the case that matters most.
+  static Timer? _clipboardClearTimer;
 
   @override
   void initState() {
@@ -170,6 +177,23 @@ class _AdminBusinessDetailScreenState extends State<AdminBusinessDetailScreen> {
     }
   }
 
+  /// Wipe the copied key off the system clipboard a minute later, but only if
+  /// it is still the thing on the clipboard — if the admin has copied
+  /// something else since, leave their clipboard alone.
+  void _scheduleClipboardClear(String plaintext) {
+    _clipboardClearTimer?.cancel();
+    _clipboardClearTimer = Timer(const Duration(seconds: 60), () async {
+      try {
+        final current = await Clipboard.getData(Clipboard.kTextPlain);
+        if (current?.text == plaintext) {
+          await Clipboard.setData(const ClipboardData(text: ''));
+        }
+      } catch (_) {
+        // Best-effort hygiene — never surface a clipboard failure.
+      }
+    });
+  }
+
   Future<void> _issueApiKey() async {
     try {
       final res = await context
@@ -204,9 +228,15 @@ class _AdminBusinessDetailScreenState extends State<AdminBusinessDetailScreen> {
             TextButton(
               onPressed: () {
                 Clipboard.setData(ClipboardData(text: plaintext));
+                // The system clipboard is readable by every other app on the
+                // device (and syncs to nearby Apple devices via Universal
+                // Clipboard). This is a long-lived bearer credential, so it
+                // does not get to sit there indefinitely — overwrite it after
+                // a short window that's still long enough to paste.
+                _scheduleClipboardClear(plaintext);
                 Navigator.pop(ctx);
                 ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                    content: Text('Key copied to clipboard'),
+                    content: Text('Key copied — clipboard clears in 60s'),
                     backgroundColor: WabColors.accentInk));
               },
               child: const Text('Copy & close'),

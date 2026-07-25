@@ -171,8 +171,14 @@ function extractKey(req) {
 async function lookupKey(plaintext, meta = {}) {
   if (!plaintext) return null;
   const hash = hashKey(plaintext);
+  // The business's own status rides along so requireAuth can refuse a key
+  // belonging to a suspended/closed business without a second round trip.
+  // Correlated scalar subqueries rather than a join: both are primary-key
+  // lookups, and this keeps the key columns first in the select list.
   const res = await query(
-    `SELECT id, business_id, scope, revoked_at, role, expires_at, last_used_ip
+    `SELECT id, business_id, scope, revoked_at, role, expires_at, last_used_ip,
+            (SELECT b.status    FROM businesses b WHERE b.id = api_keys.business_id) AS business_status,
+            (SELECT b.closed_at FROM businesses b WHERE b.id = api_keys.business_id) AS business_closed_at
        FROM api_keys WHERE key_hash = $1`,
     [hash]
   );
@@ -196,6 +202,29 @@ async function lookupKey(plaintext, meta = {}) {
     [row.id, meta.ip || null, meta.userAgent ? String(meta.userAgent).slice(0, 300) : null]
   ).catch(() => {});
   return row;
+}
+
+// A business in one of these states (or with closed_at set) has had its
+// service stopped. storefront.routes.js, conversation.handler.js, cart.nudge.js
+// and automations.js all already refuse to act for them; this is the same rule
+// applied at the dashboard/API front door, so a still-valid session or an
+// un-revoked API key can't keep the account running unpaid.
+const INACTIVE_STATUSES = ['suspended', 'cancelled'];
+
+// …except for the paths a suspended merchant needs in order to come back:
+// look at their own subscription, pay/renew, check a payment, and load enough
+// of their identity for the dashboard to render the "you're suspended, renew"
+// state. Without these, suspension would be a one-way door.
+const RECOVERY_PATH_PREFIXES = ['/api/subscriptions', '/api/payments', '/api/auth', '/api/me', '/api/devices'];
+
+function isBusinessInactive(business) {
+  if (!business) return false;
+  return !!business.closed_at || INACTIVE_STATUSES.includes(business.status);
+}
+
+function isRecoveryPath(req) {
+  const full = (req.baseUrl || '') + (req.path || '');
+  return RECOVERY_PATH_PREFIXES.some(p => full === p || full.startsWith(p + '/'));
 }
 
 /**
@@ -228,6 +257,9 @@ function requireAuth(requiredScope = 'any') {
             return res.status(403).json({ success: false, error: 'Session does not match business' });
           }
         }
+        // Deliberately NOT subject to the suspended-business gate below: this
+        // is an admin-issued, read-only, time-boxed support view, and a
+        // suspended account is precisely the one support needs to look at.
         req.auth = { keyId: null, businessId: session.business_id, scope: 'tenant', role: 'readonly', impersonating: true };
         setBusinessId(session.business_id);
         return next();
@@ -249,6 +281,13 @@ function requireAuth(requiredScope = 'any') {
             if (pathBiz && pathBiz !== business.id) {
               return res.status(403).json({ success: false, error: 'Session does not match business' });
             }
+          }
+          if (isBusinessInactive(business) && !isRecoveryPath(req)) {
+            return res.status(403).json({
+              success: false,
+              error: 'business_inactive',
+              message: 'This business is suspended or closed. Renew your subscription to restore access.'
+            });
           }
           // A Clerk session only ever belongs to the business owner today
           // (businesses.clerk_user_id is a single column) — role is always
@@ -281,6 +320,17 @@ function requireAuth(requiredScope = 'any') {
         if (pathBiz && row.business_id && pathBiz !== row.business_id) {
           return res.status(403).json({ success: false, error: 'Key does not match business' });
         }
+      }
+      // Same suspension gate as the Clerk path. Admin-scoped keys are exempt —
+      // they have no business of their own, and operating on a suspended
+      // merchant is exactly what they exist for.
+      if (row.scope !== 'admin' && !isRecoveryPath(req) &&
+          isBusinessInactive({ status: row.business_status, closed_at: row.business_closed_at })) {
+        return res.status(403).json({
+          success: false,
+          error: 'business_inactive',
+          message: 'This business is suspended or closed. Renew your subscription to restore access.'
+        });
       }
       req.auth = { keyId: row.id, businessId: row.business_id, scope: row.scope, role: row.role || 'owner' };
       if (row.business_id) setBusinessId(row.business_id);
@@ -328,6 +378,8 @@ module.exports = {
   rotateKey,
   requireAuth,
   requirePermission,
+  isBusinessInactive,
+  INACTIVE_STATUSES,
   lookupKey,
   verifyClerkSession,
   JWT_SHAPE_RE,

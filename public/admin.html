@@ -42,7 +42,7 @@
 
   <div class="dash-card" id="keyCard">
     <h2>Admin API key</h2>
-    <p class="muted" style="margin-bottom:12px;font-size:13px">Stored only in this browser's local storage, sent as a Bearer token.</p>
+    <p class="muted" style="margin-bottom:12px;font-size:13px">Held for this browser tab only (cleared when you close it, and after 8 hours), sent as a Bearer token.</p>
     <div style="display:flex;gap:10px;flex-wrap:wrap">
       <input id="adminKey" type="password" placeholder="sk_admin_..." style="flex:1;min-width:280px" />
       <button class="btn btn-primary btn-sm" onclick="saveKeyAndLoad()">Connect</button>
@@ -183,7 +183,34 @@ const STEP_LABELS = {
   invite_staff: 'Invite staff'
 };
 
-function getKey() { return localStorage.getItem('wab_admin_key') || ''; }
+/* The admin key is a full-platform bearer token. It is deliberately NOT kept
+   in localStorage: that persists to disk forever, survives browser restarts,
+   and is readable by any script on the page. sessionStorage scopes it to this
+   tab, and the stamp below expires it even within a long-lived tab, so a
+   walked-away-from browser stops being a standing admin credential. */
+const KEY_NAME = 'wab_admin_key';
+const KEY_TTL_MS = 8 * 60 * 60 * 1000;
+
+// One-time cleanup for operators who still have the old on-disk copy.
+try { localStorage.removeItem(KEY_NAME); } catch (_) { /* private mode */ }
+
+function getKey() {
+  try {
+    const raw = sessionStorage.getItem(KEY_NAME);
+    if (!raw) return '';
+    const { key, at } = JSON.parse(raw);
+    if (!key || !at || Date.now() - at > KEY_TTL_MS) { clearKey(); return ''; }
+    return key;
+  } catch (_) { return ''; }
+}
+
+function setKey(key) {
+  try { sessionStorage.setItem(KEY_NAME, JSON.stringify({ key, at: Date.now() })); } catch (_) {}
+}
+
+function clearKey() {
+  try { sessionStorage.removeItem(KEY_NAME); } catch (_) {}
+}
 
 async function api(path, opts = {}) {
   const res = await fetch('/api' + path, {
@@ -191,7 +218,9 @@ async function api(path, opts = {}) {
     headers: { Authorization: 'Bearer ' + getKey(), 'Content-Type': 'application/json', ...(opts.headers || {}) }
   });
   const body = await res.json().catch(() => ({}));
-  if (!res.ok || body.success === false) throw new Error(body.error || ('HTTP ' + res.status));
+  if (!res.ok || body.success === false) {
+    throw Object.assign(new Error(body.error || ('HTTP ' + res.status)), { status: res.status });
+  }
   return body;
 }
 
@@ -222,16 +251,18 @@ async function loadIncomplete() {
     tbody.innerHTML = '<tr><td colspan="6" class="muted">Everyone is fully set up 🎉</td></tr>';
     return;
   }
+  // Every interpolated field here is merchant-supplied (public self-service
+  // signup / PATCH /api/business/settings), so all of it goes through esc().
   tbody.innerHTML = businesses.map(b => `
     <tr>
       <td>
-        <strong>${b.name}</strong>${b.owner_name ? `<div class="muted" style="font-size:12px">${b.owner_name}</div>` : ''}
-        <div class="muted" style="font-size:11px;cursor:pointer" title="Click to copy business ID" onclick="copyBusinessId('${b.id}')">${b.id}</div>
+        <strong>${esc(b.name)}</strong>${b.owner_name ? `<div class="muted" style="font-size:12px">${esc(b.owner_name)}</div>` : ''}
+        <div class="muted copy-biz-id" style="font-size:11px;cursor:pointer" title="Click to copy business ID" data-biz-id="${esc(b.id)}">${esc(b.id)}</div>
       </td>
-      <td>${b.whatsapp_number || '—'}</td>
-      <td>${b.status}</td>
-      <td>${b.percent}%</td>
-      <td>${b.missing_steps.map(k => `<span class="pill pill-warn">${STEP_LABELS[k] || k}</span>`).join('')}</td>
+      <td>${esc(b.whatsapp_number || '—')}</td>
+      <td>${esc(b.status)}</td>
+      <td>${esc(b.percent)}%</td>
+      <td>${(b.missing_steps || []).map(k => `<span class="pill pill-warn">${esc(STEP_LABELS[k] || k)}</span>`).join('')}</td>
       <td>${fmtDate(b.created_at)}</td>
     </tr>
   `).join('');
@@ -241,6 +272,13 @@ function copyBusinessId(id) {
   navigator.clipboard?.writeText(id);
   document.getElementById('poBusinessId').value = id;
 }
+
+// Delegated — the rows are re-rendered on every load, and building an inline
+// onclick out of a merchant-controlled row would put us back where we started.
+document.getElementById('incompleteTable').addEventListener('click', ev => {
+  const el = ev.target.closest('.copy-biz-id');
+  if (el) copyBusinessId(el.dataset.bizId);
+});
 
 async function recordPayout() {
   const businessId = document.getElementById('poBusinessId').value.trim();
@@ -583,6 +621,9 @@ async function boot() {
     document.getElementById('keyCard').style.display = 'none';
     document.getElementById('app').style.display = '';
   } catch (err) {
+    // A rejected key should not linger in storage — make the operator re-enter
+    // it rather than keeping a credential the server has already refused.
+    if (err.status === 401 || err.status === 403) clearKey();
     errEl.textContent = 'Could not authenticate: ' + err.message;
     errEl.style.display = '';
   }
@@ -591,7 +632,8 @@ async function boot() {
 function saveKeyAndLoad() {
   const key = document.getElementById('adminKey').value.trim();
   if (!key) return;
-  localStorage.setItem('wab_admin_key', key);
+  setKey(key);
+  document.getElementById('adminKey').value = '';
   boot();
 }
 

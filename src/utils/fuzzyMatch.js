@@ -104,13 +104,21 @@ function scoreProductName(searchTerm, productName) {
 
   // Fuzzy: compare the search term against each word in the product name,
   // and against the whole name, taking the best (lowest-distance) result.
+  //
+  // The length-delta skip below is not just an optimisation: edit distance is
+  // at least the difference in lengths, so any candidate further than `budget`
+  // from the term in length can never come in under budget. Checking that
+  // first keeps the O(n·m) DP off the table entirely for mismatched lengths,
+  // which is what stops a single very long inbound message from burning the
+  // shared webhook worker's event loop against every product in the catalog.
+  const budget = typoBudget(term.length);
   const nameWords = name.split(' ');
   let bestDistance = Infinity;
   for (const word of [name, ...nameWords]) {
+    if (Math.abs(term.length - word.length) > budget) continue;
     const d = levenshtein(term, word);
     if (d < bestDistance) bestDistance = d;
   }
-  const budget = typoBudget(term.length);
   if (bestDistance <= budget) return Math.max(10, 60 - bestDistance * 15);
 
   return 0;

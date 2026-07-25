@@ -823,6 +823,9 @@
 <script>
 const NEXT_STATUSES = ['confirmed','preparing','ready','delivered','cancelled'];
 let BIZ = null;
+// Current category ordering, kept here so the reorder buttons can reference it
+// by name instead of embedding merchant-supplied names in their onclick.
+let CATEGORY_ORDER = [];
 
 function toast(msg) {
   const t = document.getElementById('toast');
@@ -847,7 +850,9 @@ async function api(path, opts = {}) {
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok || body.success === false) {
-    const err = new Error(body.error || ('HTTP ' + res.status));
+    // `error` is the machine-readable code (kept on .code for branching);
+    // `message`, where the server supplies one, is the human sentence.
+    const err = new Error(body.message || body.error || ('HTTP ' + res.status));
     err.code = body.error;
     throw err;
   }
@@ -940,6 +945,12 @@ async function onAuthStateChange() {
   } catch (err) {
     if (err.code === 'not_linked') {
       showCard('linkCard');
+    } else if (err.code === 'business_inactive') {
+      // Suspended/closed: the API only serves the billing routes now, so drop
+      // the merchant straight onto the card with the Renew button.
+      showSection('account');
+      showSubTab('account', 'billing');
+      toast(err.message);
     } else {
       toast('Could not load your shop: ' + err.message);
     }
@@ -1175,14 +1186,14 @@ async function loadProducts() {
         <button class="btn btn-ghost btn-xs" onclick="editPrice('${p.id}', ${Number(p.price_ghs)})">Price</button>
         <button class="btn btn-ghost btn-xs" onclick="editCostPrice('${p.id}', ${p.cost_price_ghs == null ? 'null' : Number(p.cost_price_ghs)})">Cost</button>
         <button class="btn btn-ghost btn-xs" onclick="editStockQty('${p.id}', ${p.stock_qty == null ? 'null' : p.stock_qty})">Qty</button>
-        <button class="btn btn-ghost btn-xs" onclick="quickRestock('${p.id}', '${esc(p.name)}')">Add stock</button>
+        <button class="btn btn-ghost btn-xs" data-name="${esc(p.name)}" onclick="quickRestock('${p.id}', this.dataset.name)">Add stock</button>
         <button class="btn btn-ghost btn-xs" onclick="editThreshold('${p.id}', ${threshold})">Low-stock at</button>
         <button class="btn btn-ghost btn-xs" data-image-url="${esc(p.image_url || '')}" onclick="editImage('${p.id}', this.dataset.imageUrl)">Image</button>
         <button class="btn btn-ghost btn-xs" onclick="toggleFeatured('${p.id}', ${!p.featured})">${p.featured ? 'Unfeature' : 'Feature'}</button>
         <button class="btn btn-ghost btn-xs" onclick="toggleHidden('${p.id}', ${!p.hidden})">${p.hidden ? 'Unhide' : 'Hide'}</button>
         <button class="btn btn-ghost btn-xs" data-from="${esc(p.available_from || '')}" data-to="${esc(p.available_to || '')}" onclick="editAvailability('${p.id}', this.dataset.from, this.dataset.to)">Hours</button>
-        <button class="btn btn-ghost btn-xs" onclick="manageOptions('${p.id}', '${esc(p.name)}')">Options</button>
-        <button class="btn btn-ghost btn-xs" onclick="removeProduct('${p.id}', '${esc(p.name)}')">Delete</button>
+        <button class="btn btn-ghost btn-xs" data-name="${esc(p.name)}" onclick="manageOptions('${p.id}', this.dataset.name)">Options</button>
+        <button class="btn btn-ghost btn-xs" data-name="${esc(p.name)}" onclick="removeProduct('${p.id}', this.dataset.name)">Delete</button>
       </td>
     </tr>`;
   }).join('') || '<tr><td colspan="8" class="muted">No products yet. Add your first below.</td></tr>';
@@ -1322,15 +1333,21 @@ async function importProductsCsv(file) {
 async function loadCategories() {
   const { categories } = await api('/categories?business_id=' + BIZ.id);
   const tbody = document.querySelector('#categoryTable tbody');
+  // Category names are merchant-controlled free text, so they only ever travel
+  // through escaped data-* attributes — never spliced into the onclick JS
+  // itself, which the browser HTML-decodes before compiling. The current
+  // ordering is read from the module-level list at click time rather than
+  // being serialised into every row.
+  CATEGORY_ORDER = categories.map(x => x.name);
   tbody.innerHTML = categories.map((c, i) => `
     <tr>
       <td><strong>${esc(c.name)}</strong></td>
       <td>
-        <button class="btn btn-ghost btn-xs" ${i === 0 ? 'disabled' : ''} onclick="moveCategory(${JSON.stringify(categories.map(x => x.name)).replace(/"/g, '&quot;')}, ${i}, -1)">▲</button>
-        <button class="btn btn-ghost btn-xs" ${i === categories.length - 1 ? 'disabled' : ''} onclick="moveCategory(${JSON.stringify(categories.map(x => x.name)).replace(/"/g, '&quot;')}, ${i}, 1)">▼</button>
+        <button class="btn btn-ghost btn-xs" ${i === 0 ? 'disabled' : ''} onclick="moveCategory(CATEGORY_ORDER, ${i}, -1)">▲</button>
+        <button class="btn btn-ghost btn-xs" ${i === categories.length - 1 ? 'disabled' : ''} onclick="moveCategory(CATEGORY_ORDER, ${i}, 1)">▼</button>
       </td>
       <td>${c.hidden ? '<span class="pill pill-off">Hidden</span>' : '<span class="pill pill-ok">Visible</span>'}</td>
-      <td><button class="btn btn-ghost btn-xs" onclick="toggleCategoryHidden('${esc(c.name)}', ${!c.hidden})">${c.hidden ? 'Show' : 'Hide'}</button></td>
+      <td><button class="btn btn-ghost btn-xs" data-name="${esc(c.name)}" onclick="toggleCategoryHidden(this.dataset.name, ${!c.hidden})">${c.hidden ? 'Show' : 'Hide'}</button></td>
     </tr>
   `).join('') || '<tr><td colspan="4" class="muted">No categories yet — add a product with a category to see it here.</td></tr>';
 }
@@ -1472,7 +1489,7 @@ async function loadSuppliers() {
       <td class="muted">${esc(s.contact_name || '')}</td>
       <td class="muted">${esc(s.contact_phone || '')}</td>
       <td class="muted">${esc(s.notes || '')}</td>
-      <td><button class="btn btn-ghost btn-xs" onclick="deleteSupplier('${s.id}', '${esc(s.name)}')">Delete</button></td>
+      <td><button class="btn btn-ghost btn-xs" data-name="${esc(s.name)}" onclick="deleteSupplier('${s.id}', this.dataset.name)">Delete</button></td>
     </tr>
   `).join('') || '<tr><td colspan="5" class="muted">No suppliers yet. Add your first below.</td></tr>';
   window.SUPPLIERS = suppliers;
@@ -1515,7 +1532,7 @@ async function loadReorderSuggestions() {
       <td><span class="pill ${s.stock_qty === 0 ? 'pill-off' : 'pill-warn'}">${esc(String(s.stock_qty))}</span></td>
       <td>${esc(String(s.suggested_reorder_qty))}</td>
       <td class="muted">${s.supplier_name ? esc(s.supplier_name) + (s.supplier_phone ? ' (' + esc(s.supplier_phone) + ')' : '') : '—'}</td>
-      <td><button class="btn btn-ghost btn-xs" onclick="quickRestock('${s.id}', '${esc(s.name)}')">Add stock</button></td>
+      <td><button class="btn btn-ghost btn-xs" data-name="${esc(s.name)}" onclick="quickRestock('${s.id}', this.dataset.name)">Add stock</button></td>
     </tr>
   `).join('') || '<tr><td colspan="5" class="muted">Nothing low on stock right now.</td></tr>';
 }

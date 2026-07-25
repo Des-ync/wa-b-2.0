@@ -2,7 +2,7 @@ const express = require('express');
 const logger = require('../utils/logger');
 const subService = require('../services/subscription.service');
 const { normalizeGhanaPhone, sanitizeBusiness } = require('../utils/helpers');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, requirePermission } = require('../middleware/auth');
 const { tenantBlocksBusinessId } = require('../middleware/tenantAccess');
 
 const router = express.Router();
@@ -73,8 +73,13 @@ router.get('/:businessId', requireAuth('any'), async (req, res) => {
   }
 });
 
-/** POST /api/subscriptions/:businessId/renew — manually trigger a renewal charge. */
-router.post('/:businessId/renew', requireAuth('any'), async (req, res) => {
+/**
+ * POST /api/subscriptions/:businessId/renew — manually trigger a renewal charge.
+ * Initiating a real MoMo/Paystack charge is a billing WRITE, so it needs the
+ * capability gate as well as the tenant check — otherwise a read-only
+ * impersonation session or a support/accountant key could force a charge.
+ */
+router.post('/:businessId/renew', requireAuth('any'), requirePermission('billing', 'write'), async (req, res) => {
   try {
     if (tenantBlocksBusinessId(req, req.params.businessId)) {
       return res.status(403).json({ success: false, error: 'Key does not match business' });
@@ -96,8 +101,12 @@ router.post('/:businessId/renew', requireAuth('any'), async (req, res) => {
   }
 });
 
-/** POST /api/subscriptions/:businessId/cancel — cancel subscription (at period end if active). */
-router.post('/:businessId/cancel', requireAuth('any'), async (req, res) => {
+/**
+ * POST /api/subscriptions/:businessId/cancel — cancel subscription (at period end if active).
+ * Same gate as /renew: cancelling is a billing write, not something a
+ * read-only support view should be able to do.
+ */
+router.post('/:businessId/cancel', requireAuth('any'), requirePermission('billing', 'write'), async (req, res) => {
   try {
     if (tenantBlocksBusinessId(req, req.params.businessId)) {
       return res.status(403).json({ success: false, error: 'Key does not match business' });

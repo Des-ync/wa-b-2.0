@@ -25,7 +25,14 @@ async function runDbBackupJob() {
 
   await lock.withLock('db_backup_job', 3600, async () => {
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const dumpFile = path.join(os.tmpdir(), `wa-b-backup-${stamp}.sql.gz`);
+    // The dump is a full copy of every tenant's data. A predictably-named file
+    // sitting in the shared system temp dir under the default umask is
+    // readable by any other local user for the whole duration of the dump —
+    // so it goes in a per-run 0700 directory instead, and the file itself is
+    // created 0600 before pg_dump writes a single byte into it.
+    const dumpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wa-b-backup-')); // mkdtemp(3) is always 0700
+    const dumpFile = path.join(dumpDir, `wa-b-backup-${stamp}.sql.gz`);
+    fs.closeSync(fs.openSync(dumpFile, 'w', 0o600));
 
     try {
       logger.info('[cron] db backup: starting pg_dump → %s', dumpFile);
@@ -33,8 +40,12 @@ async function runDbBackupJob() {
       // rather than interpolating into the command line: passwords with `$`,
       // `"` or backticks would otherwise be shell-expanded (breaking the dump
       // or worse), and the URL would leak into process listings via `ps`.
+      //
+      // `>>` rather than `>`: the file was pre-created with 0600 above and is
+      // empty, and appending keeps those permissions instead of letting the
+      // shell re-create it under the default umask.
       await execAsync(
-        `pg_dump "$WA_B_DB_URL" | gzip > "$WA_B_DUMP_FILE"`,
+        `pg_dump "$WA_B_DB_URL" | gzip >> "$WA_B_DUMP_FILE"`,
         {
           shell: '/bin/bash',
           maxBuffer: 1024 * 1024 * 64,
@@ -69,7 +80,14 @@ async function runDbBackupJob() {
       alertOps('Nightly DB backup failed', err.message);
       throw err;
     } finally {
-      fs.unlink(dumpFile, () => {});
+      // Remove the dump *and* its private directory, so a failed run doesn't
+      // leave a full database copy on disk until the next reboot. Never let
+      // cleanup trouble mask the real error from the try block.
+      try {
+        fs.rmSync(dumpDir, { recursive: true, force: true });
+      } catch (cleanupErr) {
+        logger.error('[cron] db backup: could not remove %s: %s', dumpDir, cleanupErr.message);
+      }
     }
   });
 }

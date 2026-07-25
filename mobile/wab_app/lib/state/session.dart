@@ -8,6 +8,7 @@ import 'package:passkeys/types.dart';
 
 import '../api/client.dart';
 import '../api/passkey_api.dart';
+import '../services/offline_cache.dart';
 
 enum SessionRole { merchant, admin }
 
@@ -186,6 +187,9 @@ class Session extends ChangeNotifier {
     business = null;
     await _storage.delete(key: 'api_key');
     await _storage.delete(key: 'role');
+    // The offline snapshots hold customer names, phone numbers and order
+    // detail — a signed-out device should not keep them.
+    await OfflineCache.clear();
     notifyListeners();
   }
 }

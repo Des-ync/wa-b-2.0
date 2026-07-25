@@ -208,13 +208,18 @@ function renderCartLines() {
     <div class="cart-line">
       <div class="cart-line-name">${esc(l.name)}<div class="muted">${money(l.price)} each</div></div>
       <div class="qty-row">
-        <button onclick="changeQty('${l.kind}','${l.id}',-1)">−</button>
-        <span>${l.quantity}</span>
-        <button onclick="changeQty('${l.kind}','${l.id}',1)">+</button>
+        <button class="qty-btn" data-kind="${esc(l.kind)}" data-id="${esc(l.id)}" data-delta="-1">−</button>
+        <span>${esc(l.quantity)}</span>
+        <button class="qty-btn" data-kind="${esc(l.kind)}" data-id="${esc(l.id)}" data-delta="1">+</button>
       </div>
     </div>
   `).join('');
 }
+
+document.getElementById('cartLines').addEventListener('click', ev => {
+  const btn = ev.target.closest('.qty-btn');
+  if (btn) changeQty(btn.dataset.kind, btn.dataset.id, Number(btn.dataset.delta));
+});
 
 async function submitCheckout() {
   const cart = loadCart();
@@ -267,12 +272,32 @@ function renderCategories() {
   const row = document.getElementById('catRow');
   if (!cats.length) { row.style.display = 'none'; return; }
   row.style.display = 'flex';
+  // Category names are merchant-controlled. They go in an escaped data-*
+  // attribute and are read back via dataset in a delegated handler — never
+  // built into an inline onclick, where the browser HTML-decodes the value
+  // before compiling it as JavaScript.
   row.innerHTML = ['All'].concat(cats).map(c => {
     const active = (c === 'All' && !ACTIVE_CATEGORY) || c === ACTIVE_CATEGORY;
-    return `<div class="cat-chip ${active ? 'active' : ''}" onclick="setCategory('${c === 'All' ? '' : esc(c).replace(/'/g, "\\'")}')">${esc(c)}</div>`;
+    return `<div class="cat-chip ${active ? 'active' : ''}" data-cat="${esc(c === 'All' ? '' : c)}">${esc(c)}</div>`;
   }).join('');
 }
 function setCategory(c) { ACTIVE_CATEGORY = c; renderCategories(); renderProducts(); }
+
+// Delegated handlers for the three merchant-data-driven grids. Bound once to
+// the containers, which are static, so re-rendering their contents never has
+// to build a handler string out of a product/bundle/category name.
+document.getElementById('catRow').addEventListener('click', ev => {
+  const chip = ev.target.closest('.cat-chip');
+  if (chip) setCategory(chip.dataset.cat || '');
+});
+
+function onAddToCartClick(ev) {
+  const btn = ev.target.closest('.add-cart');
+  if (!btn) return;
+  addToCart(btn.dataset.kind, btn.dataset.id, btn.dataset.name, Number(btn.dataset.price));
+}
+document.getElementById('grid').addEventListener('click', onAddToCartClick);
+document.getElementById('bundleGrid').addEventListener('click', onAddToCartClick);
 
 function productCard(p, digits) {
   return `
@@ -286,7 +311,7 @@ function productCard(p, digits) {
         ${p.featured ? '<div class="prod-featured">★ Featured</div>' : ''}
         ${!p.in_stock ? '<div class="prod-oos">Out of stock</div>' : ''}
         <div class="prod-actions">
-          ${p.in_stock ? `<button class="btn btn-primary btn-xs" onclick="addToCart('product','${p.id}',${JSON.stringify(p.name)}.toString(),${p.price_ghs})">Add to cart</button>` : ''}
+          ${p.in_stock ? `<button class="btn btn-primary btn-xs add-cart" data-kind="product" data-id="${esc(p.id)}" data-name="${esc(p.name)}" data-price="${esc(p.price_ghs)}">Add to cart</button>` : ''}
           ${digits ? `<a class="btn btn-ghost btn-xs" href="https://wa.me/${digits}?text=${encodeURIComponent('Hi ' + SHOP.name + ', I would like to order: ' + p.name)}" target="_blank" rel="noopener">Order on WhatsApp</a>` : ''}
         </div>
         <div class="upsell-chip" id="upsell-${p.id}"></div>
@@ -320,7 +345,7 @@ function renderBundles() {
         <div class="prod-desc">${(b.items || []).map(i => esc(i.quantity + '× ' + i.name)).join(', ')}</div>
         <div class="prod-price">${money(b.price_ghs)}</div>
         <div class="prod-actions">
-          <button class="btn btn-primary btn-xs" onclick="addToCart('bundle','${b.id}',${JSON.stringify(b.name)}.toString(),${b.price_ghs})">Add to cart</button>
+          <button class="btn btn-primary btn-xs add-cart" data-kind="bundle" data-id="${esc(b.id)}" data-name="${esc(b.name)}" data-price="${esc(b.price_ghs)}">Add to cart</button>
         </div>
       </div>
     </div>

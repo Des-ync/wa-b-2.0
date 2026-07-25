@@ -1,7 +1,7 @@
 const express = require('express');
 const logger = require('../utils/logger');
 const { query } = require('../config/database');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, requirePermission } = require('../middleware/auth');
 const { resolveBusinessId } = require('../middleware/tenantAccess');
 const wa = require('../services/whatsapp.service');
 const { recordAudit } = require('../utils/auditLog');
@@ -306,7 +306,7 @@ const SAMPLE_CATALOGS = {
  * them back), but refuses to run once real products already exist, so it
  * can never silently clutter a catalog someone has already built.
  */
-router.post('/sample-catalog', async (req, res) => {
+router.post('/sample-catalog', requirePermission('products', 'write'), async (req, res) => {
   try {
     const businessId = resolveBusinessId(req);
     if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });

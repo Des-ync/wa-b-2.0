@@ -100,9 +100,22 @@ class _ProductQuickEditSheetState extends State<ProductQuickEditSheet> {
     }
   }
 
+  /// Only render a thumbnail for an absolute `https` URL.
+  ///
+  /// `image_url` is stored data that any teammate with product-edit access
+  /// (or a catalog import) can set, and rendering it makes this device issue
+  /// an outbound GET to whatever host it names. Requiring https rules out
+  /// cleartext fetches and plain-`http` probes of hosts on the merchant's own
+  /// network; the field is meant to hold a public image link.
+  static bool _isRenderableImageUrl(String value) {
+    final uri = Uri.tryParse(value);
+    return uri != null && uri.isAbsolute && uri.scheme == 'https' && uri.host.isNotEmpty;
+  }
+
   @override
   Widget build(BuildContext context) {
-    final imageUrl = _imageUrl.text.trim();
+    final rawImageUrl = _imageUrl.text.trim();
+    final imageUrl = _isRenderableImageUrl(rawImageUrl) ? rawImageUrl : '';
     return Padding(
       padding: EdgeInsets.fromLTRB(
           24, 24, 24, MediaQuery.of(context).viewInsets.bottom + 24),
@@ -172,6 +185,20 @@ class _ProductQuickEditSheetState extends State<ProductQuickEditSheet> {
                         child: const Icon(Icons.broken_image_outlined,
                             size: 20, color: WabColors.muted2),
                       ),
+                    ),
+                  ),
+                ] else if (rawImageUrl.isNotEmpty) ...[
+                  const SizedBox(width: 12),
+                  Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                        color: WabColors.bg2,
+                        borderRadius: BorderRadius.circular(10)),
+                    child: const Tooltip(
+                      message: 'Photo links must start with https://',
+                      child: Icon(Icons.lock_outline,
+                          size: 20, color: WabColors.muted2),
                     ),
                   ),
                 ],

@@ -38,6 +38,11 @@ const { setBusinessId } = require('../utils/requestContext');
    ----------------------------------------------------------------- */
 const TYPING_RESET_MS = 10 * 60 * 1000;
 
+// Longest inbound text we will treat as a typed product name (see
+// tryTypedProductAdd). Real product names are far shorter; the cap exists so
+// unbounded inbound text can't be turned into catalog-wide fuzzy matching.
+const MAX_TYPED_PRODUCT_NAME = 120;
+
 // orderService.validatePromoCode's error codes -> customer-facing i18n keys.
 const PROMO_ERROR_KEYS = {
   expired: 'promo_expired',
@@ -1680,7 +1685,12 @@ async function continueOrderingFlow({ business, customer, state, inbound }) {
 async function tryTypedProductAdd({ business, customer, cart, inbound, page = 0 }) {
   const explicit = parseQuantityExpression(inbound.text);
   const name = explicit ? explicit.name : String(inbound.text || '').trim();
-  if (!name || name.length < 3) return false;
+  // Upper bound as well as lower: nobody types a 120-character product name,
+  // and this is untrusted inbound text on the shared single-process webhook
+  // worker — matching it against every product in the catalog is work we
+  // should never do on behalf of an arbitrary sender. detectProductQuery()
+  // caps its own term at 60 for the same reason.
+  if (!name || name.length < 3 || name.length > MAX_TYPED_PRODUCT_NAME) return false;
 
   // Fuzzy match (typo tolerance + synonyms) against the same visible-product
   // set the menu itself shows — a customer typing "waachy" or "kelly welly"
