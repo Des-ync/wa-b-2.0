@@ -201,12 +201,19 @@ router.post('/mtnmomo/disbursement-callback/:reference', mtnDisbursementCallback
 /**
  * Hubtel callback: signed with HMAC-SHA256 (`x-hubtel-signature`) when configured.
  *
- * Legacy fallback only — Paystack is the sole active gateway for both customer
- * checkout and SaaS subscription billing. Hubtel is never used to initiate a
- * new charge; this route stays mounted purely to receive/verify any residual
- * in-flight Hubtel callbacks from before the Paystack switch. Not wired back
- * into any active flow — kept dormant intentionally, to be reconsidered later.
- * Mounted with express.raw() so we can verify the raw body.
+ * Legacy fallback — Paystack is the sole active gateway for initiating new
+ * charges (customer checkout and SaaS subscription billing). Hubtel is never
+ * used to START a charge; this route stays mounted only to receive/verify any
+ * residual in-flight Hubtel callback from before the Paystack switch. It IS
+ * a live, reachable route (this was previously mis-described as "dormant" —
+ * it is not: a validly-signed request here reaches the exact same
+ * applyBillingSuccess/applyBillingFailure billing-mutation path Paystack's
+ * webhook uses). subscription.service.js's applySuccessfulPayment/
+ * markPaymentFailed require the caller's gateway to match the
+ * billing_transactions row's own `gateway` column, so a Hubtel-signed
+ * callback can only ever settle a row that was actually raised against
+ * Hubtel — it cannot touch a live Paystack reference even if the reference
+ * string collided. Mounted with express.raw() so we can verify the raw body.
  */
 router.post('/hubtel/callback', async (req, res) => {
   const signature = req.headers['x-hubtel-signature'] || req.headers['hubtel-signature'];

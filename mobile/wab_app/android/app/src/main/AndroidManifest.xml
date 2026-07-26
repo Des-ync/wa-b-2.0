@@ -2,6 +2,8 @@
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.USE_BIOMETRIC"/>
+    <!-- speech_to_text (voice product updates) does not auto-merge this permission. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <application
         android:label="WA-B"
         android:name="${applicationName}"

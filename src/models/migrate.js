@@ -5,6 +5,18 @@ const logger = require('../utils/logger');
 const SQL = `
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
+-- One-row-per-name marker table for one-time DATA backfills below (schema
+-- changes already get this for free via IF NOT EXISTS/ADD COLUMN IF NOT
+-- EXISTS, but a data backfill like "copy existing orders into
+-- payment_attempts" has no such built-in guard) — this migration script
+-- re-runs on every deploy (.github/workflows/deploy.yml), so without a
+-- marker each backfill would re-scan its whole source table forever instead
+-- of running exactly once.
+CREATE TABLE IF NOT EXISTS schema_backfills (
+  name    TEXT PRIMARY KEY,
+  done_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- =========================================================================
 -- businesses: SME tenants paying for the SaaS
 -- =========================================================================
@@ -423,10 +435,18 @@ CREATE TABLE IF NOT EXISTS payment_attempts (
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_payment_attempts_order ON payment_attempts(order_id);
--- Backfill: pre-existing orders' current refs stay resolvable.
-INSERT INTO payment_attempts (reference, order_id, method)
-SELECT payment_ref, id, payment_method FROM orders WHERE payment_ref IS NOT NULL
-ON CONFLICT (reference) DO NOTHING;
+-- One-time backfill: pre-existing orders' current refs stay resolvable.
+-- New orders get their payment_attempts row through the normal app insert
+-- path (order.service.js), so this only ever needed to run once.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM schema_backfills WHERE name = 'payment_attempts_from_orders') THEN
+    INSERT INTO payment_attempts (reference, order_id, method)
+    SELECT payment_ref, id, payment_method FROM orders WHERE payment_ref IS NOT NULL
+    ON CONFLICT (reference) DO NOTHING;
+    INSERT INTO schema_backfills (name) VALUES ('payment_attempts_from_orders');
+  END IF;
+END $$;
 
 -- =========================================================================
 -- conversation_state: per-customer flow tracker
@@ -960,10 +980,17 @@ ALTER TABLE customers ADD COLUMN IF NOT EXISTS consent_source TEXT
   CHECK (consent_source IS NULL OR consent_source IN
     ('whatsapp_first_message','instagram_first_message','messenger_first_message',
      'storefront_checkout','dashboard_manual_add'));
-UPDATE customers SET
-  consent_at = COALESCE(consent_at, created_at),
-  consent_source = COALESCE(consent_source, channel || '_first_message')
-WHERE consent_at IS NULL;
+-- One-time backfill, same reasoning as payment_attempts_from_orders above.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM schema_backfills WHERE name = 'customers_consent_at') THEN
+    UPDATE customers SET
+      consent_at = COALESCE(consent_at, created_at),
+      consent_source = COALESCE(consent_source, channel || '_first_message')
+    WHERE consent_at IS NULL;
+    INSERT INTO schema_backfills (name) VALUES ('customers_consent_at');
+  END IF;
+END $$;
 
 -- =========================================================================
 -- Account closure (self-serve, with retention warning shown before confirm —

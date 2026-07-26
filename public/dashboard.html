@@ -18,7 +18,7 @@
 <!-- Client-side WebAuthn ceremonies (passkey add/manage below) — matches the
      already-installed @simplewebauthn/server version on the backend. Exposes
      window.SimpleWebAuthnBrowser.{startRegistration,startAuthentication}. -->
-<script src="https://cdn.jsdelivr.net/npm/@simplewebauthn/browser@13.3.0/dist/bundle/index.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@simplewebauthn/browser@13.3.0/dist/bundle/index.umd.min.js" integrity="sha384-DnjEgzmDuatj/e2GTxbXmPijf7QyPvp8oAnvlWOqOqfMGekoIyImmgeJ+CxrALC7" crossorigin="anonymous"></script>
 <style>
   .dash { max-width: var(--max, 1100px); margin: 0 auto; padding: 40px 20px 80px; }
   .dash h1 { margin-bottom: 4px; }
@@ -403,12 +403,12 @@
       </div>
       <div style="margin-top:20px;border-top:1px solid var(--line);padding-top:16px">
         <div class="row-form product-form">
-          <div><label>Name</label><input id="pName" placeholder="Jollof Rice (Large)" /></div>
-          <div><label>Description</label><input id="pDesc" placeholder="Spicy jollof with chicken" /></div>
-          <div><label>Price GH₵</label><input id="pPrice" type="number" min="0" step="0.01" placeholder="45.00" /></div>
-          <div><label>Category</label><input id="pCat" placeholder="meals" /></div>
-          <div><label>Image URL</label><input id="pImage" placeholder="https://…" /></div>
-          <div><label>Stock (optional)</label><input id="pStock" type="number" min="0" placeholder="Unlimited" /></div>
+          <div><label for="pName">Name</label><input id="pName" placeholder="Jollof Rice (Large)" /></div>
+          <div><label for="pDesc">Description</label><input id="pDesc" placeholder="Spicy jollof with chicken" /></div>
+          <div><label for="pPrice">Price GH₵</label><input id="pPrice" type="number" min="0" step="0.01" placeholder="45.00" /></div>
+          <div><label for="pCat">Category</label><input id="pCat" placeholder="meals" /></div>
+          <div><label for="pImage">Image URL</label><input id="pImage" placeholder="https://…" /></div>
+          <div><label for="pStock">Stock (optional)</label><input id="pStock" type="number" min="0" placeholder="Unlimited" /></div>
           <div><button class="btn btn-primary btn-sm" onclick="addProduct()">Add product</button></div>
         </div>
       </div>
@@ -451,10 +451,10 @@
       </div>
       <div style="margin-top:20px;border-top:1px solid var(--line);padding-top:16px">
         <div class="row-form" style="grid-template-columns:1fr 1fr 1fr 1fr auto">
-          <div><label>Name</label><input id="supName" placeholder="Kejetia Wholesale" /></div>
-          <div><label>Contact name</label><input id="supContact" placeholder="Kwame" /></div>
-          <div><label>Phone</label><input id="supPhone" placeholder="0241234567" /></div>
-          <div><label>Notes</label><input id="supNotes" placeholder="Delivers Tuesdays" /></div>
+          <div><label for="supName">Name</label><input id="supName" placeholder="Kejetia Wholesale" /></div>
+          <div><label for="supContact">Contact name</label><input id="supContact" placeholder="Kwame" /></div>
+          <div><label for="supPhone">Phone</label><input id="supPhone" placeholder="0241234567" /></div>
+          <div><label for="supNotes">Notes</label><input id="supNotes" placeholder="Delivers Tuesdays" /></div>
           <div><button class="btn btn-primary btn-sm" onclick="addSupplier()">Add</button></div>
         </div>
       </div>
@@ -485,20 +485,20 @@
       </div>
       <div style="margin-top:20px;border-top:1px solid var(--line);padding-top:16px">
         <div class="row-form" style="grid-template-columns:1fr 1fr 1fr 1fr 1fr auto">
-          <div><label>Code</label><input id="promoCode" placeholder="FRIDAY10" /></div>
-          <div><label>Type</label><select id="promoType"><option value="percent">Percent %</option><option value="fixed">Fixed GH₵</option></select></div>
-          <div><label>Value</label><input id="promoValue" type="number" min="0" step="0.01" placeholder="10" /></div>
-          <div><label>Max uses (optional)</label><input id="promoMaxUses" type="number" min="1" placeholder="" /></div>
-          <div><label>Expires (optional)</label><input id="promoExpires" type="date" /></div>
+          <div><label for="promoCode">Code</label><input id="promoCode" placeholder="FRIDAY10" /></div>
+          <div><label for="promoType">Type</label><select id="promoType"><option value="percent">Percent %</option><option value="fixed">Fixed GH₵</option></select></div>
+          <div><label for="promoValue">Value</label><input id="promoValue" type="number" min="0" step="0.01" placeholder="10" /></div>
+          <div><label for="promoMaxUses">Max uses (optional)</label><input id="promoMaxUses" type="number" min="1" placeholder="" /></div>
+          <div><label for="promoExpires">Expires (optional)</label><input id="promoExpires" type="date" /></div>
           <div><button class="btn btn-primary btn-sm" onclick="addPromo()">Add</button></div>
         </div>
         <details style="margin-top:14px">
           <summary style="cursor:pointer;font-size:13px;color:var(--muted)">More conditions (optional)</summary>
           <div class="row-form" style="grid-template-columns:1fr 1fr 1fr 1fr;margin-top:10px">
-            <div><label>Minimum order GH₵</label><input id="promoMinOrder" type="number" min="0" step="0.01" placeholder="" /></div>
+            <div><label for="promoMinOrder">Minimum order GH₵</label><input id="promoMinOrder" type="number" min="0" step="0.01" placeholder="" /></div>
             <div><label style="display:flex;align-items:center;gap:6px;margin-top:18px"><input type="checkbox" id="promoFirstOrder" style="width:auto" /> First order only</label></div>
-            <div><label>Customer tag</label><input id="promoTag" placeholder="vip" /></div>
-            <div><label>Customer group</label>
+            <div><label for="promoTag">Customer tag</label><input id="promoTag" placeholder="vip" /></div>
+            <div><label for="promoSegment">Customer group</label>
               <select id="promoSegment">
                 <option value="">Any</option>
                 <option value="ordered_30d">Ordered in last 30 days</option>
@@ -508,7 +508,7 @@
             </div>
           </div>
           <div class="row-form" style="grid-template-columns:1fr 1fr;margin-top:10px">
-            <div><label>Category (product must be in cart)</label><input id="promoCategory" placeholder="drinks" /></div>
+            <div><label for="promoCategory">Category (product must be in cart)</label><input id="promoCategory" placeholder="drinks" /></div>
           </div>
         </details>
       </div>
@@ -525,7 +525,7 @@
       <div style="margin-bottom:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
         <select id="orderStatusFilter" onchange="loadOrders()" style="max-width:220px">
           <option value="">All statuses</option>
-          <option>pending</option><option>confirmed</option><option>paid</option>
+          <option>pending</option><option>confirmed</option>
           <option>preparing</option><option>ready</option><option>delivered</option><option>cancelled</option>
         </select>
         <button class="btn btn-ghost btn-sm" onclick="exportOrdersCsv()">Download list</button>
@@ -568,21 +568,21 @@
           <textarea id="sWelcome" rows="3" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-sm,6px);font:inherit;background:var(--bg);color:var(--ink)" placeholder="👋 Akwaaba! Welcome to Auntie Ama's Kitchen…"></textarea>
         </div>
         <div class="row-form" style="grid-template-columns:1fr 1fr 1fr 1fr 1fr">
-          <div><label>Bot language</label><select id="sLang"><option value="en">English</option><option value="tw">Twi</option></select></div>
-          <div><label>Support number</label><input id="sSupport" placeholder="0241234567" /></div>
-          <div><label>Flat delivery fee GH₵</label><input id="sFee" type="number" min="0" step="0.01" placeholder="0.00" /></div>
-          <div><label>Opens (HH:MM)</label><input id="sOpen" placeholder="08:00" /></div>
-          <div><label>Closes (HH:MM)</label><input id="sClose" placeholder="21:00" /></div>
+          <div><label for="sLang">Bot language</label><select id="sLang"><option value="en">English</option><option value="tw">Twi</option></select></div>
+          <div><label for="sSupport">Support number</label><input id="sSupport" placeholder="0241234567" /></div>
+          <div><label for="sFee">Flat delivery fee GH₵</label><input id="sFee" type="number" min="0" step="0.01" placeholder="0.00" /></div>
+          <div><label for="sOpen">Opens (HH:MM)</label><input id="sOpen" placeholder="08:00" /></div>
+          <div><label for="sClose">Closes (HH:MM)</label><input id="sClose" placeholder="21:00" /></div>
         </div>
         <div class="row-form" style="grid-template-columns:1fr 1fr 1fr">
-          <div><label>Owner name</label><input id="sOwnerName" placeholder="Ama Boateng" /></div>
-          <div><label>MoMo payout number</label><input id="sPayoutNumber" placeholder="0241234567" /></div>
-          <div><label>MoMo network</label><select id="sPayoutNetwork"><option value="">Select network</option><option value="mtn">MTN</option><option value="vodafone">Vodafone/Telecel</option><option value="airteltigo">AirtelTigo</option></select></div>
+          <div><label for="sOwnerName">Owner name</label><input id="sOwnerName" placeholder="Ama Boateng" /></div>
+          <div><label for="sPayoutNumber">MoMo payout number</label><input id="sPayoutNumber" placeholder="0241234567" /></div>
+          <div><label for="sPayoutNetwork">MoMo network</label><select id="sPayoutNetwork"><option value="">Select network</option><option value="mtn">MTN</option><option value="vodafone">Vodafone/Telecel</option><option value="airteltigo">AirtelTigo</option></select></div>
         </div>
         <details style="margin-top:2px">
           <summary style="cursor:pointer;font-size:13px;color:var(--muted)">More business details (optional)</summary>
           <div class="row-form" style="grid-template-columns:1fr;margin-top:10px">
-            <div><label>VAT rate % (0 if not VAT-registered)</label><input id="sVatRate" type="number" min="0" max="100" step="0.01" placeholder="0" /></div>
+            <div><label for="sVatRate">VAT rate % (0 if not VAT-registered)</label><input id="sVatRate" type="number" min="0" max="100" step="0.01" placeholder="0" /></div>
           </div>
           <div style="margin-top:10px">
             <label style="font-size:12px;color:var(--muted)">Delivery zones — one per line as <code>Zone name: fee</code> (overrides the flat fee; customers pick their zone at checkout)</label>
@@ -599,8 +599,8 @@
       <p class="muted" style="margin-bottom:14px;font-size:13px">A public web page listing your catalog, synced live from what you sell on WhatsApp. Share the link or print the QR code for your counter — customers land on the page and tap through to order on WhatsApp, or check out right there as a guest.</p>
       <div style="display:grid;gap:14px;max-width:640px">
         <div class="row-form" style="grid-template-columns:1fr 1fr">
-          <div><label>Logo image URL (optional)</label><input id="sLogoUrl" placeholder="https://…/logo.jpg" /></div>
-          <div><label>Banner image URL (optional)</label><input id="sBannerUrl" placeholder="https://…/banner.jpg" /></div>
+          <div><label for="sLogoUrl">Logo image URL (optional)</label><input id="sLogoUrl" placeholder="https://…/logo.jpg" /></div>
+          <div><label for="sBannerUrl">Banner image URL (optional)</label><input id="sBannerUrl" placeholder="https://…/banner.jpg" /></div>
         </div>
         <div><button class="btn btn-ghost btn-sm" onclick="saveBranding()">Save branding</button></div>
         <div>
@@ -635,8 +635,8 @@
         <div><label style="display:flex;align-items:center;gap:8px;font-size:13px"><input type="checkbox" id="cnEnabled" style="width:auto" onchange="syncCheckboxGroup('cnEnabled','cnFields')" /> Remind customers who leave items in their cart</label></div>
         <div id="cnFields" style="display:grid;gap:14px">
           <div class="row-form" style="grid-template-columns:1fr 1fr">
-            <div><label>Wait before first reminder (minutes)</label><input id="cnDelay" type="number" min="5" max="1440" placeholder="60" /></div>
-            <div><label>Max reminders per cart</label><input id="cnMaxPerCart" type="number" min="1" max="5" placeholder="1" /></div>
+            <div><label for="cnDelay">Wait before first reminder (minutes)</label><input id="cnDelay" type="number" min="5" max="1440" placeholder="60" /></div>
+            <div><label for="cnMaxPerCart">Max reminders per cart</label><input id="cnMaxPerCart" type="number" min="1" max="5" placeholder="1" /></div>
           </div>
           <div>
             <label style="font-size:12px;color:var(--muted)">Custom message (optional — leave blank for the default copy). Use {shop} and {count} as placeholders.</label>
@@ -649,7 +649,7 @@
               <textarea id="cnTemplateB" rows="2" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-sm,6px);font:inherit;background:var(--bg);color:var(--ink)" placeholder="Don't miss out — your {count} items at {shop} are still saved!"></textarea>
             </div>
             <div class="row-form" style="grid-template-columns:1fr;margin-top:10px">
-              <div><label>Coupon code to mention (optional)</label><input id="cnCoupon" placeholder="COMEBACK10" /></div>
+              <div><label for="cnCoupon">Coupon code to mention (optional)</label><input id="cnCoupon" placeholder="COMEBACK10" /></div>
             </div>
           </details>
           <div><button class="btn btn-primary btn-sm" onclick="saveCartNudgeSettings()">Save cart reminder settings</button></div>
@@ -665,19 +665,19 @@
         <div><label style="display:flex;align-items:center;gap:8px;font-size:13px"><input type="checkbox" id="loyEnabled" style="width:auto" onchange="syncCheckboxGroup('loyEnabled','loyFields')" /> Enable loyalty & rewards</label></div>
         <div id="loyFields" style="display:grid;gap:14px">
           <div class="row-form" style="grid-template-columns:1fr 1fr">
-            <div><label>Points earned per GH₵ spent</label><input id="loyPointsPerGhs" type="number" min="0" step="0.1" placeholder="1" /></div>
-            <div><label>GH₵ value per point redeemed</label><input id="loyRedemptionRate" type="number" min="0" step="0.001" placeholder="0.05" /></div>
+            <div><label for="loyPointsPerGhs">Points earned per GH₵ spent</label><input id="loyPointsPerGhs" type="number" min="0" step="0.1" placeholder="1" /></div>
+            <div><label for="loyRedemptionRate">GH₵ value per point redeemed</label><input id="loyRedemptionRate" type="number" min="0" step="0.001" placeholder="0.05" /></div>
           </div>
           <details>
             <summary style="cursor:pointer;font-size:13px;color:var(--muted)">More rewards (optional)</summary>
             <div class="row-form" style="grid-template-columns:1fr 1fr;margin-top:10px">
-              <div><label>"Buy N, get 1 free" — orders needed (0 = off)</label><input id="loyStampsTarget" type="number" min="0" max="100" placeholder="0" /></div>
-              <div><label>Free item value GH₵</label><input id="loyFreeItemValue" type="number" min="0" step="0.01" placeholder="0" /></div>
+              <div><label for="loyStampsTarget">"Buy N, get 1 free" — orders needed (0 = off)</label><input id="loyStampsTarget" type="number" min="0" max="100" placeholder="0" /></div>
+              <div><label for="loyFreeItemValue">Free item value GH₵</label><input id="loyFreeItemValue" type="number" min="0" step="0.01" placeholder="0" /></div>
             </div>
             <div class="row-form" style="grid-template-columns:1fr 1fr 1fr;margin-top:10px">
-              <div><label>Referral reward GH₵</label><input id="loyReferralReward" type="number" min="0" step="0.01" placeholder="0" /></div>
-              <div><label>Birthday discount type</label><select id="loyBirthdayType"><option value="percent">Percent %</option><option value="fixed">Fixed GH₵</option></select></div>
-              <div><label>Birthday discount value</label><input id="loyBirthdayValue" type="number" min="0" step="0.01" placeholder="0" /></div>
+              <div><label for="loyReferralReward">Referral reward GH₵</label><input id="loyReferralReward" type="number" min="0" step="0.01" placeholder="0" /></div>
+              <div><label for="loyBirthdayType">Birthday discount type</label><select id="loyBirthdayType"><option value="percent">Percent %</option><option value="fixed">Fixed GH₵</option></select></div>
+              <div><label for="loyBirthdayValue">Birthday discount value</label><input id="loyBirthdayValue" type="number" min="0" step="0.01" placeholder="0" /></div>
             </div>
             <div style="margin-top:10px">
               <label style="font-size:12px;color:var(--muted)">VIP tiers — one per line as <code>Name: minimum lifetime GH₵ spend</code>, e.g. Gold: 500</label>
@@ -726,10 +726,10 @@
           </table>
         </div>
         <div class="row-form" style="grid-template-columns:1fr 1fr 1fr 2fr auto;margin-top:16px">
-          <div><label>Date</label><input id="expDate" type="date" /></div>
-          <div><label>Category</label><input id="expCategory" placeholder="ingredients" /></div>
-          <div><label>Amount GH₵</label><input id="expAmount" type="number" min="0" step="0.01" placeholder="50.00" /></div>
-          <div><label>Description</label><input id="expDescription" placeholder="Weekly market run" /></div>
+          <div><label for="expDate">Date</label><input id="expDate" type="date" /></div>
+          <div><label for="expCategory">Category</label><input id="expCategory" placeholder="ingredients" /></div>
+          <div><label for="expAmount">Amount GH₵</label><input id="expAmount" type="number" min="0" step="0.01" placeholder="50.00" /></div>
+          <div><label for="expDescription">Description</label><input id="expDescription" placeholder="Weekly market run" /></div>
           <div><button class="btn btn-primary btn-sm" onclick="addExpense()">Add</button></div>
         </div>
       </div>
@@ -759,8 +759,8 @@
       </div>
       <div style="margin-top:20px;border-top:1px solid var(--line);padding-top:16px">
         <div class="row-form" style="grid-template-columns:1fr 1fr 1fr auto">
-          <div><label>Name</label><input id="keyName" placeholder="Kwame — kitchen" /></div>
-          <div><label>Role</label>
+          <div><label for="keyName">Name</label><input id="keyName" placeholder="Kwame — kitchen" /></div>
+          <div><label for="keyRole">Role</label>
             <select id="keyRole">
               <option value="manager">Manager</option>
               <option value="support">Support</option>
@@ -768,7 +768,7 @@
               <option value="owner">Owner</option>
             </select>
           </div>
-          <div><label>Expires (optional)</label><input id="keyExpires" type="date" /></div>
+          <div><label for="keyExpires">Expires (optional)</label><input id="keyExpires" type="date" /></div>
           <div><button class="btn btn-primary btn-sm" onclick="issueTeamKey()">Issue key</button></div>
         </div>
       </div>
@@ -1174,7 +1174,7 @@ async function loadProducts() {
     ].filter(Boolean).join(' ') || '<span class="muted" style="font-size:12px">—</span>';
     return `
     <tr data-id="${p.id}">
-      <td>${p.image_url ? `<img src="${esc(p.image_url)}" class="thumb" onerror="this.style.display='none'" />` : '<span class="muted" style="font-size:12px">—</span>'}</td>
+      <td>${p.image_url ? `<img src="${esc(p.image_url)}" alt="${esc(p.name || 'Product photo')}" class="thumb" onerror="this.style.display='none'" />` : '<span class="muted" style="font-size:12px">—</span>'}</td>
       <td><strong>${esc(p.name)}</strong></td>
       <td class="muted">${esc(p.description || '')}</td>
       <td>${Number(p.price_ghs).toFixed(2)}</td>
@@ -1674,9 +1674,9 @@ function renderOrderModal(detail) {
     <h3>Delivery</h3>
     ${o.delivery_address ? `<p style="margin-bottom:10px"><span class="muted">${esc(o.delivery_address)}</span> — <a href="${esc(mapsLink(o.delivery_address))}" target="_blank" rel="noopener">View on map ↗</a></p>` : ''}
     <div class="row-form" style="grid-template-columns:1fr 1fr 1fr auto;align-items:end">
-      <div><label>Rider name</label><input id="omRiderName" value="${esc(o.rider_name || '')}" /></div>
-      <div><label>Rider phone</label><input id="omRiderPhone" value="${esc(o.rider_phone || '')}" /></div>
-      <div><label>Delivery status</label>
+      <div><label for="omRiderName">Rider name</label><input id="omRiderName" value="${esc(o.rider_name || '')}" /></div>
+      <div><label for="omRiderPhone">Rider phone</label><input id="omRiderPhone" value="${esc(o.rider_phone || '')}" /></div>
+      <div><label for="omDeliveryStatus">Delivery status</label>
         <select id="omDeliveryStatus">
           ${['unassigned', 'assigned', 'picked_up', 'delivered'].map(s => `<option value="${s}" ${o.delivery_status === s ? 'selected' : ''}>${s}</option>`).join('')}
         </select>
@@ -1686,11 +1686,11 @@ function renderOrderModal(detail) {
     <div style="margin-top:10px">
       <label style="font-size:12px;color:var(--muted)">Delivery proof photo URL — set this alongside marking the order "delivered" to notify the customer with the photo</label>
       <input id="omDeliveryProof" placeholder="https://…" value="${esc(o.delivery_proof_url || '')}" style="width:100%" />
-      ${o.delivery_proof_url ? `<div style="margin-top:6px"><img src="${esc(o.delivery_proof_url)}" style="max-width:160px;border-radius:var(--r-sm,6px)" onerror="this.style.display='none'" /></div>` : ''}
+      ${o.delivery_proof_url ? `<div style="margin-top:6px"><img src="${esc(o.delivery_proof_url)}" alt="Delivery proof photo" style="max-width:160px;border-radius:var(--r-sm,6px)" onerror="this.style.display='none'" /></div>` : ''}
     </div>
     <div class="row-form" style="grid-template-columns:1fr 1fr;margin-top:10px">
-      <div><label>Estimated ready</label><input id="omReadyAt" type="datetime-local" value="${o.estimated_ready_at ? toLocalDatetimeValue(o.estimated_ready_at) : ''}" /></div>
-      <div><label>Estimated delivery</label><input id="omDeliveryAt" type="datetime-local" value="${o.estimated_delivery_at ? toLocalDatetimeValue(o.estimated_delivery_at) : ''}" /></div>
+      <div><label for="omReadyAt">Estimated ready</label><input id="omReadyAt" type="datetime-local" value="${o.estimated_ready_at ? toLocalDatetimeValue(o.estimated_ready_at) : ''}" /></div>
+      <div><label for="omDeliveryAt">Estimated delivery</label><input id="omDeliveryAt" type="datetime-local" value="${o.estimated_delivery_at ? toLocalDatetimeValue(o.estimated_delivery_at) : ''}" /></div>
     </div>
     <div style="margin-top:8px"><button class="btn btn-ghost btn-sm" onclick="saveOrderEstimates('${o.id}')">Save ETAs</button></div>
 

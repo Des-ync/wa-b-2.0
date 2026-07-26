@@ -19,25 +19,18 @@
 <section class="page-hero"><div class="wrap">
   <span class="eyebrow">Legal</span>
   <h1 style="margin-top:18px">Cookie Policy</h1>
-  <p>Short version: we use one essential cookie to keep you signed in. We do not use ad pixels, third-party trackers, or any cookie that profiles you across the web.</p>
+  <p>Short version: the WA-B dashboard doesn't set its own cookies at all — you stay signed in via a token held in your browser's session storage, not a cookie. We do not use ad pixels, third-party trackers, or any cookie that profiles you across the web.</p>
 </div></section>
 
 <section class="section section--tight"><div class="wrap"><div class="prose">
   <p class="prose-meta">Last updated: 1 May 2026</p>
 
   <h2>What we use</h2>
-  <table style="width:100%;border-collapse:collapse;margin-top:16px;font-size:14.5px">
-    <thead><tr style="text-align:left;border-bottom:1px solid var(--line)"><th style="padding:12px 8px">Name</th><th style="padding:12px 8px">Purpose</th><th style="padding:12px 8px">Duration</th><th style="padding:12px 8px">Type</th></tr></thead>
-    <tbody>
-      <tr style="border-bottom:1px solid var(--line)"><td style="padding:14px 8px;font-family:var(--font-mono);font-size:12.5px">wab_session</td><td style="padding:14px 8px">Keeps you signed in to the dashboard.</td><td style="padding:14px 8px">30 days</td><td style="padding:14px 8px">Essential</td></tr>
-      <tr style="border-bottom:1px solid var(--line)"><td style="padding:14px 8px;font-family:var(--font-mono);font-size:12.5px">wab_csrf</td><td style="padding:14px 8px">Protects against cross-site request forgery.</td><td style="padding:14px 8px">Session</td><td style="padding:14px 8px">Essential</td></tr>
-      <tr style="border-bottom:1px solid var(--line)"><td style="padding:14px 8px;font-family:var(--font-mono);font-size:12.5px">wab_theme</td><td style="padding:14px 8px">Remembers your light/dark mode preference.</td><td style="padding:14px 8px">1 year</td><td style="padding:14px 8px">Preference</td></tr>
-      <tr style="border-bottom:1px solid var(--line)"><td style="padding:14px 8px;font-family:var(--font-mono);font-size:12.5px">wab_locale</td><td style="padding:14px 8px">Remembers your language (English, Twi, Ga, Ewe).</td><td style="padding:14px 8px">1 year</td><td style="padding:14px 8px">Preference</td></tr>
-    </tbody>
-  </table>
+  <p>WA-B's own code sets no first-party cookies. Sign-in state is kept in your browser's session storage (cleared when you close the tab or sign out), not a cookie. Two small local-storage preferences (dark/light mode, and whether you've dismissed the passkey setup prompt) are stored client-side and never leave your browser.</p>
+  <p>Our authentication provider, <b>Clerk</b>, may set its own cookies on <code>clerk.skes.tech</code> as part of the sign-in flow (e.g. session and device-recognition cookies). Those are governed by <a href="https://clerk.com/privacy" target="_blank" rel="noopener">Clerk's own privacy policy</a>, not this one.</p>
 
   <h2>Analytics</h2>
-  <p>Our marketing site uses <a href="https://plausible.io" target="_blank" rel="noopener">Plausible Analytics</a>, a cookieless, EU-hosted tool that aggregates traffic without tracking individuals. No personal data leaves your browser. We don't share with anyone, anywhere, ever.</p>
+  <p>We do not currently run any analytics or tracking tool on the marketing site.</p>
 
   <h2>What we don't use</h2>
   <ul>
@@ -48,10 +41,10 @@
   </ul>
 
   <h2>Your control</h2>
-  <p>You can delete cookies in your browser at any time. The session cookie will simply log you out. It's required for the dashboard to function.</p>
+  <p>Clearing your browser's session storage (or just closing the tab) signs you out of the dashboard — there's no cookie to delete on our end. To manage Clerk's own sign-in cookies, see their privacy policy linked above.</p>
 
   <h2>Changes</h2>
-  <p>If we ever add a new cookie, we'll update this page and notify signed-in merchants by email. Questions: <a href="mailto:privacy@wa-b.com">privacy@wa-b.com</a>.</p>
+  <p>If we ever add a first-party cookie, we'll update this page and notify signed-in merchants by email. Questions: <a href="mailto:privacy@wa-b.com">privacy@wa-b.com</a>.</p>
 </div></div></section>
 
 <footer class="footer">

@@ -6,7 +6,44 @@ on:
   workflow_dispatch: {}
 
 jobs:
+  # Runs on a clean, disposable runner with no access to production secrets —
+  # a failing test here blocks the deploy job below from ever running.
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: whatsapp_saas_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/whatsapp_saas_test
+      NODE_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run migrate
+      # One retry: a rare (~5%, observed on Node 26 locally, not yet confirmed
+      # on this job's Node 18) supertest/HTTP-parser race unrelated to any
+      # single test's own logic can occasionally fail an unrelated test with
+      # a garbled-response parse error. A genuine regression fails twice in a
+      # row; this only absorbs the rare flake.
+      - run: npm test || npm test
+
   deploy:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - name: Deploy to Oracle Cloud app VM

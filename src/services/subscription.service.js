@@ -252,7 +252,7 @@ async function initiateRenewal({ business, plan }) {
  *     within 1 pesewa. Mismatches mark the row as failed and do NOT extend
  *     the subscription — this blocks "$0.01 paid, full month granted" attacks.
  */
-async function applySuccessfulPayment({ reference, transactionId, amount }) {
+async function applySuccessfulPayment({ reference, transactionId, amount, gateway }) {
   return transaction(async client => {
     const billingRes = await client.query(
       `SELECT bt.*, s.business_id AS sub_business_id, s.plan_id, p.billing_cycle,
@@ -265,9 +265,14 @@ async function applySuccessfulPayment({ reference, transactionId, amount }) {
          -- pending/current plan only for legacy rows created before plan_id
          -- existed, so a plan change mid-flight can't apply the wrong tier.
          JOIN plans p ON p.id = COALESCE(bt.plan_id, s.pending_plan_id, s.plan_id)
-        WHERE bt.reference = $1
+        -- gateway must match the caller's own identity — a signed callback
+        -- from gateway A must never be able to settle a billing_transactions
+        -- row that was actually raised against gateway B (e.g. a "dormant"
+        -- Hubtel callback settling a live Paystack subscription charge just
+        -- because the reference string happens to match).
+        WHERE bt.reference = $1 AND bt.gateway = $2
         FOR UPDATE`,
-      [reference]
+      [reference, gateway]
     );
     const billing = billingRes.rows[0];
     if (!billing) {
@@ -364,12 +369,14 @@ async function applySuccessfulPayment({ reference, transactionId, amount }) {
   });
 }
 
-async function markPaymentFailed({ reference, errorPayload }) {
+async function markPaymentFailed({ reference, errorPayload, gateway }) {
   return transaction(async client => {
     const lockRes = await client.query(
+      // Same gateway-scoping as applySuccessfulPayment above — a callback
+      // from one gateway must never be able to touch another gateway's row.
       `SELECT id, status, subscription_id FROM billing_transactions
-        WHERE reference = $1 FOR UPDATE`,
-      [reference]
+        WHERE reference = $1 AND gateway = $2 FOR UPDATE`,
+      [reference, gateway]
     );
     const existing = lockRes.rows[0];
     if (!existing) return { applied: false, reason: 'unknown_reference' };

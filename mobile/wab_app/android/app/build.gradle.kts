@@ -64,6 +64,17 @@ android {
             // fresh checkout without the keystore.
             signingConfig = if (hasReleaseSigning) signingConfigs.getByName("release")
                 else signingConfigs.getByName("debug")
+            // Minify + shrink for release (smaller APK/AAB, some obfuscation).
+            // proguard-rules.pro has a defensive baseline for Firebase/
+            // Credential Manager/flutter_local_notifications' reflection —
+            // re-verify sign-in, passkeys, push, scanning, and voice update
+            // on a real release build/device after touching this.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
     }
 }

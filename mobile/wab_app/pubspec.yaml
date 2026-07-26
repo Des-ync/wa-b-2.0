@@ -1,6 +1,10 @@
 name: wab_app
 description: WA-B — WhatsApp commerce dashboard for merchants and the WA-B team.
 publish_to: "none"
+# Versioning: bump the build number (the +N suffix) on every release build
+# submitted to either store — both the App Store and Play Store require it to
+# strictly increase and reject a re-upload otherwise. Bump the semver part
+# (1.0.0) only for user-visible feature changes; see CHANGELOG.md.
 version: 1.0.0+1
 
 environment:

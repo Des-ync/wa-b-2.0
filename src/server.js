@@ -7,16 +7,9 @@ const rateLimit = require('express-rate-limit');
 const cron = require('node-cron');
 const logger = require('./utils/logger');
 const { pool, query } = require('./config/database');
-const notification = require('./services/notification.service');
 const webhookProcessor = require('./services/webhook.processor');
-const paymentSweeper = require('./services/payment.sweeper');
-const cartNudge = require('./services/cart.nudge');
-const loyaltyJobs = require('./services/loyalty.jobs');
-const automations = require('./services/automations');
-const broadcastSender = require('./services/broadcast.sender');
 const { alertOps } = require('./services/alert.service');
-const dbBackup = require('./jobs/db.backup');
-const dailySummary = require('./jobs/daily.summary');
+const { startCronJobs } = require('./services/cronJobs');
 const { requireAuth } = require('./middleware/auth');
 const { latencyMiddleware } = require('./middleware/latency');
 const { requestIdMiddleware } = require('./middleware/requestId');
@@ -191,6 +184,52 @@ app.get('/wa-b/storefront.html', async (req, res, next) => {
   }
 });
 
+// robots.txt / sitemap.xml — same "true domain root" constraint as the
+// passkey files below: crawlers only ever look at /robots.txt, never
+// /wa-b/robots.txt, so these can't just be static files under public/.
+// Scoped narrowly (two exact filenames) so the reserved domain root stays
+// free for other future projects, same as everything else here.
+const INDEXABLE_PAGES = [
+  'index.html', 'pricing.html', 'features.html', 'about.html', 'integrations.html',
+  'docs.html', 'blog.html', 'careers.html', 'press.html', 'changelog.html',
+  'contact.html', 'security.html', 'privacy.html', 'terms.html', 'cookies.html',
+  'data-processing.html', 'roi-calculator.html', 'guide-go-live-checklist.html',
+  'guide-how-it-works.html', 'guide-whatsapp-commerce-playbook.html',
+  'industry-boutiques.html', 'industry-cosmetics.html', 'industry-grocery.html',
+  'industry-pharmacies.html', 'industry-restaurants.html', 'signup.html', 'status.html'
+];
+
+app.get('/robots.txt', (req, res) => {
+  const base = (process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '');
+  res.type('text/plain').send(
+    [
+      'User-agent: *',
+      'Allow: /wa-b/',
+      'Disallow: /wa-b/dashboard.html',
+      'Disallow: /wa-b/admin.html',
+      'Disallow: /wa-b/accountant.html',
+      'Disallow: /wa-b/login.html',
+      'Disallow: /wa-b/receipt.html',
+      'Disallow: /wa-b/payment-success.html',
+      'Disallow: /wa-b/payment-pending.html',
+      'Disallow: /wa-b/mobile-clerk-bridge.html',
+      'Disallow: /wa-b/case-study-template.html',
+      '',
+      `Sitemap: ${base}/sitemap.xml`
+    ].join('\n')
+  );
+});
+
+app.get('/sitemap.xml', (req, res) => {
+  const base = (process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '');
+  const urls = INDEXABLE_PAGES
+    .map(p => `  <url><loc>${base}/wa-b/${p}</loc></url>`)
+    .join('\n');
+  res.type('application/xml').send(
+    `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>`
+  );
+});
+
 // Native passkey domain association files. Both specs require these at the
 // true domain root (never under /wa-b, unlike everything else this app
 // serves) — Apple/Android won't look anywhere else.
@@ -354,100 +393,6 @@ app.use((err, _req, res, _next) => {
   if (res.headersSent) return;
   res.status(500).json({ success: false, error: 'Internal server error' });
 });
-
-/* -------------------------------------------------------------------------
-   Cron jobs (Africa/Accra)
-   ------------------------------------------------------------------------- */
-
-function startCronJobs() {
-  // Each job acquires a DB-backed worker_lock first, so even if multiple
-  // instances run this scheduler (RUN_CRON=true everywhere), only one will
-  // execute the body of each job per fire.
-  cron.schedule('0 8 * * *', () => {
-    notification.runRenewalJob().catch(err =>
-      logger.error('renewalJob crashed: %s', err.message, { stack: err.stack })
-    );
-  }, { timezone: 'Africa/Accra' });
-
-  cron.schedule('0 9 * * *', () => {
-    notification.runReminderJob().catch(err =>
-      logger.error('reminderJob crashed: %s', err.message, { stack: err.stack })
-    );
-  }, { timezone: 'Africa/Accra' });
-
-  cron.schedule('0 10 * * *', () => {
-    notification.runSuspensionJob().catch(err =>
-      logger.error('suspensionJob crashed: %s', err.message, { stack: err.stack })
-    );
-  }, { timezone: 'Africa/Accra' });
-
-  // Reconcile stuck pending payments every 5 minutes.
-  cron.schedule('*/5 * * * *', () => {
-    paymentSweeper.runPaymentSweeper().catch(err =>
-      logger.error('paymentSweeper crashed: %s', err.message, { stack: err.stack })
-    );
-  }, { timezone: 'Africa/Accra' });
-
-  // Weekly retention prune (Sunday 02:30).
-  cron.schedule('30 2 * * 0', () => {
-    notification.runPruneJob().catch(err =>
-      logger.error('pruneJob crashed: %s', err.message, { stack: err.stack })
-    );
-  }, { timezone: 'Africa/Accra' });
-
-  // Cart-abandonment nudges every 15 minutes (leader-locked, once per cart).
-  cron.schedule('*/15 * * * *', () => {
-    cartNudge.runCartNudgeJob().catch(err =>
-      logger.error('cartNudgeJob crashed: %s', err.message, { stack: err.stack })
-    );
-  }, { timezone: 'Africa/Accra' });
-
-  // Birthday loyalty coupons, daily 07:00 — self-locked via worker_locks
-  // (birthday_coupon_job), so this is safe even if RUN_CRON=true on more
-  // than one instance. Previously only scheduled in src/worker.js, which
-  // deploy/ecosystem.config.js never starts (only wa-saas-api / src/server.js
-  // runs in production) — it was dead code in practice.
-  cron.schedule('0 7 * * *', () => {
-    loyaltyJobs.runBirthdayCouponJob().catch(err =>
-      logger.error('birthdayCouponJob crashed: %s', err.message, { stack: err.stack })
-    );
-  }, { timezone: 'Africa/Accra' });
-
-  // Broadcast queue drain, once a minute — small rate-limited batches so a
-  // merchant's re-engagement blast never bursts past Meta's send limits.
-  cron.schedule('* * * * *', () => {
-    broadcastSender.runBroadcastSenderJob().catch(err =>
-      logger.error('broadcastSenderJob crashed: %s', err.message, { stack: err.stack })
-    );
-  }, { timezone: 'Africa/Accra' });
-
-  // Lifecycle automations (reorder reminder / win-back / post-purchase
-  // review / delivery feedback) every 30 minutes — hour/day-granularity
-  // triggers, no need for tighter polling.
-  cron.schedule('*/30 * * * *', () => {
-    automations.runAutomationsJob().catch(err =>
-      logger.error('automationsJob crashed: %s', err.message, { stack: err.stack })
-    );
-  }, { timezone: 'Africa/Accra' });
-
-  // Nightly DB backup (03:15 Africa/Accra, low-traffic hour). No-op unless
-  // DB_BACKUP_ENABLED=true — see .env.example.
-  cron.schedule('15 3 * * *', () => {
-    dbBackup.runDbBackupJob().catch(err =>
-      logger.error('dbBackupJob crashed: %s', err.message, { stack: err.stack })
-    );
-  }, { timezone: 'Africa/Accra' });
-
-  // End-of-day merchant summary (20:30 Africa/Accra) — orders, revenue, top
-  // product, low stock, failed payments, via WhatsApp + mobile push.
-  cron.schedule('30 20 * * *', () => {
-    dailySummary.runDailySummaryJob().catch(err =>
-      logger.error('dailySummaryJob crashed: %s', err.message, { stack: err.stack })
-    );
-  }, { timezone: 'Africa/Accra' });
-
-  logger.info('Cron jobs scheduled (Africa/Accra) — 08:00 renewals, 09:00 reminders, 10:00 suspensions, 5-min payment sweeper, 15-min cart nudges, 07:00 birthday coupons, 1-min broadcast drain, 30-min lifecycle automations, 20:30 daily summary, 03:15 db backup, weekly prune.');
-}
 
 /* -------------------------------------------------------------------------
    Bootstrap

@@ -260,14 +260,23 @@ router.post('/', requirePermission('orders', 'write'), async (req, res) => {
   }
 });
 
+// 'paid' is a fulfillment-status enum value at the DB level, but no route
+// here may set it directly — only orderService.markOrderPaid() (via
+// POST /:id/mark-paid or a gateway webhook) may, because that's the only
+// path that also updates payment_status/stock/loyalty/GMV together. See the
+// comment on POST /:id/mark-paid below.
+const PATCHABLE_STATUSES = orderService.VALID_STATUSES.filter(s => s !== 'paid');
+
 /** PATCH /api/orders/:id/status — body: { status, reason? } (reason only used for 'cancelled') */
 router.patch('/:id/status', requirePermission('orders', 'write'), async (req, res) => {
   try {
     const { status, reason } = req.body || {};
-    if (!orderService.VALID_STATUSES.includes(status)) {
+    if (!PATCHABLE_STATUSES.includes(status)) {
       return res.status(400).json({
         success: false,
-        error: `status must be one of: ${orderService.VALID_STATUSES.join(', ')}`
+        error: status === 'paid'
+          ? "Use POST /:id/mark-paid to record a payment — it's the only path that updates payment_status, stock, and loyalty together."
+          : `status must be one of: ${PATCHABLE_STATUSES.join(', ')}`
       });
     }
     const existing = await orderService.getOrderById(req.params.id);

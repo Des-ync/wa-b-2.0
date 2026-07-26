@@ -138,15 +138,28 @@ async function upsertSampleBusinessAndProducts() {
   });
 }
 
-async function seed() {
+// Plan seeding is safe to run unconditionally, anywhere, anytime — it's the
+// intended way to publish a pricing change (edit PLANS above, redeploy,
+// reseed) and is fully idempotent. Demo business/product creation is NOT
+// safe to run unconditionally: it inserts a fake tenant straight into
+// whatever database DATABASE_URL points at, including production. It now
+// requires an explicit opt-in (--demo-data, or SEED_DEMO_DATA=true) so the
+// documented bootstrap sequence (`npm run seed`) can never silently plant
+// demo data in a real production database.
+async function seed({ allowDemoData = false } = {}) {
   logger.info('Starting database seed...');
   await upsertPlans();
-  await upsertSampleBusinessAndProducts();
+  if (allowDemoData) {
+    await upsertSampleBusinessAndProducts();
+  } else {
+    logger.info('Skipping demo business/products (pass --demo-data or set SEED_DEMO_DATA=true to include them — do NOT do this against production).');
+  }
   logger.info('Seed completed.');
 }
 
 if (require.main === module) {
-  seed()
+  const allowDemoData = process.argv.includes('--demo-data') || process.env.SEED_DEMO_DATA === 'true';
+  seed({ allowDemoData })
     .then(() => close())
     .then(() => process.exit(0))
     .catch(err => {

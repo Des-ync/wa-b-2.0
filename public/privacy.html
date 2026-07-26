@@ -69,14 +69,16 @@
       <p>We do <b>not</b> use your customers' data to train AI, sell ads, or enrich third-party profiles.</p>
 
       <h2>4. Where it lives</h2>
-      <p>All production data is stored in PostgreSQL clusters in EU-West (Frankfurt) with read replicas in West Africa (Lagos). Encrypted at rest (AES-256) and in transit (TLS 1.2+). Backups are encrypted and retained for 30 days.</p>
+      <p>All production data is stored in a PostgreSQL database hosted on Oracle Cloud Infrastructure (Morocco West / Casablanca region). Encrypted in transit (TLS 1.2+). Nightly database backups are taken when enabled; encryption and retention of those backups depend on the storage destination they're uploaded to.</p>
 
       <h2>5. Who we share it with</h2>
       <ul>
-        <li><b>Meta</b>: to send and receive WhatsApp messages on your behalf.</li>
-        <li><b>Hubtel</b>: to charge MoMo and reconcile payments.</li>
-        <li><b>Paystack</b>: to charge cards (only if you enable card payments).</li>
-        <li><b>Cloud infrastructure</b>: Hetzner (Falkenstein, DE) and Cloudflare (CDN).</li>
+        <li><b>Meta</b>: to send and receive WhatsApp, Instagram, and Messenger messages on your behalf.</li>
+        <li><b>Paystack</b>: to charge cards and MoMo for order checkout and subscription billing.</li>
+        <li><b>Hubtel</b>: legacy MoMo processor, kept only to settle any in-flight charge from before we switched to Paystack.</li>
+        <li><b>Clerk</b>: authentication for merchant dashboard sign-in.</li>
+        <li><b>Firebase (Google)</b>: push notifications to the WA-B mobile app.</li>
+        <li><b>Cloud infrastructure</b>: Oracle Cloud Infrastructure (Morocco West / Casablanca).</li>
         <li><b>Compelled disclosure</b>: only with a valid Ghanaian court order.</li>
       </ul>
 
@@ -90,7 +92,7 @@
       <p>Email <a href="mailto:privacy@wa-b.com">privacy@wa-b.com</a> for any of these. We respond within 7 business days.</p>
 
       <h2>7. Cookies</h2>
-      <p>The dashboard uses one essential cookie for session auth. We use Plausible Analytics (cookieless, EU-hosted) for marketing-site analytics. No third-party trackers, no ad pixels.</p>
+      <p>The dashboard itself sets no first-party cookies — sign-in state is kept in your browser's session storage, not a cookie. Our authentication provider, Clerk, may set its own cookies as part of sign-in. We don't currently run any marketing-site analytics or tracking tool. See our <a href="cookies.html">Cookie Policy</a> for details.</p>
 
       <h2>8. Retention</h2>
       <p>Active account data: kept while your account is active. Closed accounts: purged 30 days after closure. Billing records: 7 years (Ghana Revenue Authority requirement).</p>

@@ -80,44 +80,77 @@ async function logOutbound({ businessId, customerId, type, content, waMessageId,
   }
 }
 
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+// A network error (no response at all) or a 5xx/429 is transient — Meta's
+// side hiccuped, not our request being wrong. A 4xx (invalid number,
+// unapproved template, bad auth) will fail identically on retry, so those
+// are terminal and must not be retried.
+function isRetryable(err) {
+  const status = err.response?.status;
+  if (status == null) return true; // network error / timeout
+  return status === 429 || status >= 500;
+}
+
 /**
  * Low-level send. Returns the WhatsApp message id on success.
+ *
+ * Retries transient failures (network error, 429, 5xx) up to 2 times with
+ * short backoff before giving up — previously a single blip from Meta's side
+ * permanently dropped the message (order confirmations, OTPs, payment-retry
+ * prompts) with only a log line as the trace. 4xx application errors are
+ * never retried since they'd fail identically every time.
  */
 async function sendRaw(payload, meta = {}) {
   const { phoneNumberId, accessToken } = await resolveCredentials(meta.businessId);
   if (!phoneNumberId || !accessToken) {
     throw new Error('WhatsApp Cloud API not configured (WA_PHONE_NUMBER_ID / WA_ACCESS_TOKEN missing)');
   }
-  try {
-    const res = await http.post(
-      `/${phoneNumberId}/messages`,
-      payload,
-      { headers: { Authorization: `Bearer ${accessToken}` } }
-    );
-    const waId = res.data?.messages?.[0]?.id;
-    await logOutbound({
-      businessId: meta.businessId,
-      customerId: meta.customerId,
-      type: payload.type || 'unknown',
-      content: meta.content || JSON.stringify(payload).slice(0, 1000),
-      waMessageId: waId,
-      status: 'sent'
-    });
-    metrics.increment('wa_send_success_total');
-    return { success: true, messageId: waId, raw: res.data };
-  } catch (err) {
-    const status = err.response?.status;
-    logger.error('WhatsApp send failed (%s): %s | type=%s to=%s', status, err.message, payload.type, payload.to || payload.recipient);
-    await logOutbound({
-      businessId: meta.businessId,
-      customerId: meta.customerId,
-      type: payload.type || 'unknown',
-      content: meta.content || JSON.stringify(payload).slice(0, 1000),
-      status: 'failed'
-    });
-    metrics.increment('wa_send_failure_total');
-    return { success: false, error: err.message, status };
+  const maxAttempts = 3;
+  const retryDelaysMs = meta.retryDelaysMs || [300, 900];
+  let lastErr;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const res = await http.post(
+        `/${phoneNumberId}/messages`,
+        payload,
+        { headers: { Authorization: `Bearer ${accessToken}` } }
+      );
+      const waId = res.data?.messages?.[0]?.id;
+      await logOutbound({
+        businessId: meta.businessId,
+        customerId: meta.customerId,
+        type: payload.type || 'unknown',
+        content: meta.content || JSON.stringify(payload).slice(0, 1000),
+        waMessageId: waId,
+        status: 'sent'
+      });
+      metrics.increment('wa_send_success_total');
+      return { success: true, messageId: waId, raw: res.data };
+    } catch (err) {
+      lastErr = err;
+      const status = err.response?.status;
+      const retryable = isRetryable(err);
+      logger.error(
+        'WhatsApp send failed (%s) attempt %d/%d: %s | type=%s to=%s%s',
+        status, attempt, maxAttempts, err.message, payload.type, payload.to || payload.recipient,
+        retryable && attempt < maxAttempts ? ' — retrying' : ''
+      );
+      if (!retryable || attempt >= maxAttempts) break;
+      await sleep(retryDelaysMs[attempt - 1] || retryDelaysMs[retryDelaysMs.length - 1]);
+    }
   }
+
+  await logOutbound({
+    businessId: meta.businessId,
+    customerId: meta.customerId,
+    type: payload.type || 'unknown',
+    content: meta.content || JSON.stringify(payload).slice(0, 1000),
+    status: 'failed'
+  });
+  metrics.increment('wa_send_failure_total');
+  return { success: false, error: lastErr.message, status: lastErr.response?.status };
 }
 
 /**

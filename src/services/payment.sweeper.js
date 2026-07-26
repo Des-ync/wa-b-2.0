@@ -114,14 +114,15 @@ async function reconcileStaleBilling() {
         if (verified.currency && verified.currency !== 'GHS') {
           logger.error('[sweeper] billing %s completed in unexpected currency %s; failing',
             tx.reference, verified.currency);
-          await subService.markPaymentFailed({ reference: tx.reference, errorPayload: { currency: verified.currency } });
+          await subService.markPaymentFailed({ reference: tx.reference, errorPayload: { currency: verified.currency }, gateway: 'paystack' });
           continue;
         }
         logger.info('[sweeper] billing %s actually paid — applying', tx.reference);
         await webhookProcessor.applyBillingSuccess({
           reference: tx.reference,
           transactionId: verified.gateway_ref,
-          amount: verified.amount_ghs
+          amount: verified.amount_ghs,
+          gateway: 'paystack'
         });
         continue;
       }
@@ -130,7 +131,8 @@ async function reconcileStaleBilling() {
         await webhookProcessor.applyBillingFailure({
           reference: tx.reference,
           errorPayload: { status: verified.status },
-          reason: verified.status
+          reason: verified.status,
+          gateway: 'paystack'
         });
         continue;
       }
@@ -140,7 +142,7 @@ async function reconcileStaleBilling() {
       const ageHours = (Date.now() - new Date(tx.initiated_at).getTime()) / 3_600_000;
       if (ageHours >= HARD_EXPIRE_HOURS) {
         logger.warn('[sweeper] hard-failing billing %s after %dh pending', tx.reference, HARD_EXPIRE_HOURS);
-        await subService.markPaymentFailed({ reference: tx.reference, errorPayload: { reason: 'hard_expired' } });
+        await subService.markPaymentFailed({ reference: tx.reference, errorPayload: { reason: 'hard_expired' }, gateway: 'paystack' });
       }
     } catch (err) {
       logger.error('[sweeper] billing reconcile failed for ref=%s: %s', tx.reference, err.message);

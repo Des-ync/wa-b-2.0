@@ -5,7 +5,9 @@
  *
  * Responsibilities:
  *   - Drain the webhook_events queue (whatsapp / paystack / hubtel events)
- *   - Run the daily cron jobs (renewal / reminder / suspension)
+ *   - Run every cron job via the shared src/services/cronJobs.js — the same
+ *     module src/server.js uses in single-process mode, so this can never
+ *     silently drift to a different/incomplete job list again.
  *
  * The worker_locks table protects against accidental multi-instance running of
  * the cron jobs (e.g., during a deploy overlap). The webhook queue uses
@@ -15,12 +17,8 @@ require('dotenv').config();
 const cron = require('node-cron');
 const logger = require('./utils/logger');
 const { pool } = require('./config/database');
-const notification = require('./services/notification.service');
 const webhookProcessor = require('./services/webhook.processor');
-const paymentSweeper = require('./services/payment.sweeper');
-const cartNudge = require('./services/cart.nudge');
-const loyaltyJobs = require('./services/loyalty.jobs');
-const automations = require('./services/automations');
+const { startCronJobs } = require('./services/cronJobs');
 
 logger.info('🛠  Starting WhatsApp SaaS worker (env=%s)', process.env.NODE_ENV || 'development');
 
@@ -30,53 +28,7 @@ webhookProcessor.start({
 });
 
 // 2) Cron jobs
-cron.schedule('0 8 * * *', () => {
-  notification.runRenewalJob().catch(err =>
-    logger.error('renewalJob crashed: %s', err.message, { stack: err.stack })
-  );
-}, { timezone: 'Africa/Accra' });
-
-cron.schedule('0 9 * * *', () => {
-  notification.runReminderJob().catch(err =>
-    logger.error('reminderJob crashed: %s', err.message, { stack: err.stack })
-  );
-}, { timezone: 'Africa/Accra' });
-
-cron.schedule('0 10 * * *', () => {
-  notification.runSuspensionJob().catch(err =>
-    logger.error('suspensionJob crashed: %s', err.message, { stack: err.stack })
-  );
-}, { timezone: 'Africa/Accra' });
-
-cron.schedule('*/5 * * * *', () => {
-  paymentSweeper.runPaymentSweeper().catch(err =>
-    logger.error('paymentSweeper crashed: %s', err.message, { stack: err.stack })
-  );
-}, { timezone: 'Africa/Accra' });
-
-cron.schedule('30 2 * * 0', () => {
-  notification.runPruneJob().catch(err =>
-    logger.error('pruneJob crashed: %s', err.message, { stack: err.stack })
-  );
-}, { timezone: 'Africa/Accra' });
-
-cron.schedule('*/15 * * * *', () => {
-  cartNudge.runCartNudgeJob().catch(err =>
-    logger.error('cartNudgeJob crashed: %s', err.message, { stack: err.stack })
-  );
-}, { timezone: 'Africa/Accra' });
-
-cron.schedule('0 7 * * *', () => {
-  loyaltyJobs.runBirthdayCouponJob().catch(err =>
-    logger.error('birthdayCouponJob crashed: %s', err.message, { stack: err.stack })
-  );
-}, { timezone: 'Africa/Accra' });
-
-cron.schedule('*/30 * * * *', () => {
-  automations.runAutomationsJob().catch(err =>
-    logger.error('automationsJob crashed: %s', err.message, { stack: err.stack })
-  );
-}, { timezone: 'Africa/Accra' });
+startCronJobs();
 
 logger.info('Worker cron + processor armed.');
 

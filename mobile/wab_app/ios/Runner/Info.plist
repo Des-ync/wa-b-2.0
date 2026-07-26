@@ -28,6 +28,12 @@
 	<true/>
 	<key>NSFaceIDUsageDescription</key>
 	<string>WA-B uses Face ID to confirm it's you before showing payouts and settlement details.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>WA-B uses the camera to scan product barcodes.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>WA-B uses the microphone so you can update products by voice.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>WA-B converts your voice to text, on-device, to update products by voice.</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

@@ -113,7 +113,7 @@ async function processPaystack(payload) {
       return;
     }
     if (isBilling) {
-      await applyBillingSuccess({ reference, transactionId: gatewayRef, amount });
+      await applyBillingSuccess({ reference, transactionId: gatewayRef, amount, gateway: 'paystack' });
     } else {
       await conversation.handlePaymentSuccess({ reference, gatewayRef, amount });
     }
@@ -121,7 +121,7 @@ async function processPaystack(payload) {
   }
   if (eventType === 'charge.failed' || data.status === 'failed') {
     if (isBilling) {
-      await applyBillingFailure({ reference, errorPayload: payload, reason: data.gateway_response || 'declined' });
+      await applyBillingFailure({ reference, errorPayload: payload, reason: data.gateway_response || 'declined', gateway: 'paystack' });
     } else {
       await conversation.handlePaymentFailure({
         reference,
@@ -164,8 +164,8 @@ async function processPaystackTransfer(eventType, data) {
 /**
  * Shared SaaS-billing success path: extend the subscription and notify.
  */
-async function applyBillingSuccess({ reference, transactionId, amount }) {
-  const result = await subService.applySuccessfulPayment({ reference, transactionId, amount });
+async function applyBillingSuccess({ reference, transactionId, amount, gateway }) {
+  const result = await subService.applySuccessfulPayment({ reference, transactionId, amount, gateway });
   if (result.applied) {
     const businessRes = await query(
       'SELECT * FROM businesses WHERE id = $1',
@@ -185,7 +185,7 @@ async function applyBillingSuccess({ reference, transactionId, amount }) {
 /**
  * Shared SaaS-billing failure path: mark failed and notify.
  */
-async function applyBillingFailure({ reference, errorPayload, reason }) {
+async function applyBillingFailure({ reference, errorPayload, reason, gateway }) {
   const billingRes = await query(
     `SELECT bt.*, b.id AS biz_id, b.whatsapp_number, b.name AS business_name,
             p.display_name AS plan_display_name
@@ -193,11 +193,11 @@ async function applyBillingFailure({ reference, errorPayload, reason }) {
        JOIN subscriptions s ON s.id = bt.subscription_id
        JOIN businesses b   ON b.id = bt.business_id
        JOIN plans p        ON p.id = COALESCE(bt.plan_id, s.pending_plan_id, s.plan_id)
-      WHERE bt.reference = $1`,
-    [reference]
+      WHERE bt.reference = $1 AND bt.gateway = $2`,
+    [reference, gateway]
   );
   const billing = billingRes.rows[0];
-  const result = await subService.markPaymentFailed({ reference, errorPayload });
+  const result = await subService.markPaymentFailed({ reference, errorPayload, gateway });
   if (billing && result.applied) {
     await notification.notifySubscriptionFailed({
       business: {
@@ -317,7 +317,8 @@ async function processHubtel(payload) {
     await applyBillingSuccess({
       reference: parsed.reference,
       transactionId: parsed.transactionId,
-      amount: parsed.amount
+      amount: parsed.amount,
+      gateway: 'hubtel'
     });
     return;
   }
@@ -325,7 +326,8 @@ async function processHubtel(payload) {
   await applyBillingFailure({
     reference: parsed.reference,
     errorPayload: payload,
-    reason: parsed.status
+    reason: parsed.status,
+    gateway: 'hubtel'
   });
 }
 

@@ -35,10 +35,29 @@ function buildApp() {
 
 const TENANT_KEY_ROW = { id: 'key1', business_id: 'biz-1', scope: 'tenant', revoked_at: null, role: 'owner' };
 
+// A bare aggregate (COUNT/SUM/etc. with no GROUP BY) always returns exactly
+// one row in real Postgres, even over zero matching source rows — the
+// aggregate itself is just 0/null, never an empty result set. Route handlers
+// across this codebase (analytics.routes.js, notification.routes.js) rely on
+// that guarantee and read `rows[0].someAlias` unconditionally. A generic
+// "unknown query -> { rows: [] }" mock breaks that guarantee and makes a
+// route 500 even when it's actually correct — this defaults any bare
+// aggregate to a single zero-valued row instead, matching real Postgres.
+function defaultQueryResult(sql) {
+  const hasAggregate = /\b(COUNT|SUM|AVG|MIN|MAX)\s*\(/i.test(sql);
+  const hasGroupBy = /\bGROUP BY\b/i.test(sql);
+  if (hasAggregate && !hasGroupBy) {
+    const row = {};
+    for (const m of sql.matchAll(/\bAS\s+"?(\w+)"?/gi)) row[m[1]] = 0;
+    return { rows: [row], rowCount: 1 };
+  }
+  return { rows: [], rowCount: 0 };
+}
+
 function mockKeyOnly() {
   currentQuery = async (sql) => {
     if (sql.includes('SELECT id, business_id, scope, revoked_at')) return { rows: [TENANT_KEY_ROW] };
-    return { rows: [], rowCount: 0 };
+    return defaultQueryResult(sql);
   };
 }
 
@@ -69,7 +88,7 @@ test('tenant key CAN access its own business across every one of the same routes
   for (const [method, path] of CASES) {
     const ownPath = path.replace('biz-OTHER', 'biz-1');
     const res = await request(app)[method.toLowerCase()](ownPath).set('Authorization', 'Bearer sk_live_abc');
-    assert.notEqual(res.status, 403, `${method} ${ownPath} should not be blocked, got 403`);
+    assert.equal(res.status, 200, `${method} ${ownPath} should succeed, got ${res.status}: ${JSON.stringify(res.body)}`);
   }
 });
 
@@ -78,12 +97,12 @@ test('admin key can access any business_id across every one of the same routes',
     if (sql.includes('SELECT id, business_id, scope, revoked_at')) {
       return { rows: [{ id: 'key2', business_id: null, scope: 'admin', revoked_at: null, role: 'owner' }] };
     }
-    return { rows: [], rowCount: 0 };
+    return defaultQueryResult(sql);
   };
   const app = buildApp();
   for (const [method, path] of CASES) {
     const res = await request(app)[method.toLowerCase()](path).set('Authorization', 'Bearer sk_admin_abc');
-    assert.notEqual(res.status, 403, `${method} ${path} should not be blocked for an admin key, got 403`);
+    assert.equal(res.status, 200, `${method} ${path} should succeed for an admin key, got ${res.status}: ${JSON.stringify(res.body)}`);
   }
 });
 
