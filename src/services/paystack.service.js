@@ -288,9 +288,9 @@ async function resolveMomoBankCode(network) {
  * triggered action (not a hot path).
  */
 async function createTransferRecipient({ name, accountNumber, network }) {
-  ensureConfigured();
   const normalized = normalizeGhanaPhone(accountNumber);
   if (!normalized) return { success: false, error: 'Invalid Ghana phone number' };
+  ensureConfigured();
   try {
     const bankCode = await resolveMomoBankCode(network);
     const res = await http.post('/transferrecipient', {
