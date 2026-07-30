@@ -1068,5 +1068,6 @@ module.exports = {
   getOrderHistory,
   getOrderRefunds,
   VALID_STATUSES,
+  VALID_PAYMENT_STATUSES,
   VALID_DELIVERY_STATUSES
 };

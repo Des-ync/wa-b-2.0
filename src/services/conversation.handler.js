@@ -1,4 +1,4 @@
-const { query, transaction } = require('../config/database');
+const { query } = require('../config/database');
 const logger = require('../utils/logger');
 const wa = require('./whatsapp.service');
 const { getAdapter, destOf } = require('./channel.adapter');
@@ -1502,17 +1502,27 @@ async function findOutOfStockMatch(businessId, name) {
   return { product: hit, alternatives };
 }
 
-/** Tell the customer an item is finished, and what they could have instead. */
+/**
+ * Tell the customer an item is finished, what they could have instead, and
+ * offer to text them when it is back.
+ *
+ * The restock opt-in matters as much as the alternatives: it is the only
+ * thing here that recovers the sale rather than substituting it. Tapping a
+ * sold-out item from the menu has always offered this (addProductToCart);
+ * TYPING its name reached a different code path, so the two answers used to
+ * differ for no reason a customer could see.
+ */
 async function sendOutOfStock({ business, customer, match }) {
   const lang = langOf(business);
   const list = match.alternatives
     .map(p => `• ${p.name} — ${formatGhs(p.price_ghs)}`)
     .join('\n');
-  await chOf(customer).sendText(destOf(customer),
+  await chOf(customer).sendButtons(destOf(customer),
     t(lang, 'out_of_stock_alternatives', {
       name: match.product.name,
       alternatives: list || null
     }),
+    [{ id: `watchprod_${match.product.id}`, title: t(lang, 'btn_notify_restock') }],
     { businessId: business.id, customerId: customer.id });
 }
 
@@ -2665,7 +2675,7 @@ async function startCardPayment({ business, customer, orderId }) {
 /**
  * Called by the Paystack webhook handler after a successful payment.
  */
-async function handlePaymentSuccess({ reference, gatewayRef, amount }) {
+async function handlePaymentSuccess({ reference, gatewayRef: _gatewayRef, amount }) {
   const order = await orderService.getOrderByPaymentRef(reference);
   if (!order) {
     logger.warn('handlePaymentSuccess: no order with payment_ref=%s', reference);

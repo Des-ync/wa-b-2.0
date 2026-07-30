@@ -365,3 +365,48 @@ test('legacyErrorIsCode keeps the code in `error` and the prose in `message`', (
   assert.equal(modern.body.error.code, 'link_required');
   assert.match(modern.body.error.message, /web dashboard/);
 });
+
+/**
+ * The guard that should have existed three commits ago.
+ *
+ * A scripted migration inserted `respond.ok(req, res, ...)` into handlers
+ * whose parameter list was `(_req, res)` — an underscore-prefixed,
+ * deliberately-unused request argument. `req` was therefore undefined, the
+ * try threw a ReferenceError, the catch called
+ * `respond.failInternal(req, ...)` and threw again, and the request HUNG.
+ *
+ * Eighteen endpoints across admin and subscription routes shipped that way,
+ * including the PUBLIC /api/subscriptions/plans. None of the earlier guards
+ * caught it: they checked for a missing require, a half-migrated file, and an
+ * unbound TRAILING argument — not the first argument, and not a parameter
+ * that exists under a different name.
+ *
+ * ESLint's no-undef now catches this class outright and runs in CI. This
+ * stays as a targeted, zero-dependency check of the exact shape.
+ */
+test('no route handler calls respond.* with a req its signature does not provide', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const dir = path.join(__dirname, '..', 'src', 'routes');
+
+  const offenders = [];
+  for (const file of fs.readdirSync(dir).filter(f => f.endsWith('.js'))) {
+    const src = fs.readFileSync(path.join(dir, file), 'utf8');
+
+    // Each handler: from its parameter list to the next handler.
+    const handlerRe = /\((_?req)\s*,\s*res\)\s*=>\s*\{/g;
+    let m;
+    while ((m = handlerRe.exec(src)) !== null) {
+      const paramName = m[1];
+      if (paramName === 'req') continue;               // provides req, fine
+      const next = src.indexOf('\nrouter.', m.index);
+      const body = src.slice(m.index, next === -1 ? src.length : next);
+      if (/\brespond\.\w+\(\s*req\b/.test(body)) {
+        offenders.push(`${file}:${src.slice(0, m.index).split('\n').length} takes (${paramName}, res) but calls respond.*(req, ...)`);
+      }
+    }
+  }
+
+  assert.deepEqual(offenders, [],
+    'these handlers reference an undefined req — every request to them hangs rather than erroring');
+});

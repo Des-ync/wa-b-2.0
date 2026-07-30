@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:wab_app/api/accounting_api.dart';
+import 'package:wab_app/api/broadcast_api.dart';
 import 'package:wab_app/api/client.dart';
 import 'package:wab_app/api/order_api.dart';
 
@@ -224,6 +225,37 @@ void main() {
         api.sendPaymentReminder('ord-1'),
         throwsA(isA<ApiException>().having((e) => e.status, 'status', 429)),
       );
+    });
+  });
+
+  group('BroadcastApi', () {
+    test('preview posts the audience and is read-only', () async {
+      final cap = Capture();
+      await cap.client().previewBroadcast('biz-1', audience: {'segment': 'inactive_60d'});
+
+      expect(cap.last.url.path, '/api/broadcasts/preview');
+      expect(cap.lastBody, {
+        'business_id': 'biz-1',
+        'audience': {'segment': 'inactive_60d'}
+      });
+    });
+
+    test('preview omits an empty audience rather than sending {}', () async {
+      final cap = Capture();
+      await cap.client().previewBroadcast('biz-1', audience: {});
+      expect(cap.lastBody, {'business_id': 'biz-1'});
+
+      await cap.client().previewBroadcast('biz-1');
+      expect(cap.lastBody, {'business_id': 'biz-1'});
+    });
+
+    test('a test send targets the test route, not the real one', () async {
+      final cap = Capture();
+      await cap.client().sendBroadcastTest('biz-1', body: 'Fresh jollof!');
+
+      // Hitting /api/broadcasts here would send to every customer.
+      expect(cap.last.url.path, '/api/broadcasts/test');
+      expect(cap.lastBody, {'business_id': 'biz-1', 'body': 'Fresh jollof!'});
     });
   });
 

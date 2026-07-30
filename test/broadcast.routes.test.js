@@ -166,3 +166,138 @@ test('a failure mid-fan-out leaves no half-created broadcast', async () => {
   assert.equal(res.status, 500);
   assert.equal(res.body.error, 'Internal server error');
 });
+
+/**
+ * Broadcast safety rails (Phase 7).
+ *
+ * A broadcast fans out the moment it is created and cannot be recalled, so
+ * everything here exists to answer one question before that happens: who is
+ * actually going to receive this, and does it read the way I think it does.
+ */
+
+const wa = require('../src/services/whatsapp.service');
+let testSends = [];
+wa.sendText = async (to, body) => { testSends.push({ to, body }); return { success: true }; };
+
+test.beforeEach(() => { testSends = []; });
+
+test('preview counts exactly who the fan-out would reach', async () => {
+  const seen = [];
+  withQuery(async (sql) => {
+    seen.push(sql.replace(/\s+/g, ' '));
+    if (sql.includes('opted_out = FALSE') && sql.includes('COUNT')) return { rows: [{ n: 847 }] };
+    if (sql.includes('opted_out = TRUE')) return { rows: [{ n: 12 }] };
+    return { rows: [{ display_name: 'Kojo', whatsapp_number: '+233241234567' }] };
+  });
+
+  const res = await auth(request(app()).post('/api/broadcasts/preview'))
+    .send({ business_id: 'biz-1', audience: { segment: 'inactive_60d' } });
+
+  assert.equal(res.status, 200);
+  assert.equal(res.body.recipient_count, 847);
+  // The difference between 4 people and 4,000 is the difference between a
+  // nudge and a reputational incident.
+  assert.equal(res.body.opted_out_count, 12);
+  assert.match(res.body.audience_desc, /Inactive/);
+  assert.equal(res.body.sample[0].display_name, 'Kojo');
+});
+
+test('preview excludes opted-out customers, same as the real fan-out', async () => {
+  const seen = [];
+  withQuery(async (sql) => {
+    seen.push(sql);
+    return { rows: [{ n: 0 }] };
+  });
+
+  await auth(request(app()).post('/api/broadcasts/preview'))
+    .send({ business_id: 'biz-1' });
+
+  const countQuery = seen.find(s => s.includes('COUNT') && s.includes('opted_out = FALSE'));
+  assert.ok(countQuery, 'the reachable count must exclude opted-out customers');
+});
+
+test('the opted-out count is scoped to the SAME audience filter', async () => {
+  // Otherwise it answers "how many overall", which is a different and
+  // misleading number next to a filtered recipient count.
+  const seen = [];
+  withQuery(async (sql, params) => {
+    seen.push({ sql: sql.replace(/\s+/g, ' '), params });
+    return { rows: [{ n: 1 }] };
+  });
+
+  await auth(request(app()).post('/api/broadcasts/preview'))
+    .send({ business_id: 'biz-1', audience: { tag: 'vip' } });
+
+  const optedOut = seen.find(c => c.sql.includes('opted_out = TRUE'));
+  assert.match(optedOut.sql, /ANY\(c\.tags\)/, 'the tag filter must apply to both counts');
+  assert.ok(optedOut.params.includes('vip'));
+});
+
+test('preview needs a business_id and refuses another tenant', async () => {
+  const missing = await auth(request(app()).post('/api/broadcasts/preview')).send({});
+  assert.equal(missing.status, 400);
+
+  const cross = await auth(request(app()).post('/api/broadcasts/preview'))
+    .send({ business_id: 'biz-2' });
+  assert.equal(cross.status, 403);
+});
+
+test('a test send goes to the shop own number, clearly marked', async () => {
+  withQuery(async (sql) => (sql.includes('FROM businesses')
+    ? { rows: [{ id: 'biz-1', name: 'Auntie Ama', whatsapp_number: '+233241110000' }] }
+    : { rows: [] }));
+
+  const res = await auth(request(app()).post('/api/broadcasts/test'))
+    .send({ business_id: 'biz-1', body: 'Fresh jollof today!' });
+
+  assert.equal(res.status, 200);
+  assert.equal(testSends.length, 1);
+  assert.equal(testSends[0].to, '+233241110000');
+  // A merchant reading it on their phone must not mistake it for a campaign
+  // that already went out.
+  assert.match(testSends[0].body, /TEST/);
+  assert.match(testSends[0].body, /Only you received it/);
+  assert.match(testSends[0].body, /Fresh jollof today!/);
+});
+
+test('a test is NOT recorded as a broadcast', async () => {
+  const seen = [];
+  withQuery(async (sql) => {
+    seen.push(sql);
+    if (sql.includes('FROM businesses')) {
+      return { rows: [{ id: 'biz-1', name: 'A', whatsapp_number: '+233241110000' }] };
+    }
+    return { rows: [] };
+  });
+
+  await auth(request(app()).post('/api/broadcasts/test'))
+    .send({ business_id: 'biz-1', body: 'hi' });
+
+  // Counting it would corrupt the history and the delivery stats.
+  assert.ok(!seen.some(s => s.includes('INSERT INTO broadcasts')));
+  assert.ok(!seen.some(s => s.includes('INSERT INTO broadcast_recipients')));
+});
+
+test('a test needs a body, and respects the same length cap as a real send', async () => {
+  withQuery(async () => ({ rows: [{ id: 'biz-1', whatsapp_number: '+233241110000' }] }));
+
+  const empty = await auth(request(app()).post('/api/broadcasts/test'))
+    .send({ business_id: 'biz-1', body: '  ' });
+  assert.equal(empty.status, 400);
+
+  const long = await auth(request(app()).post('/api/broadcasts/test'))
+    .send({ business_id: 'biz-1', body: 'x'.repeat(1025) });
+  assert.equal(long.status, 400);
+});
+
+test('a shop with no WhatsApp number gets a clear reason, not a crash', async () => {
+  withQuery(async (sql) => (sql.includes('FROM businesses')
+    ? { rows: [{ id: 'biz-1', name: 'A', whatsapp_number: null }] }
+    : { rows: [] }));
+
+  const res = await auth(request(app()).post('/api/broadcasts/test'))
+    .send({ business_id: 'biz-1', body: 'hi' });
+
+  assert.equal(res.status, 400);
+  assert.match(res.body.error, /no WhatsApp number/);
+});

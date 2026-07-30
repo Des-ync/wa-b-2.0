@@ -9,7 +9,7 @@ const respond = require('../utils/response');
 const router = express.Router();
 
 /** GET /api/subscriptions/plans — list active SaaS plans (public). */
-router.get('/plans', async (_req, res) => {
+router.get('/plans', async (req, res) => {
   try {
     const plans = await subService.listPlans();
     return respond.ok(req, res, { plans });

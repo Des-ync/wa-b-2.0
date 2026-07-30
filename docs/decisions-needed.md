@@ -126,6 +126,11 @@ production deploy. **Alternative:** a separate workflow that runs on PRs only an
 gate deploy. **Recommendation:** separate workflow, PR-only.
 
 ### 13. Error tracking — Sentry, or self-hosted?
+**Now the single highest-value unblocked-by-you item.** The 18 hanging endpoints described
+in §11 of the improvement plan were live in production and nothing reported them: a hung
+request produces no error log, no 5xx, and no alert. Error tracking would have surfaced
+them the first time a merchant's dashboard spun.
+
 **Blocks:** Phase 9.
 Sentry's free tier is generous but is a third-party data processor, which interacts with
 the existing `data-processing.html` commitments. **Needed:** approval of the vendor, or a

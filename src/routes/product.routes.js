@@ -487,7 +487,7 @@ router.post('/import', requirePermission('products', 'write'), async (req, res) 
       };
 
       const isUpdate = record.id && ownedIds.has(record.id);
-      const { errors, out, fields } = validateProductBody(bodyForValidation, { partial: isUpdate });
+      const { errors, out } = validateProductBody(bodyForValidation, { partial: isUpdate });
       if (errors.length) {
         skipped.push({ row: i + 2, name: record.name || '(no name)', errors });
         continue;

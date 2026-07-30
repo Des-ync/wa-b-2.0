@@ -310,7 +310,23 @@ app.use('/api/subscriptions', apiLimiter, subscriptionRoutes);
 app.use('/api/orders', apiLimiter, orderRoutes);
 app.use('/api/admin', apiLimiter, adminRoutes);
 app.use('/api/products', apiLimiter, productRoutes);
-app.use('/api/auth', apiLimiter, authRoutes);
+// Auth is deliberately tighter than the general API limit. The OTP flow's
+// real protection is its 5-attempts-per-code cap (auth.routes.js), which is
+// sound — this is defence in depth, and it also slows enumeration: the
+// request endpoint necessarily answers differently for "no such business",
+// "not linked yet" and "code sent", so at 120/min an attacker could probe
+// which Ghanaian numbers are registered shops. Narrowing those responses
+// would hurt legitimate merchants and is a product decision; rate-limiting
+// the probe is not.
+const authLimiter = rateLimit({
+  windowMs: 15 * 60_000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  // Counted per IP, which is what express-rate-limit keys on by default.
+  message: { success: false, error: 'Too many sign-in attempts. Try again in a few minutes.' }
+});
+app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api/customers', apiLimiter, customerRoutes);
 app.use('/api/business', apiLimiter, businessRoutes);
 app.use('/api/analytics', apiLimiter, analyticsRoutes);

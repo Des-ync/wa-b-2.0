@@ -275,6 +275,12 @@ test('a sold-out item is reported as finished, with alternatives', async () => {
   assert.match(body, /Waakye/);
   assert.match(body, /Fried rice/);
   assert.doesNotMatch(body, /Malt/, 'alternatives come from the same category first');
+
+  // The restock opt-in is the only thing here that RECOVERS the sale rather
+  // than substituting it, and tapping a sold-out item has always offered it.
+  const buttons = sent.flatMap(m => m.buttons || []);
+  assert.ok(buttons.some(b => b.id === 'watchprod_p1'),
+    'typing a sold-out name must offer the same "tell me when it is back" as tapping it does');
 });
 
 test('"do you have X" gets the same honest answer when X is finished', async () => {

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../api/client.dart';
+import '../api/broadcast_api.dart';
 import '../state/session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
@@ -159,6 +160,7 @@ class _ComposeSheetState extends State<_ComposeSheet> {
   final _minSpendCtrl = TextEditingController();
   String? _segment;
   bool _sending = false;
+  bool _testing = false;
 
   @override
   void dispose() {
@@ -175,18 +177,112 @@ class _ComposeSheetState extends State<_ComposeSheet> {
     });
   }
 
-  Future<void> _send() async {
-    final text = _bodyCtrl.text.trim();
-    if (text.isEmpty) return;
-    setState(() => _sending = true);
-    final session = context.read<Session>();
-    try {
-      final audience = <String, dynamic>{
+  Map<String, dynamic> _audience() => {
         if (_segment != null) 'segment': _segment,
         if (_tagCtrl.text.trim().isNotEmpty) 'tag': _tagCtrl.text.trim(),
         if (_minSpendCtrl.text.trim().isNotEmpty)
           'min_spend_ghs': double.tryParse(_minSpendCtrl.text.trim()),
       };
+
+  /// Ask the server who this would reach, and make the merchant confirm.
+  ///
+  /// The count is the point: "inactive 60+ days" could be four people or four
+  /// thousand, and the merchant has no way to tell from the filter alone.
+  Future<bool> _confirmAudience() async {
+    final session = context.read<Session>();
+    final bid = session.businessId;
+    if (bid == null) return false;
+
+    Map<String, dynamic> preview;
+    try {
+      preview = await session.api.previewBroadcast(bid, audience: _audience());
+    } catch (e) {
+      // Never block a send on the preview failing — but say so, rather than
+      // letting the merchant think they saw a count they didn't.
+      if (!mounted) return false;
+      return await _confirmDialog(
+        title: 'Send without a preview?',
+        body: "We couldn't check how many customers this reaches.\n\n$e",
+        confirmLabel: 'Send anyway',
+      );
+    }
+    if (!mounted) return false;
+
+    final count = (preview['recipient_count'] as num?)?.toInt() ?? 0;
+    final optedOut = (preview['opted_out_count'] as num?)?.toInt() ?? 0;
+    final desc = '${preview['audience_desc'] ?? 'your customers'}';
+
+    if (count == 0) {
+      _toast('Nobody matches that audience — nothing would be sent.', error: true);
+      return false;
+    }
+    return _confirmDialog(
+      title: 'Send to $count customer${count == 1 ? '' : 's'}?',
+      body: '$desc.\n\n'
+          '${optedOut > 0 ? '$optedOut matching customer${optedOut == 1 ? ' has' : 's have'} opted out and will not be included.\n\n' : ''}'
+          'This cannot be undone once it starts sending.',
+      confirmLabel: 'Send now',
+    );
+  }
+
+  Future<bool> _confirmDialog({
+    required String title, required String body, required String confirmLabel,
+  }) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: Text(body),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: Text(confirmLabel)),
+        ],
+      ),
+    );
+    return ok == true;
+  }
+
+  /// Send the draft to the merchant's own number so they can read it as a
+  /// customer will. Catches the typo, not the bug.
+  Future<void> _sendTest() async {
+    final text = _bodyCtrl.text.trim();
+    if (text.isEmpty) {
+      _toast('Write your message first.', error: true);
+      return;
+    }
+    final session = context.read<Session>();
+    final bid = session.businessId;
+    if (bid == null) return;
+    setState(() => _testing = true);
+    try {
+      final res = await session.api.sendBroadcastTest(bid, body: text);
+      if (mounted) _toast('Test sent to ${res['sent_to'] ?? 'your WhatsApp'}.');
+    } catch (e) {
+      if (mounted) _toast('$e', error: true);
+    } finally {
+      if (mounted) setState(() => _testing = false);
+    }
+  }
+
+  void _toast(String message, {bool error = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Semantics(liveRegion: true, child: Text(message)),
+      backgroundColor: error ? WabColors.danger : WabColors.accentInk,
+    ));
+  }
+
+  Future<void> _send() async {
+    final text = _bodyCtrl.text.trim();
+    if (text.isEmpty) return;
+    // Preview and confirm BEFORE anything is created — the fan-out starts the
+    // instant the broadcast row exists.
+    if (!await _confirmAudience()) return;
+    if (!mounted) return;
+    setState(() => _sending = true);
+    final session = context.read<Session>();
+    try {
+      final audience = _audience();
       final res = await session.api.post('/api/broadcasts', body: {
         'business_id': session.businessId,
         'body': text,
@@ -314,6 +410,19 @@ class _ComposeSheetState extends State<_ComposeSheet> {
                 'Only customers who haven\'t opted out are ever included. Sends are rate-limited in the background.',
                 style: TextStyle(color: WabColors.muted, fontSize: 12)),
             const SizedBox(height: 16),
+            // Reading the draft as a customer will is the cheapest way to
+            // catch a typo or a missing price — none of which is recoverable
+            // once the fan-out starts.
+            OutlinedButton.icon(
+              onPressed: (_sending || _testing) ? null : _sendTest,
+              icon: _testing
+                  ? const SizedBox(
+                      width: 16, height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.send_rounded, size: 18),
+              label: Text(_testing ? 'Sending test…' : 'Send a test to myself'),
+            ),
+            const SizedBox(height: 10),
             FilledButton(
               onPressed: _sending ? null : _send,
               child: _sending

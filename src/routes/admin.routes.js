@@ -27,7 +27,7 @@ router.use(requireAuth('admin'));
 /**
  * GET /api/admin/stats — high-level dashboard counters.
  */
-router.get('/stats', async (_req, res) => {
+router.get('/stats', async (req, res) => {
   try {
     const result = await query(`
       SELECT
@@ -85,7 +85,7 @@ router.get('/businesses', async (req, res) => {
  * onboarding, with the specific steps still missing. Lets support proactively
  * chase setup instead of waiting for a "why isn't my bot working" ticket.
  */
-router.get('/businesses/incomplete-setup', async (_req, res) => {
+router.get('/businesses/incomplete-setup', async (req, res) => {
   try {
     const result = await query(`
       SELECT b.id, b.name, b.owner_name, b.whatsapp_number, b.wa_phone_number_id,
@@ -180,7 +180,7 @@ router.get('/messages', async (req, res) => {
 /**
  * GET /api/admin/plans — active plans (used by the onboarding form).
  */
-router.get('/plans', async (_req, res) => {
+router.get('/plans', async (req, res) => {
   try {
     const result = await query(
       `SELECT id, name, display_name, price_ghs, billing_cycle
@@ -497,7 +497,7 @@ function tailErrorLog(maxEntries = 100) {
  * server error-log entries, failed/stuck webhooks, failed message sends
  * and failed billing charges. Newest first.
  */
-router.get('/issues', async (_req, res) => {
+router.get('/issues', async (req, res) => {
   try {
     const [webhooks, messages, billing] = await Promise.all([
       query(
@@ -559,7 +559,7 @@ router.get('/issues', async (_req, res) => {
 /**
  * GET /api/admin/health — live backend vitals for the ops screen.
  */
-router.get('/health', async (_req, res) => {
+router.get('/health', async (req, res) => {
   try {
     const t0 = Date.now();
     const queue = await query(
@@ -602,7 +602,7 @@ router.get('/health', async (_req, res) => {
  * beyond /health and /issues: p95 response times, retry counts, per-provider
  * webhook error rates, stuck orders/payments, and recent alert history.
  */
-router.get('/ops', async (_req, res) => {
+router.get('/ops', async (req, res) => {
   try {
     const [byProvider, stuckOrders, alerts] = await Promise.all([
       query(
@@ -736,7 +736,7 @@ router.get('/webhooks/:id', async (req, res) => {
  * POST /api/admin/webhooks/:id/retry — requeue one failed webhook.
  * POST /api/admin/webhooks/retry-failed — requeue everything failed.
  */
-router.post('/webhooks/retry-failed', async (_req, res) => {
+router.post('/webhooks/retry-failed', async (req, res) => {
   try {
     const result = await query(
       `UPDATE webhook_events
@@ -1012,7 +1012,7 @@ router.get('/businesses/:id/usage', async (req, res) => {
  * baseline, not a fixed platform-wide threshold, so a naturally busy shop
  * doesn't get flagged just for being busy.
  */
-router.get('/risk-flags', async (_req, res) => {
+router.get('/risk-flags', async (req, res) => {
   try {
     const [suspiciousIps, paymentSpikes, messageSpikes] = await Promise.all([
       query(

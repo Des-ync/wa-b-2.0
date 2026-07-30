@@ -1,6 +1,6 @@
 # KweliChat / WA-B — Improvement Plan 2026 (corrected, evidence-backed)
 
-**Status:** Phases 0–6 complete (§5–§10) — Phase 6 partially; see §10. Phase 3's envelope migration covers 22 of 26 route
+**Status:** Phases 0–7 complete (§5–§11); Phase 9 started (§12). Phase 8 not started. Phase 3's envelope migration covers 22 of 26 route
 groups; the four left out are deliberate. Phases 5–9 not started.
 **Produced:** 2026-07-30, at commit `4d8d48b`.
 **Supersedes:** `improvement-prompt.md` as the execution plan. That file remains the
@@ -493,4 +493,115 @@ lines of the same product staying separate in the cart.
 - **PWA + full WCAG 2.1 AA audit.** The new controls are labelled (`role="dialog"`,
   `aria-modal`, `aria-labelledby`, `aria-label` on the icon-only steppers) and have visible
   focus, but a full audit and a service worker are separate work.
+- Nothing pushed or merged.
+
+
+---
+
+## 11. Phase 7 — shipped vs. planned
+
+Branch `phase-7/automations`. **Broadcast safety done. The automation templates the plan
+listed turned out to be mostly built already.**
+
+### The plan was wrong again about what was missing
+
+It listed back-in-stock alerts and a merchant low-stock digest as templates still to build.
+Both already exist:
+
+- **Back-in-stock** is event-driven, not scheduled — `product_watchers` plus
+  `automations.notifyProductRestocked`, fired from the product PATCH when `in_stock` flips.
+  A scheduled template would have been the wrong shape *and* a duplicate.
+- **Merchant low-stock digest** is part of `jobs/daily.summary.js`.
+
+### An inconsistency Phase 5 introduced, now fixed
+
+Tapping a sold-out item from the menu has always offered "tell me when it's back"
+(`addProductToCart`). The out-of-stock reply I added in Phase 5 for the **typed** path did
+not — so the same question got two different answers depending on how it was asked, and
+the typed path silently dropped the only response that *recovers* the sale rather than
+substituting it. Both paths now offer the restock opt-in.
+
+### Broadcast safety
+
+A broadcast fans out the moment it is created and cannot be recalled. Two rails, both
+reachable from the mobile compose sheet:
+
+| Rail | Why |
+|---|---|
+| `POST /broadcasts/preview` | "inactive 60+ days" could be four people or four thousand, and the filter alone doesn't say. Returns the reachable count, a five-name sample to sanity-check the filter, and how many *matching* customers opted out — scoped to the same audience, so it answers "of the people you targeted", not "overall". |
+| `POST /broadcasts/test` | Sends the draft to the shop's own number. Catches the typo, the missing price, the line that reads fine in a compose box and badly in a chat bubble. Deliberately **not** recorded as a broadcast — a test is not a campaign, and counting it would corrupt the history and delivery stats. |
+
+The preview builds its count from the **same `buildAudienceClauses`** the sender uses, so
+the number cannot drift from what actually happens. A preview failure never blocks a send;
+it downgrades to "Send without a preview?" rather than letting the merchant believe they
+saw a count they didn't.
+
+### Not done
+
+- **Post-send performance** (delivered / replies / orders / revenue generated). `broadcasts`
+  tracks `sent_count` and `failed_count`; attributing replies and revenue to a campaign
+  needs a schema decision about the attribution window, which is a product question.
+- **Folding the birthday cron into the automation engine** — that is decisions-needed #10,
+  still unanswered. `loyalty.jobs.js` works; the argument for folding it in is consistency,
+  not correctness.
+- Nothing pushed or merged.
+
+
+---
+
+## 12. Phase 9 — security hardening (started)
+
+Branch `phase-9/security`. Two corrections to the plan, and one live production bug the
+new tooling found within a minute of being installed.
+
+### CSRF is NOT a gap here — the plan was wrong
+
+The plan (inherited from `improvement-prompt.md`) listed "CSRF protection on
+browser-authenticated dashboard mutations". Verified against the code:
+
+- `public/dashboard.html` authenticates with `Authorization: Bearer <token>`
+- there is **no** cookie parsing, **no** session middleware, **no** `res.cookie` anywhere
+- there is **no** CORS middleware, so cross-origin requests are same-origin-blocked
+
+CSRF requires an *ambient* credential the browser attaches automatically. A Bearer header
+is not one, and cannot be set cross-origin without CORS approval that is never granted.
+Adding CSRF tokens would be theatre: complexity, a new desync failure mode, and no
+attack prevented. **Not implemented, deliberately.**
+
+### The linter found 18 hanging endpoints — shipped, in production
+
+Installing ESLint surfaced `no-undef` on `admin.routes.js` (16 sites) and
+`subscription.routes.js` (2), including the **public** `/api/subscriptions/plans`.
+
+Cause: the scripted envelope migration inserted `respond.ok(req, res, ...)` into handlers
+whose signature was `(_req, res)` — an underscore-prefixed, deliberately-unused request
+parameter. `req` was undefined, the `try` threw, the `catch` called
+`respond.failInternal(req, ...)` and threw again, and **the request hung**.
+
+None of the four guards I had written caught it. They checked for a missing `require`, a
+half-migrated file, an unbound *trailing* argument, and a malformed `fail()` — not a
+first argument, and not a parameter that exists under a different name. A fifth guard now
+covers this exact shape, but the real lesson is that **a linter catches a whole class
+where hand-written guards catch instances**.
+
+It also explains why nothing alerted: a hung request emits no error log and no 5xx. This
+is now the argument for decisions-needed #13 (error tracking).
+
+### Shipped
+
+| Piece | Notes |
+|---|---|
+| ESLint + `npm run lint`, gated in CI | Deliberately defect-focused, not style-focused: a thousand formatting findings on day one would get it switched off. |
+| 7 real unused-variable/dead-import fixes | Including two dead imports and a dead destructure left by earlier migrations. |
+| Secret scanning in CI | Verified against a planted canary. A test fixture was renamed rather than the detector weakened. |
+| Tighter auth rate limit (30/15min vs 120/min) | The OTP flow's real protection is its 5-attempts-per-code cap, which is sound. This is defence in depth, and slows enumeration of which numbers are registered shops. |
+
+### Not done
+
+- **Error tracking** — blocked on decisions-needed #13, now the highest-value item on that
+  list.
+- **`public/dashboard.html` decomposition** (2,879 lines) and the CSP tightening that
+  depends on it.
+- **Staff roles and permissions UI** — the backend RBAC exists (`utils/permissions.js`,
+  `rbac.test.js`); there is no UI for it.
 - Nothing pushed or merged.

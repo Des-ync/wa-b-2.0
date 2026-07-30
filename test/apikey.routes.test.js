@@ -325,13 +325,13 @@ test('POST /:id/rotate succeeds and returns the new plaintext without leaking a 
   ]);
   rotateKeyReturn = {
     id: 'new-key-2', business_id: 'biz-1', name: 'Own key', scope: 'tenant', role: 'manager',
-    expires_at: null, created_at: new Date().toISOString(), plaintext: 'sk_live_rotatedplaintext'
+    expires_at: null, created_at: new Date().toISOString(), plaintext: 'sk_live_NOT_A_REAL_KEY'
   };
   const app = buildApp();
   const res = await request(app).post('/api/keys/key-2/rotate').set('Authorization', 'Bearer sk_live_abc');
   assert.equal(res.status, 200);
   assert.equal(res.body.success, true);
-  assert.equal(res.body.key.plaintext, 'sk_live_rotatedplaintext');
+  assert.equal(res.body.key.plaintext, 'sk_live_NOT_A_REAL_KEY');
   assert.deepEqual(rotateKeyCalls, ['key-2']);
   const fields = Object.keys(res.body.key);
   assert.ok(!fields.some(f => /hash/i.test(f)), `response leaked a hash-like field: ${JSON.stringify(fields)}`);

@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { pool, query, close } = require('../config/database');
+const { query, close } = require('../config/database');
 const logger = require('../utils/logger');
 
 const SQL = `

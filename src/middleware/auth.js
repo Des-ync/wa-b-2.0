@@ -27,7 +27,7 @@ async function verifyClerkSession(token) {
   let payload;
   try {
     payload = await verifyToken(token, { secretKey: CLERK_SECRET_KEY });
-  } catch (err) {
+  } catch (_err) {
     const wrapped = new Error('Invalid or expired Clerk session');
     wrapped.code = 'invalid_token';
     throw wrapped;

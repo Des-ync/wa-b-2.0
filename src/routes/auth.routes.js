@@ -80,7 +80,7 @@ async function requireClerkToken(req, res, next) {
     req.clerkUserId = result.clerkUserId;
     req.linkedBusiness = result.business;
     next();
-  } catch (err) {
+  } catch (_err) {
     return respond.fail(req, res, { code: respond.CODES.UNAUTHORIZED, message: 'Invalid or expired Clerk session' });
   }
 }

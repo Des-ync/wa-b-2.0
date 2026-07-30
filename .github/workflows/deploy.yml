@@ -34,6 +34,36 @@ jobs:
           node-version: '18'
           cache: 'npm'
       - run: npm ci
+
+      # Lint before the tests: no-undef catches the class of bug that makes a
+      # route HANG rather than fail (an undefined `req`, a missing require),
+      # which a passing test suite will not surface if nothing exercises that
+      # branch. Eighteen such endpoints shipped before this gate existed.
+      - run: npm run lint
+
+      # Fail the build if a credential is about to be committed. The repo
+      # already .gitignores .env and the Firebase service account; this
+      # catches the case where one arrives under a name nobody thought to
+      # ignore.
+      - name: Secret scan
+        run: |
+          set -e
+          # Tracked files only — node_modules and untracked scratch files are
+          # not what gets deployed.
+          FOUND=$(git ls-files -z | xargs -0 grep -nIE \
+            -e 'sk_live_[A-Za-z0-9]{16,}' \
+            -e 'sk_test_[A-Za-z0-9]{16,}' \
+            -e 'BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY' \
+            -e '"private_key"[[:space:]]*:[[:space:]]*"-----BEGIN' \
+            -e 'EAA[A-Za-z0-9]{40,}' \
+            2>/dev/null | grep -v '\.env\.example' | grep -v 'eslint.config.js' || true)
+          if [ -n "$FOUND" ]; then
+            echo "::error::A credential appears to be committed:"
+            echo "$FOUND"
+            exit 1
+          fi
+          echo "No committed credentials found."
+
       - run: npm run migrate
       # One retry: a rare (~5%, observed on Node 26 locally, not yet confirmed
       # on this job's Node 18) supertest/HTTP-parser race unrelated to any
