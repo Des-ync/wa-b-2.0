@@ -38,6 +38,7 @@ const storefrontRoutes = require('./routes/storefront.routes');
 const inventoryRoutes = require('./routes/inventory.routes');
 const accountingRoutes = require('./routes/accounting.routes');
 const automationsRoutes = require('./routes/automations.routes');
+const contactRoutes = require('./routes/contact.routes');
 const auditlogRoutes = require('./routes/auditlog.routes');
 
 const app = express();
@@ -329,6 +330,17 @@ app.use('/api/inventory', apiLimiter, inventoryRoutes);
 app.use('/api/accounting', apiLimiter, accountingRoutes);
 app.use('/api/automations', apiLimiter, automationsRoutes);
 app.use('/api/audit-log', apiLimiter, auditlogRoutes);
+
+// Public, unauthenticated marketing-site contact form — a much tighter limit
+// than apiLimiter since it's an anonymous write endpoint that sends real email.
+const contactLimiter = rateLimit({
+  windowMs: 60 * 60_000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: 'Too many messages sent. Please try again later or WhatsApp us instead.' }
+});
+app.use('/api/contact', contactLimiter, contactRoutes);
 
 // Public system status — powers the (honest) status page. Exposes only
 // coarse operational signals, never tenant data.

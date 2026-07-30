@@ -19,3 +19,4 @@ build/
 *.swp
 *.swo
 .nyc_output/
+improvement-prompt.md

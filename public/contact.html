@@ -69,7 +69,7 @@
       <h2 class="h-card" style="font-size:22px">Send us a message</h2>
       <p style="color:var(--muted);font-size:14px;margin:8px 0 24px">Fill in the form and we'll route it to the right team. Response within one business day.</p>
 
-      <form class="form" onsubmit="event.preventDefault();this.querySelector('button').textContent='✓ Sent';this.querySelector('button').classList.add('btn-accent');this.querySelector('button').classList.remove('btn-primary')">
+      <form class="form" id="contact-form">
         <div class="field-row">
           <div class="field"><label for="name">Name</label><input id="name" type="text" required placeholder="Akosua Asare" /></div>
           <div class="field"><label for="email">Email</label><input id="email" type="email" required placeholder="you@business.com" /></div>
@@ -85,8 +85,46 @@
           </select>
         </div>
         <div class="field"><label for="msg">Message</label><textarea id="msg" rows="5" required placeholder="Tell us a bit about your business and what you're hoping WA-B can do for you."></textarea></div>
+        <!-- Honeypot: hidden from real visitors, real bots tend to fill every field. -->
+        <div style="position:absolute;left:-9999px" aria-hidden="true"><label for="website">Website</label><input id="website" type="text" tabindex="-1" autocomplete="off" /></div>
+        <p id="contact-form-error" role="alert" style="color:#c0392b;font-size:14px;margin:0;display:none"></p>
         <button type="submit" class="btn btn-primary btn-lg" style="justify-content:center">Send message <span class="arr">→</span></button>
       </form>
+      <script>
+        document.getElementById('contact-form').addEventListener('submit', async function (event) {
+          event.preventDefault();
+          const btn = this.querySelector('button');
+          const errEl = document.getElementById('contact-form-error');
+          errEl.style.display = 'none';
+          const originalLabel = btn.innerHTML;
+          btn.disabled = true;
+          btn.textContent = 'Sending…';
+          try {
+            const res = await fetch('/api/contact', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                name: document.getElementById('name').value,
+                email: document.getElementById('email').value,
+                subject: document.getElementById('subject').value,
+                message: document.getElementById('msg').value,
+                website: document.getElementById('website').value
+              })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok || !data.success) throw new Error(data.error || 'Could not send your message.');
+            btn.textContent = '✓ Sent';
+            btn.classList.add('btn-accent');
+            btn.classList.remove('btn-primary');
+            this.reset();
+          } catch (err) {
+            btn.disabled = false;
+            btn.innerHTML = originalLabel;
+            errEl.textContent = err.message;
+            errEl.style.display = 'block';
+          }
+        });
+      </script>
     </div>
   </div>
 </section>
