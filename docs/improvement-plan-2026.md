@@ -1,6 +1,6 @@
 # KweliChat / WA-B — Improvement Plan 2026 (corrected, evidence-backed)
 
-**Status:** Phases 0–7 complete (§5–§11); Phase 9 started (§12). Phase 8 not started. Phase 3's envelope migration covers 22 of 26 route
+**Status:** Phases 0–7 complete (§5–§11); Phases 8 and 9 started (§13, §12). Phase 3's envelope migration covers 22 of 26 route
 groups; the four left out are deliberate. Phases 5–9 not started.
 **Produced:** 2026-07-30, at commit `4d8d48b`.
 **Supersedes:** `improvement-prompt.md` as the execution plan. That file remains the
@@ -605,3 +605,53 @@ is now the argument for decisions-needed #13 (error tracking).
 - **Staff roles and permissions UI** — the backend RBAC exists (`utils/permissions.js`,
   `rbac.test.js`); there is no UI for it.
 - Nothing pushed or merged.
+
+
+---
+
+## 13. Phase 8 — merchant depth (started)
+
+Branch `phase-8/merchant-depth`. **The CRM profile shipped.** The rest of Phase 8 is a
+long list of independent items; this took the one with the largest gap between what the
+backend already does and what a merchant can see.
+
+### The gap
+
+`GET /api/customers/:id/profile` has served lifetime spend, order frequency, preferred
+payment method, last products ordered, recent orders and conversation history for a long
+time, and **nothing called it**. Tapping a customer in the list opened the chat thread, so
+"is this person worth a discount" had no answer inside the app. The same was true of
+`/loyalty`, `/tags`, `/address-note` and `/birthday`.
+
+### Shipped
+
+`lib/screens/customer_detail.dart` — one screen answering what the merchant actually asks
+when they tap a name in a customer *list*: what is this person worth, what do they buy,
+what have I promised them. The chat is one tap away from there rather than being the
+destination.
+
+Loyalty loads in parallel and is allowed to fail on its own: a shop with the programme
+switched off must still see who its best customers are.
+
+Also `lib/api/customer_api.dart` — typed methods for profile, loyalty, tags, address note,
+birthday and points redemption, all previously unreachable.
+
+### Two shape assumptions caught before shipping
+
+- **`last_products_ordered` elements are `{ name, ordered_at }` objects**, not strings.
+  `Text('$p')` would have rendered `{name: Jollof Rice, ordered_at: …}` on screen.
+- The profile's derived metrics arrive **flat**, because the legacy envelope spreads `meta`
+  at the top level — which is what every deployed client receives.
+
+Both are now pinned by widget tests built from the exact payload the endpoint returns,
+rather than from what the screen wished it returned. A third test pins that a failing
+loyalty call still renders the profile.
+
+### Not done
+
+Bulk edit, duplicate product, drag-and-drop ordering, product quality score, photo upload
+(still paste-URL), CSV import *preview* (the import itself exists and reports skipped rows),
+Kanban order board, printable packing slip, segment builder UI, settings IA rework, undo.
+Each is independent; none blocks the others.
+
+Nothing pushed or merged.

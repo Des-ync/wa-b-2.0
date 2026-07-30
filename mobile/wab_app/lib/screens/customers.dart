@@ -4,7 +4,7 @@ import 'package:provider/provider.dart';
 import '../state/session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
-import 'chat.dart';
+import 'customer_detail.dart';
 
 class CustomersScreen extends StatefulWidget {
   const CustomersScreen({super.key});
@@ -111,8 +111,12 @@ class _CustomersScreenState extends State<CustomersScreen> {
                             fontWeight: FontWeight.w800,
                             color: WabColors.accentInk,
                             fontSize: 15)),
+                    // Opens the profile, not the chat. "Is this person worth
+                    // a discount" is the question a merchant has when they
+                    // tap a name in a customer LIST; the chat is one tap away
+                    // from there.
                     onTap: () => Navigator.of(ctx).push(MaterialPageRoute(
-                        builder: (_) => ChatScreen(
+                        builder: (_) => CustomerDetailScreen(
                             customerId: '${c['id']}', customerName: name))),
                   ),
                 );

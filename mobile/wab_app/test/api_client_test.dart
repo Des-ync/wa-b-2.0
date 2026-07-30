@@ -6,6 +6,7 @@ import 'package:http/testing.dart';
 import 'package:wab_app/api/accounting_api.dart';
 import 'package:wab_app/api/broadcast_api.dart';
 import 'package:wab_app/api/client.dart';
+import 'package:wab_app/api/customer_api.dart';
 import 'package:wab_app/api/order_api.dart';
 
 /// The API layer.
@@ -225,6 +226,56 @@ void main() {
         api.sendPaymentReminder('ord-1'),
         throwsA(isA<ApiException>().having((e) => e.status, 'status', 429)),
       );
+    });
+  });
+
+  group('CustomerApi', () {
+    test('profile and loyalty are separate calls', () async {
+      final cap = Capture();
+      await cap.client().getCustomerProfile('cust-1');
+      expect(cap.last.url.path, '/api/customers/cust-1/profile');
+
+      await cap.client().getCustomerLoyalty('cust-1');
+      expect(cap.last.url.path, '/api/customers/cust-1/loyalty');
+    });
+
+    test('tags replace the whole set', () async {
+      final cap = Capture();
+      await cap.client().setCustomerTags('cust-1', ['vip', 'wholesale']);
+
+      expect(cap.last.method, 'PATCH');
+      expect(cap.last.url.path, '/api/customers/cust-1/tags');
+      expect(cap.lastBody, {'tags': ['vip', 'wholesale']});
+    });
+
+    test('an empty tag list clears them rather than being dropped', () async {
+      final cap = Capture();
+      await cap.client().setCustomerTags('cust-1', []);
+      // Sending nothing would leave the old tags in place — the merchant
+      // removing every tag must actually remove them.
+      expect(cap.lastBody, {'tags': []});
+    });
+
+    test('address note and birthday both accept null to clear', () async {
+      final cap = Capture();
+      await cap.client().setCustomerAddressNote('cust-1', null);
+      expect(cap.last.url.path, '/api/customers/cust-1/address-note');
+      expect(cap.lastBody, {'address_note': null});
+
+      await cap.client().setCustomerBirthday('cust-1', null);
+      expect(cap.lastBody, {'date_of_birth': null});
+
+      await cap.client().setCustomerBirthday('cust-1', '1990-04-12');
+      expect(cap.lastBody, {'date_of_birth': '1990-04-12'});
+    });
+
+    test('redeeming points posts an integer count', () async {
+      final cap = Capture();
+      await cap.client().redeemCustomerPoints('cust-1', points: 100);
+
+      expect(cap.last.method, 'POST');
+      expect(cap.last.url.path, '/api/customers/cust-1/loyalty/redeem-points');
+      expect(cap.lastBody, {'points': 100});
     });
   });
 
