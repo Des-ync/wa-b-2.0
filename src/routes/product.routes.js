@@ -1,6 +1,6 @@
 const express = require('express');
 const logger = require('../utils/logger');
-const { query } = require('../config/database');
+const { query, transaction } = require('../config/database');
 const { requireAuth, requirePermission } = require('../middleware/auth');
 const { tenantBlocksBusinessId } = require('../middleware/tenantAccess');
 const { toCsv, parseCsv } = require('../utils/csv');
@@ -433,6 +433,22 @@ router.get('/export', async (req, res) => {
  * business) are updated in place; all other rows are inserted. Malformed
  * rows are skipped and reported back rather than aborting the whole import.
  */
+/**
+ * POST /api/products/import — body: { business_id?, csv, dry_run? }
+ *
+ * `dry_run: true` validates the whole file and reports exactly what WOULD
+ * happen, row by row, without writing anything. A merchant pasting a
+ * spreadsheet has no other way to find out that column 3 is the wrong one
+ * until their catalogue is already wrong — and unlike a single bad product,
+ * a bad import is 200 of them.
+ *
+ * The real import runs in ONE transaction. It used to write row by row, so a
+ * database error on row 150 of 200 left 149 products written, returned a 500,
+ * and gave the merchant no way to know which. Validation failures still skip
+ * individual rows and report them — those are the merchant's typos, not a
+ * failure of the import — but anything unexpected now rolls the whole file
+ * back.
+ */
 router.post('/import', requirePermission('products', 'write'), async (req, res) => {
   try {
     const businessId = req.body?.business_id || req.auth?.businessId;
@@ -446,6 +462,7 @@ router.post('/import', requirePermission('products', 'write'), async (req, res) 
     if (!csvText || typeof csvText !== 'string') {
       return respond.invalid(req, res, 'csv (string) is required', { csv: 'is invalid' });
     }
+    const dryRun = req.body?.dry_run === true;
 
     const rows = parseCsv(csvText);
     if (!rows.length) return respond.invalid(req, res, 'CSV has no rows');
@@ -456,8 +473,9 @@ router.post('/import', requirePermission('products', 'write'), async (req, res) 
       return respond.invalid(req, res, 'Import is limited to 2000 rows per file');
     }
 
-    let created = 0;
-    let updated = 0;
+    // Built first, applied second — so a dry run and a real import agree by
+    // construction rather than by two code paths that must be kept in step.
+    const plan = [];
     const skipped = [];
 
     // Only trust an `id` that already belongs to this business — prevents a
@@ -493,34 +511,71 @@ router.post('/import', requirePermission('products', 'write'), async (req, res) 
         continue;
       }
 
-      if (isUpdate) {
-        const sets = [];
-        const params = [record.id];
-        for (const [col, val] of Object.entries(out)) {
-          params.push(val);
-          sets.push(`${col} = $${params.length}`);
-        }
-        if (sets.length) {
-          await query(`UPDATE products SET ${sets.join(', ')} WHERE id = $1`, params);
-          updated++;
-        }
-      } else {
-        await query(
-          `INSERT INTO products (
-             business_id, name, description, price_ghs, category, in_stock, image_url, stock_qty,
-             low_stock_threshold, featured, hidden, available_from, available_to, cost_price_ghs
-           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
-          [
-            businessId, out.name, out.description ?? null, out.price_ghs,
-            out.category || 'general', out.in_stock ?? true, out.image_url ?? null,
-            out.stock_qty ?? null, out.low_stock_threshold ?? 3, out.featured ?? false,
-            out.hidden ?? false, out.available_from ?? null, out.available_to ?? null,
-            out.cost_price_ghs ?? null
-          ]
-        );
-        created++;
-      }
+      plan.push({
+        row: i + 2,
+        action: isUpdate ? 'update' : 'create',
+        id: isUpdate ? record.id : null,
+        name: out.name ?? record.name ?? '',
+        // Which columns this row actually changes — the difference between
+        // "200 updates" and "200 updates that all blank your descriptions".
+        fields: Object.keys(out),
+        values: out
+      });
     }
+
+    const created = plan.filter(p => p.action === 'create').length;
+    const updated = plan.filter(p => p.action === 'update').length;
+
+    if (dryRun) {
+      return respond.ok(req, res,
+        {
+          // Capped: a 2000-row preview is unreadable and a large response on
+          // a slow connection. The counts above still describe the whole file.
+          preview: plan.slice(0, 50).map(({ values: _values, ...row }) => row),
+          skipped
+        },
+        {
+          meta: {
+            dry_run: true,
+            created, updated,
+            skipped_count: skipped.length,
+            preview_truncated: plan.length > 50
+          }
+        });
+    }
+
+    // One transaction for the whole file: a failure part-way through must not
+    // leave a half-imported catalogue the merchant cannot reason about.
+    await transaction(async client => {
+      for (const row of plan) {
+        if (row.action === 'update') {
+          const sets = [];
+          const params = [row.id];
+          for (const [col, val] of Object.entries(row.values)) {
+            params.push(val);
+            sets.push(`${col} = $${params.length}`);
+          }
+          if (sets.length) {
+            await client.query(`UPDATE products SET ${sets.join(', ')} WHERE id = $1`, params);
+          }
+        } else {
+          const out = row.values;
+          await client.query(
+            `INSERT INTO products (
+               business_id, name, description, price_ghs, category, in_stock, image_url, stock_qty,
+               low_stock_threshold, featured, hidden, available_from, available_to, cost_price_ghs
+             ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+            [
+              businessId, out.name, out.description ?? null, out.price_ghs,
+              out.category || 'general', out.in_stock ?? true, out.image_url ?? null,
+              out.stock_qty ?? null, out.low_stock_threshold ?? 3, out.featured ?? false,
+              out.hidden ?? false, out.available_from ?? null, out.available_to ?? null,
+              out.cost_price_ghs ?? null
+            ]
+          );
+        }
+      }
+    });
 
     return respond.ok(req, res,
       { created, updated, skipped },

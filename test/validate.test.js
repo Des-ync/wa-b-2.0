@@ -203,3 +203,32 @@ test('summarize gives the legacy envelope something human to show', () => {
     'name is required (and 1 more)');
   assert.equal(summarize({}), 'Invalid request');
 });
+
+test('an explicitly-undefined value is treated as absent, not as invalid', () => {
+  // The regression this pins: the CSV import builds
+  // `{ stock_qty: record.stock_qty }` from a spreadsheet, so a file with no
+  // stock_qty column yields a key holding undefined. Validating that as a
+  // supplied value rejected every row of any CSV missing an optional column.
+  const schema = { name: str({ required: true }), stock_qty: int({ min: 0, nullable: true }) };
+
+  const { valid, value, fields } = validate({ name: 'Jollof', stock_qty: undefined }, schema);
+
+  assert.equal(valid, true, JSON.stringify(fields));
+  assert.ok(!('stock_qty' in value), 'absent means leave alone, not write undefined');
+});
+
+test('undefined still respects `required`', () => {
+  // Absent is absent — a required field explicitly set to undefined is
+  // missing, and must be reported as missing rather than silently accepted.
+  const { valid, fields } = validate({ name: undefined }, { name: str({ required: true }) });
+  assert.equal(valid, false);
+  assert.equal(fields.name, 'is required');
+});
+
+test('null is still a VALUE — it clears a nullable field', () => {
+  // The distinction that makes the rule above safe: undefined means "I said
+  // nothing", null means "I said: empty".
+  const schema = { stock_qty: int({ min: 0, nullable: true }) };
+  assert.equal(validate({ stock_qty: null }, schema).value.stock_qty, null);
+  assert.ok(!('stock_qty' in validate({ stock_qty: undefined }, schema).value));
+});

@@ -20,7 +20,11 @@ const request = require('supertest');
 const db = require('../src/config/database');
 let currentQuery = async () => ({ rows: [] });
 db.query = (...a) => currentQuery(...a);
-db.transaction = async (cb) => cb({ query: (...a) => currentQuery(...a) });
+// product.routes destructures { transaction } at require time, so the stub
+// has to delegate to a swappable variable — reassigning db.transaction later
+// would not change what the module already captured.
+let currentTransaction = async (cb) => cb({ query: (...a) => currentQuery(...a) });
+db.transaction = (...a) => currentTransaction(...a);
 
 const automations = require('../src/services/automations');
 let restockCalls = [];
@@ -68,7 +72,11 @@ function captureWrite() {
   return seen;
 }
 
-test.beforeEach(() => { restockCalls = []; withQuery(async () => ({ rows: [] })); });
+test.beforeEach(() => {
+  restockCalls = [];
+  currentTransaction = async (cb) => cb({ query: (...a) => currentQuery(...a) });
+  withQuery(async () => ({ rows: [] }));
+});
 
 // ---------------------------------------------------------------- list/create
 
@@ -455,4 +463,148 @@ test('v2 reports which bundle field was wrong', async () => {
   assert.equal(res.body.error.code, 'validation_error');
   assert.deepEqual(Object.keys(res.body.error.fields).sort(),
     ['items', 'name', 'price_ghs']);
+});
+
+// ------------------------------------------------------------------- import
+
+/**
+ * CSV import: the dry run, and the transaction.
+ *
+ * A merchant pasting a spreadsheet has no way to discover that column 3 is
+ * the wrong one until their catalogue is already wrong — and unlike one bad
+ * product, a bad import is two hundred of them.
+ */
+function withImport({ owned = [], onWrite } = {}) {
+  const writes = [];
+  currentQuery = async (sql, params) => {
+    if (sql.includes('SELECT id, business_id, scope, revoked_at')) return { rows: [TENANT_KEY_ROW] };
+    if (sql === 'SELECT id FROM products WHERE business_id = $1') {
+      return { rows: owned.map(id => ({ id })) };
+    }
+    writes.push({ sql: sql.replace(/\s+/g, ' ').trim(), params });
+    if (onWrite) onWrite(sql);
+    return { rows: [], rowCount: 1 };
+  };
+  return writes;
+}
+
+const CSV_HEADER = 'name,price_ghs,category';
+const importCsv = (csv, extra = {}) =>
+  auth(request(app()).post('/api/products/import'))
+    .send({ business_id: 'biz-1', csv, ...extra });
+
+test('a dry run reports what would happen and writes NOTHING', async () => {
+  const writes = withImport();
+
+  const res = await importCsv(
+    `${CSV_HEADER}\nJollof,40,mains\nWaakye,25,mains`, { dry_run: true });
+
+  assert.equal(res.status, 200);
+  assert.equal(res.body.dry_run, true);
+  assert.equal(res.body.created, 2);
+  assert.equal(res.body.updated, 0);
+  assert.equal(res.body.preview.length, 2);
+  assert.equal(res.body.preview[0].name, 'Jollof');
+  assert.equal(res.body.preview[0].action, 'create');
+  // Row numbers are 1-based INCLUDING the header, so they match what the
+  // merchant sees in their spreadsheet.
+  assert.equal(res.body.preview[0].row, 2);
+
+  assert.deepEqual(writes.filter(w => /INSERT INTO products|UPDATE products/.test(w.sql)), [],
+    'a dry run that writes is not a dry run');
+});
+
+test('a dry run tells the merchant which columns each row would change', async () => {
+  withImport();
+
+  const res = await importCsv(`${CSV_HEADER}\nJollof,40,mains`, { dry_run: true });
+
+  // The difference between "200 updates" and "200 updates that all blank
+  // your descriptions".
+  assert.ok(res.body.preview[0].fields.includes('name'));
+  assert.ok(res.body.preview[0].fields.includes('price_ghs'));
+});
+
+test('a dry run separates rows it would skip, with the reason', async () => {
+  withImport();
+
+  const res = await importCsv(
+    `${CSV_HEADER}\nJollof,40,mains\n,notanumber,mains`, { dry_run: true });
+
+  assert.equal(res.body.created, 1);
+  assert.equal(res.body.skipped_count, 1);
+  assert.equal(res.body.skipped[0].row, 3);
+  assert.ok(res.body.skipped[0].errors.length > 0);
+});
+
+test('a dry run marks a row with a known id as an update, not a create', async () => {
+  withImport({ owned: ['11111111-1111-1111-1111-111111111111'] });
+
+  const res = await importCsv(
+    'id,name,price_ghs\n11111111-1111-1111-1111-111111111111,Jollof,45',
+    { dry_run: true });
+
+  assert.equal(res.body.updated, 1);
+  assert.equal(res.body.created, 0);
+  assert.equal(res.body.preview[0].action, 'update');
+});
+
+test("a row with another business's id is treated as a create, never an update", async () => {
+  // The ownership set is the only thing standing between a crafted CSV and
+  // overwriting another tenant's catalogue by guessing UUIDs.
+  withImport({ owned: [] });
+
+  const res = await importCsv(
+    'id,name,price_ghs\n99999999-9999-9999-9999-999999999999,Hijack,1',
+    { dry_run: true });
+
+  assert.equal(res.body.updated, 0);
+  assert.equal(res.body.preview[0].action, 'create');
+});
+
+test('a large preview is capped but the counts still cover the whole file', async () => {
+  withImport();
+  const rows = Array.from({ length: 120 }, (_, i) => `Item ${i},10,mains`).join('\n');
+
+  const res = await importCsv(`${CSV_HEADER}\n${rows}`, { dry_run: true });
+
+  assert.equal(res.body.created, 120, 'the count describes the whole file');
+  assert.equal(res.body.preview.length, 50, 'the preview is readable');
+  assert.equal(res.body.preview_truncated, true);
+});
+
+test('a real import writes inside ONE transaction', async () => {
+  let transactionUsed = false;
+  currentTransaction = async (cb) => {
+    transactionUsed = true;
+    return cb({ query: (...a) => currentQuery(...a) });
+  };
+  withImport();
+
+  const res = await importCsv(`${CSV_HEADER}\nJollof,40,mains\nWaakye,25,mains`);
+
+  assert.equal(res.status, 200);
+  assert.equal(res.body.created, 2);
+  // Row-by-row writes meant a failure on row 150 of 200 left 149 products
+  // written, a 500 returned, and no way to tell which.
+  assert.equal(transactionUsed, true);
+});
+
+test('a failure part-way through rolls the whole file back', async () => {
+  currentTransaction = async (cb) => {
+    // Model a real transaction: the caller's throw propagates and nothing
+    // the callback did is kept.
+    return cb({
+      query: async (sql) => {
+        if (sql.includes('INSERT INTO products')) throw new Error('deadlock detected');
+        return { rows: [], rowCount: 1 };
+      }
+    });
+  };
+  withImport();
+
+  const res = await importCsv(`${CSV_HEADER}\nJollof,40,mains`);
+
+  assert.equal(res.status, 500);
+  assert.equal(res.body.error, 'Internal server error');
 });

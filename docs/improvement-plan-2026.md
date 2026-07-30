@@ -647,11 +647,30 @@ Both are now pinned by widget tests built from the exact payload the endpoint re
 rather than from what the screen wished it returned. A third test pins that a failing
 loyalty call still renders the profile.
 
+### CSV import — preview, a transaction, and a regression it exposed
+
+`dry_run: true` now validates the whole file and reports what *would* happen per row,
+writing nothing. A merchant pasting a spreadsheet had no way to discover that column 3 was
+the wrong one until their catalogue was already wrong — and unlike one bad product, a bad
+import is two hundred of them.
+
+The real import now runs in **one transaction**. It wrote row by row, so a database error
+on row 150 of 200 left 149 products written, returned a 500, and gave the merchant no way
+to know which.
+
+**Building the dry run exposed a live regression from Phase 3.** The import assembles
+`{ stock_qty: record.stock_qty }` from spreadsheet columns, so a CSV without a `stock_qty`
+column produced a key holding `undefined`. The hand-rolled validators it replaced checked
+`if (body.x !== undefined)`; the schema layer used `hasOwnProperty`, so it validated
+`undefined` as a supplied value and **rejected every row of any CSV missing an optional
+column** — which is most of them. `validate()` now treats an explicitly-`undefined` value
+as absent, matching the behaviour it replaced. `null` still means "clear this", which is
+the distinction that makes the rule safe. Verified end to end against a real database.
+
 ### Not done
 
 Bulk edit, duplicate product, drag-and-drop ordering, product quality score, photo upload
-(still paste-URL), CSV import *preview* (the import itself exists and reports skipped rows),
-Kanban order board, printable packing slip, segment builder UI, settings IA rework, undo.
-Each is independent; none blocks the others.
+(still paste-URL), Kanban order board, printable packing slip, segment builder UI, settings
+IA rework, undo. Each is independent; none blocks the others.
 
 Nothing pushed or merged.

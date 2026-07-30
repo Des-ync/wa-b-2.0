@@ -226,7 +226,17 @@ function validate(body, schema, { partial = false, refine } = {}) {
   const fields = {};
 
   for (const [name, rule] of Object.entries(schema)) {
-    const present = Object.prototype.hasOwnProperty.call(source, name);
+    // An explicitly-`undefined` value counts as ABSENT, not as a value to
+    // validate. This is what the hand-rolled validators this layer replaced
+    // did (`if (body.x !== undefined)`), and it matters for callers that
+    // build an object rather than receiving JSON: the CSV import assembles
+    // `{ stock_qty: record.stock_qty }` from a spreadsheet, so a file with no
+    // stock_qty column produced a key holding undefined. Treating that as a
+    // supplied value rejected every row of any CSV missing an optional
+    // column — which is most of them. JSON has no undefined, so request
+    // bodies are unaffected either way.
+    const present = Object.prototype.hasOwnProperty.call(source, name)
+      && source[name] !== undefined;
     const raw = present ? source[name] : MISSING;
 
     if (!present) {
