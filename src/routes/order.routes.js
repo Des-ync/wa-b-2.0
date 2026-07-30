@@ -96,7 +96,13 @@ router.get('/stats/today', async (req, res) => {
             FROM payment_attempts pa
             JOIN today t ON t.id = pa.order_id
            WHERE pa.status = 'failed'
-             AND COALESCE(pa.failure_reason, '') <> 'superseded')                    AS failed_payments_count`,
+             AND COALESCE(pa.failure_reason, '') <> 'superseded')                    AS failed_payments_count,
+         -- Orders sitting at the very first stage, waiting on the merchant to
+         -- accept them. NOT scoped to today: an order left unconfirmed since
+         -- yesterday is more urgent than one placed an hour ago, and a Task
+         -- Center that forgets it overnight is worse than no Task Center.
+         (SELECT COUNT(*)::int FROM orders
+           WHERE business_id = $1 AND status = 'pending')                            AS needs_confirmation_count`,
       [business_id]
     );
     const s = r.rows[0];

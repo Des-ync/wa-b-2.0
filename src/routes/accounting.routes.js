@@ -246,7 +246,8 @@ router.get('/reconciliation', requirePermission('financial', 'read'), async (req
       }
       return csvResponse(res, `payout-reconciliation-${label}.csv`, columns, rows);
     }
-    return respond.ok(req, res, {      total_paid_orders: result.rows.length,
+    return respond.ok(req, res, {
+      total_paid_orders: result.rows.length,
       unmatched_count: unmatched.length,
       unmatched,
       orders: result.rows
@@ -304,7 +305,8 @@ router.get('/payout-balance', requirePermission('financial', 'read'), async (req
     );
     const collected = Number(collectedRes.rows[0].collected);
     const paidOut = Number(paidOutRes.rows[0].paid_out);
-    return respond.ok(req, res, {      collected_ghs: collected.toFixed(2),
+    return respond.ok(req, res, {
+      collected_ghs: collected.toFixed(2),
       paid_out_ghs: paidOut.toFixed(2),
       balance_ghs: (collected - paidOut).toFixed(2)
     });
@@ -590,7 +592,8 @@ router.get('/profit-loss', requirePermission('financial', 'read'), async (req, r
     );
     const totalExpenses = expenseRes.rows.reduce((sum, r) => sum + Number(r.expenses), 0);
     const revenue = Number(revenueRes.rows[0].revenue);
-    return respond.ok(req, res, {      revenue_ghs: revenue.toFixed(2),
+    return respond.ok(req, res, {
+      revenue_ghs: revenue.toFixed(2),
       expenses_ghs: totalExpenses.toFixed(2),
       expenses_by_category: expenseRes.rows,
       net_ghs: (revenue - totalExpenses).toFixed(2)
@@ -661,7 +664,8 @@ router.get('/inventory-valuation', requirePermission('financial', 'read'), async
       }
       return csvResponse(res, `inventory-valuation-${new Date().toISOString().slice(0, 10)}.csv`, columns, rows);
     }
-    return respond.ok(req, res, {      total_value_ghs: Number(totalValueGhs.toFixed(2)),
+    return respond.ok(req, res, {
+      total_value_ghs: Number(totalValueGhs.toFixed(2)),
       untracked_count: untrackedCount,
       uncosted_count: uncostedCount,
       items

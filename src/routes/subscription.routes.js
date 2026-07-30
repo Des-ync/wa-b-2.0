@@ -48,7 +48,8 @@ router.post('/', requireAuth('admin'), async (req, res) => {
       });
     }
 
-    return respond.ok(req, res, {      business: safeBusiness,
+    return respond.ok(req, res, {
+      business: safeBusiness,
       reference: result.reference,
       subscription_id: result.subscriptionId,
       payment_status: result.status
@@ -115,7 +116,8 @@ router.post('/:businessId/cancel', requireAuth('any'), requirePermission('billin
     const business = await subService.getBusinessById(req.params.businessId);
     if (!business) return respond.notFound(req, res, 'Business');
     const result = await subService.cancelSubscription(business.id);
-    return respond.ok(req, res, {      mode: result.mode,                  // 'period_end' | 'immediate'
+    return respond.ok(req, res, {
+      mode: result.mode,                  // 'period_end' | 'immediate'
       ends_at: result.endsAt,
       subscriptions: result.subscriptions
     });

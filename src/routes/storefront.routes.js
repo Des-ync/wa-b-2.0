@@ -77,7 +77,8 @@ router.get('/:slug', async (req, res) => {
       )
     ]);
 
-    return respond.ok(req, res, {      shop: {
+    return respond.ok(req, res, {
+      shop: {
         name: business.name,
         industry: business.industry,
         welcome_message: business.welcome_message,
@@ -228,7 +229,8 @@ router.post('/:slug/checkout', async (req, res) => {
     const message = `Hi ${business.name}, I'd like to complete order #${order.order_number}`;
     const whatsappLink = digits ? `https://wa.me/${digits}?text=${encodeURIComponent(message)}` : null;
 
-    return respond.ok(req, res, {      order: { order_number: order.order_number, total_ghs: order.total_ghs },
+    return respond.ok(req, res, {
+      order: { order_number: order.order_number, total_ghs: order.total_ghs },
       whatsapp_link: whatsappLink
     }, { status: 201 });
   } catch (err) {

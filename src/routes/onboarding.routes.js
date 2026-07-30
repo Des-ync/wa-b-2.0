@@ -98,7 +98,8 @@ router.get('/status', async (req, res) => {
       )
     ]);
     const checklist = computeOnboardingSteps(business, productCount.rows[0].n, staffCount.rows[0].n);
-    return respond.ok(req, res, {      ...checklist,
+    return respond.ok(req, res, {
+      ...checklist,
       // Platform-wide signal, not per-tenant: Paystack is a single platform
       // account (see migrate.js payouts note) — a merchant should know if
       // real money is moving yet or the whole platform is still on Paystack
@@ -153,7 +154,8 @@ router.get('/webhook-health', async (req, res) => {
       else whatsappStatus = ageHours < 2 ? 'unknown' : 'no_inbound_received';
     }
 
-    return respond.ok(req, res, {      whatsapp: {
+    return respond.ok(req, res, {
+      whatsapp: {
         status: whatsappStatus,
         connected: !!business.wa_phone_number_id,
         inbound_message_count: m.inbound_count,
@@ -361,7 +363,8 @@ router.post('/sample-catalog', requirePermission('products', 'write'), async (re
       detail: { product_count: insertedProducts.length, industry: business.industry }
     });
 
-    return respond.ok(req, res, {      products_added: insertedProducts.length,
+    return respond.ok(req, res, {
+      products_added: insertedProducts.length,
       categories_added: catalog.categories.length,
       promo_added: !!promo
     }, { status: 201 });

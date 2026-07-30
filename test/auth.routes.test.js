@@ -705,3 +705,40 @@ test('DELETE /passkey/:id: deleting one\'s own credential succeeds', async () =>
   assert.equal(res.status, 200);
   assert.equal(res.body.success, true);
 });
+
+/**
+ * The link_required contract, pinned in BOTH envelopes.
+ *
+ * mobile/wab_app/lib/screens/login.dart branches on
+ * `e.code == 'link_required'` to tell a merchant to finish setup on the web
+ * dashboard. In the legacy envelope the client derives that code from the
+ * `error` STRING, so putting prose there would silently break Clerk-linked
+ * sign-in — no error, no test failure, just a generic message forever.
+ */
+test('link_required sends the code in `error` and the prose in `message`', async () => {
+  currentQuery = makeQueryRouter([
+    ['FROM businesses WHERE whatsapp_number', () => ({ rows: [{ ...BUSINESS, clerk_user_id: null }] })]
+  ]);
+
+  const res = await request(buildApp())
+    .post('/api/auth/mobile/request').send({ whatsapp_number: PHONE_LOCAL });
+
+  assert.equal(res.status, 403);
+  assert.equal(res.body.error, 'link_required', 'login.dart branches on this exact value');
+  assert.match(res.body.message, /web dashboard/, 'and shows this to the merchant');
+});
+
+test('link_required moves into error.code under the v2 envelope', async () => {
+  currentQuery = makeQueryRouter([
+    ['FROM businesses WHERE whatsapp_number', () => ({ rows: [{ ...BUSINESS, clerk_user_id: null }] })]
+  ]);
+
+  const res = await request(buildApp())
+    .post('/api/auth/mobile/request')
+    .set('X-API-Version', '2')
+    .send({ whatsapp_number: PHONE_LOCAL });
+
+  assert.equal(res.status, 403);
+  assert.equal(res.body.error.code, 'link_required');
+  assert.match(res.body.error.message, /web dashboard/);
+});

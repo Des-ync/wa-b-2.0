@@ -139,7 +139,8 @@ router.get('/', async (req, res) => {
       recovered_revenue_ghs: acc.recovered_revenue_ghs + Number(r.recovered_revenue_ghs)
     }), { nudged_count: 0, recovered_count: 0, recovered_revenue_ghs: 0 });
 
-    return respond.ok(req, res, {      analytics: {
+    return respond.ok(req, res, {
+      analytics: {
         days,
         revenue_trend: revenue.rows,
         top_products: topProducts.rows,
@@ -243,7 +244,8 @@ router.get('/delivery-sla', async (req, res) => {
       late_rate_pct: b.with_eta > 0 ? Math.round((b.late / b.with_eta) * 100) : null
     })).sort((a, b) => b.deliveries - a.deliveries);
 
-    return respond.ok(req, res, {      delivery_sla: {
+    return respond.ok(req, res, {
+      delivery_sla: {
         completed_deliveries: rows.length,
         avg_minutes_to_deliver: avgMinutes !== null ? Math.round(avgMinutes) : null,
         late_count: lateCount,
@@ -357,7 +359,8 @@ router.get('/profit', async (req, res) => {
       margin_ghs: r.cost_ghs != null ? Number((Number(r.revenue_with_known_cost_ghs) - Number(r.cost_ghs)).toFixed(2)) : null
     }));
 
-    return respond.ok(req, res, {      profit: {
+    return respond.ok(req, res, {
+      profit: {
         days,
         by_product: products,
         by_day: byDayOut,
@@ -454,7 +457,8 @@ router.get('/cohorts', async (req, res) => {
       };
     }
 
-    return respond.ok(req, res, {      cohorts: {
+    return respond.ok(req, res, {
+      cohorts: {
         days,
         new_customers: nv.new || { customers: 0, orders: 0, revenue_ghs: 0 },
         returning_customers: nv.returning || { customers: 0, orders: 0, revenue_ghs: 0 },

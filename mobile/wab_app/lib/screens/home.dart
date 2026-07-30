@@ -8,7 +8,9 @@ import '../api/onboarding_api.dart';
 import '../services/offline_cache.dart';
 import '../state/session.dart';
 import '../theme.dart';
+import '../state/task_center.dart';
 import '../widgets/common.dart';
+import '../widgets/task_center.dart';
 import 'notifications.dart';
 import 'onboarding_checklist.dart';
 import 'order_detail.dart';
@@ -205,6 +207,13 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final session = context.watch<Session>();
+    // Derived once per build: the Task Center needs the list and the layout
+    // needs to know whether it is empty.
+    final tasks = buildTasks(
+      stats: _stats,
+      onboarding: _onboarding,
+      business: session.business,
+    );
     final name = session.business?['name']?.toString() ?? 'Your shop';
     final status = session.business?['status']?.toString();
 
@@ -261,6 +270,8 @@ class _HomeScreenState extends State<HomeScreen> {
                         _setupBanner(),
                         const SizedBox(height: 16),
                       ],
+                      TaskCenter(tasks: tasks),
+                      if (tasks.isNotEmpty) const SizedBox(height: 24),
                       _statGrid(),
                       const SizedBox(height: 24),
                       const Text('Recent orders',

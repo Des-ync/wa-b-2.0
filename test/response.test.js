@@ -304,3 +304,64 @@ test('no route passes an `error` key to respond.fail', () => {
   assert.deepEqual(offenders, [],
     'respond.fail ignores `error` — use { code, message }, or the status silently becomes 500');
 });
+
+/**
+ * A guard for the subtlest bug this migration produced.
+ *
+ * auth.routes.js has resolver HELPERS that send a response and then
+ * `return null`, so the calling route knows to stop. A scripted pass put
+ * `return` in front of the respond.* call, which made the helper hand back
+ * the response object — truthy — and the caller carried on as though a
+ * business had been found. Every test still passed except the two that
+ * happened to exercise that exact branch.
+ *
+ * `return respond.x(...)` immediately followed by `return null;` is always
+ * this mistake: the second statement is unreachable, and the first returns
+ * the wrong thing.
+ */
+test('no respond.* return is immediately followed by an unreachable return null', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const dir = path.join(__dirname, '..', 'src', 'routes');
+
+  const offenders = [];
+  for (const file of fs.readdirSync(dir).filter(f => f.endsWith('.js'))) {
+    const src = fs.readFileSync(path.join(dir, file), 'utf8');
+    const re = /return respond\.\w+\(req, res,[\s\S]{0,300}?\);\s*\n\s*return null;/g;
+    let m;
+    while ((m = re.exec(src)) !== null) {
+      offenders.push(`${file}:${src.slice(0, m.index).split('\n').length}`);
+    }
+  }
+
+  assert.deepEqual(offenders, [],
+    'a helper that sends a response must return null, not the response object');
+});
+
+test('legacyErrorIsCode keeps the code in `error` and the prose in `message`', () => {
+  // auth's link_required contract: mobile login branches on e.code, which the
+  // client derives from the legacy `error` string.
+  const legacy = res();
+  respond.fail(reqWith(), legacy, {
+    code: 'link_required',
+    status: 403,
+    message: 'Finish setting up your account on the web dashboard first, then log in here.',
+    legacyErrorIsCode: true
+  });
+
+  assert.equal(legacy.statusCode, 403);
+  assert.equal(legacy.body.error, 'link_required');
+  assert.match(legacy.body.message, /web dashboard/);
+
+  // v2 puts them where they belong, and the client reads the object form.
+  const modern = res();
+  respond.fail(reqWith(2), modern, {
+    code: 'link_required',
+    status: 403,
+    message: 'Finish setting up your account on the web dashboard first, then log in here.',
+    legacyErrorIsCode: true
+  });
+
+  assert.equal(modern.body.error.code, 'link_required');
+  assert.match(modern.body.error.message, /web dashboard/);
+});

@@ -96,7 +96,9 @@ function ok(req, res, payload = {}, { meta, status = 200 } = {}) {
  * `json['message'] ?? json['error']`). Sending a code there would put
  * "validation_error" in front of a merchant.
  */
-function fail(req, res, { code = CODES.INTERNAL, message, fields, status, extra } = {}) {
+function fail(req, res, {
+  code = CODES.INTERNAL, message, fields, status, extra, legacyErrorIsCode = false
+} = {}) {
   const httpStatus = status || STATUS_FOR_CODE[code] || 400;
   const text = message || 'Something went wrong';
 
@@ -105,6 +107,18 @@ function fail(req, res, { code = CODES.INTERNAL, message, fields, status, extra 
     if (fields && Object.keys(fields).length) error.fields = fields;
     if (extra && Object.keys(extra).length) error.details = extra;
     return res.status(httpStatus).json({ success: false, error });
+  }
+
+  // A handful of pre-v2 responses put the CODE in `error` and the human text
+  // in a sibling `message` — auth's `link_required` is the one that matters,
+  // because mobile login branches on `e.code == 'link_required'` and the
+  // client derives that code from the legacy `error` string. Emitting the
+  // prose there instead would not fail loudly; Clerk-linked sign-in would
+  // just stop recognising the case and show a generic error forever.
+  if (legacyErrorIsCode) {
+    return res.status(httpStatus).json({
+      success: false, error: code, message: text, ...(extra || {})
+    });
   }
   return res.status(httpStatus).json({ success: false, error: text, ...(extra || {}) });
 }

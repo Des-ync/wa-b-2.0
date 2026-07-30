@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../services/push.dart';
+import '../state/shell_tabs.dart';
 import '../state/session.dart';
 import 'admin_home.dart';
 import 'chat.dart';
@@ -22,18 +23,31 @@ class MainShell extends StatefulWidget {
 }
 
 class _MainShellState extends State<MainShell> {
+  /// Kept in step with `pages` below; guards the tab-switch stream against an
+  /// out-of-range index rather than throwing inside a listener.
+  static const _pageCount = 5;
+
   int _index = 0;
   StreamSubscription? _tapSub;
+  StreamSubscription? _tabSub;
 
   @override
   void initState() {
     super.initState();
     _tapSub = notificationTaps.stream.listen(_handleTap);
+    // The Task Center on Home asks the shell to switch tabs, so tapping
+    // "2 customers waiting" lands IN the Inbox rather than on a pushed copy
+    // of it stacked over Home.
+    _tabSub = shellTabRequests.stream.listen((i) {
+      if (!mounted || i < 0 || i >= _pageCount) return;
+      setState(() => _index = i);
+    });
   }
 
   @override
   void dispose() {
     _tapSub?.cancel();
+    _tabSub?.cancel();
     super.dispose();
   }
 

@@ -59,7 +59,7 @@ migration. A request header costs nothing and lets each client move when it is r
 | `auditlog.routes.js` | ✅ | `auditlog.routes.test.js` | |
 | `onboarding.routes.js` | ✅ | `onboarding.test.js` | Consumed by both dashboard and mobile checklist. |
 | `admin.routes.js` | ✅ | `admin.routes.critical.test.js` | Largest file (1,110 lines). |
-| `auth.routes.js` | ☐ | `auth.routes.test.js` | ⚠️ See the `link_required` warning below. |
+| `auth.routes.js` | ✅ | `auth.routes.test.js` | ⚠️ See the `link_required` warning below. |
 | `receipt.routes.js` | ☐ | `receipt.routes.test.js` | **Public** — `public/receipt.html` reads it directly. |
 | `webhook.routes.js` | ☐ | — | ⚠️ Gateways read these responses; the shape is a third-party contract, not ours. **Probably should never migrate.** |
 | `payment.routes.js` | ☐ | — | Same caution as webhooks for any gateway-facing route. |
@@ -68,11 +68,10 @@ migration. A request header costs nothing and lets each client move when it is r
 | `device.routes.js` | ✅ | — | |
 | `search.routes.js` | ✅ | — | |
 
-**21 of 26 migrated.** The five remaining are deliberate:
+**22 of 26 migrated.** The five remaining are deliberate:
 
 | Not migrated | Why |
 |---|---|
-| `auth.routes.js` | Uses the legacy `error` string as a machine-readable code (`link_required`), which `login.dart` branches on. Migrating it needs that mapped to `error.code` verbatim — see the warning below. |
 | `webhook.routes.js` | Paystack and Meta read these responses. The shape is their contract, not ours. |
 | `payment.routes.js` | Same — gateway-facing. |
 | `receipt.routes.js` | `public/receipt.html` reads it directly. |
@@ -107,12 +106,17 @@ migration. A request header costs nothing and lets each client move when it is r
   or a rejection.
 - **`str`'s `max` truncates; use `strExact` to reject.** Matches the product routes'
   existing behaviour, where a long description is trimmed rather than refused.
+- **⚠️ A helper that sends a response must `return null`, not the response.** auth.routes.js
+  has resolver helpers whose callers check for null. Prefixing `return` on the respond.*
+  call made them hand back a truthy response object, so the caller carried on as though
+  the lookup had succeeded. Only the two tests exercising that exact branch caught it; a
+  fifth static guard now scans for `return respond.*` followed by `return null`.
 - **⚠️ Some routes use the legacy `error` string as a machine-readable code.**
   `auth.routes.js` returns a bare `error: 'link_required'`, and `mobile/.../login.dart`
   branches on `e.code == 'link_required'`. The mobile client maps legacy `error` → `code`
-  for exactly this reason. When migrating `auth.routes.js`, the v2 `error.code` must be
-  `link_required` — not `validation_error` with the detail buried in a message — or
-  Clerk-linked sign-in silently breaks.
+  for exactly this reason. Handled by `respond.fail`'s `legacyErrorIsCode: true`, which keeps the CODE in the legacy
+  `error` field and the prose in a sibling `message`, while v2 gets the proper
+  `error.code`. Pinned by tests in both envelopes.
 - **⚠️ A missed `require` makes routes HANG, not 500.** Adding `respond.*` calls without
   the import means every request throws a ReferenceError inside its `try`, the `catch`
   calls `respond.failInternal` and throws again, and Express never responds. The module

@@ -68,7 +68,7 @@ test('GET /orders/stats/today surfaces low_stock_count and failed_payments_count
           orders_count: 12, paid_count: 8, gmv_ghs: '450.00', awaiting_payment: 2,
           cancelled_count: 1, payment_attempts: 10, open_orders: 3,
           new_customers_count: 4, messages_needing_reply_count: 2,
-          low_stock_count: 5, failed_payments_count: 3
+          low_stock_count: 5, failed_payments_count: 3, needs_confirmation_count: 4
         }]
       };
     }
@@ -94,6 +94,18 @@ test('GET /orders/stats/today surfaces low_stock_count and failed_payments_count
   // ...but attempts retired by a later success are not failures the merchant
   // needs to troubleshoot.
   assert.match(sawQuery, /<> 'superseded'/);
+});
+
+test('needs_confirmation_count spans all time, not just today', () => {
+  // An order left unconfirmed since yesterday is MORE urgent than one placed
+  // an hour ago. A Task Center that forgets it overnight is worse than none.
+  const fs = require('node:fs');
+  const src = fs.readFileSync(require('node:path').join(__dirname, '..', 'src', 'routes', 'order.routes.js'), 'utf8');
+  const clause = src.slice(src.indexOf('needs_confirmation_count') - 260, src.indexOf('needs_confirmation_count'));
+
+  assert.match(clause, /FROM orders/);
+  assert.match(clause, /status = 'pending'/);
+  assert.ok(!/FROM today/.test(clause), 'must not be scoped to the today CTE');
 });
 
 test('GET /orders/stats/today is blocked for a business_id the tenant key does not own', async () => {

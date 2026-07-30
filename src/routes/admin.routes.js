@@ -295,7 +295,8 @@ router.get('/businesses/:id', async (req, res) => {
       )
     ]);
 
-    return respond.ok(req, res, {      business,
+    return respond.ok(req, res, {
+      business,
       counters: counters.rows[0],
       recent_messages: messages.rows
     });
@@ -576,7 +577,8 @@ router.get('/health', async (_req, res) => {
     );
     const dbLatencyMs = Date.now() - t0;
     const mem = process.memoryUsage();
-    return respond.ok(req, res, {      health: {
+    return respond.ok(req, res, {
+      health: {
         ...queue.rows[0],
         db_latency_ms: dbLatencyMs,
         uptime_seconds: Math.round(process.uptime()),
@@ -636,7 +638,8 @@ router.get('/ops', async (_req, res) => {
       error_rate_pct: r.total > 0 ? Math.round((r.failed / r.total) * 100) : 0
     }));
 
-    return respond.ok(req, res, {      ops: {
+    return respond.ok(req, res, {
+      ops: {
         latency: getLatencyStats({ withinMinutes: 60 }),
         provider_error_rates: providerErrorRates,
         stuck_payments: stuckOrders.rows,
@@ -979,7 +982,8 @@ router.get('/businesses/:id/usage', async (req, res) => {
 
     const plan = planRes.rows[0] || null;
     const sent = msgRes.rows[0].sent_this_month;
-    return respond.ok(req, res, {      usage: {
+    return respond.ok(req, res, {
+      usage: {
         plan_name: plan?.display_name || null,
         messages_sent_this_month: sent,
         messages_received_this_month: msgRes.rows[0].received_this_month,

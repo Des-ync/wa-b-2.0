@@ -11,6 +11,7 @@ const { query } = require('../config/database');
 const { verifyClerkSession, JWT_SHAPE_RE, requireAuth, requirePermission, issueKey, revokeKey } = require('../middleware/auth');
 const { normalizeGhanaPhone, generateOtp, sanitizeBusiness } = require('../utils/helpers');
 const wa = require('../services/whatsapp.service');
+const respond = require('../utils/response');
 
 const router = express.Router();
 
@@ -39,20 +40,20 @@ const WEBAUTHN_CHALLENGE_TTL_MINUTES = 5;
 async function resolveLinkableBusiness(req, res) {
   const phone = normalizeGhanaPhone(req.body?.whatsapp_number);
   if (!phone) {
-    res.status(400).json({ success: false, error: 'Invalid Ghana whatsapp_number' });
+    respond.fail(req, res, { code: respond.CODES.VALIDATION, message: 'Invalid Ghana whatsapp_number' });
     return null;
   }
   const result = await query('SELECT * FROM businesses WHERE whatsapp_number = $1', [phone]);
   const business = result.rows[0];
   if (!business) {
-    res.status(404).json({
-      success: false,
-      error: 'No business found for that WhatsApp number. Ask an admin to onboard your shop first.'
+    respond.fail(req, res, {
+      code: respond.CODES.NOT_FOUND,
+      message: 'No business found for that WhatsApp number. Ask an admin to onboard your shop first.'
     });
     return null;
   }
   if (business.clerk_user_id && business.clerk_user_id !== req.clerkUserId) {
-    res.status(409).json({ success: false, error: 'This business is already linked to a different account.' });
+    respond.fail(req, res, { code: respond.CODES.CONFLICT, message: 'This business is already linked to a different account.' });
     return null;
   }
   return business;
@@ -67,7 +68,7 @@ async function requireClerkToken(req, res, next) {
   const header = req.headers['authorization'] || '';
   const token = header.toLowerCase().startsWith('bearer ') ? header.slice(7).trim() : null;
   if (!token || !JWT_SHAPE_RE.test(token)) {
-    return res.status(401).json({ success: false, error: 'Missing or invalid Clerk session token' });
+    respond.fail(req, res, { code: respond.CODES.UNAUTHORIZED, message: 'Missing or invalid Clerk session token' });
   }
   try {
     // Reuse the DB lookup path when possible so an already-linked user just
@@ -80,7 +81,7 @@ async function requireClerkToken(req, res, next) {
     req.linkedBusiness = result.business;
     next();
   } catch (err) {
-    return res.status(401).json({ success: false, error: 'Invalid or expired Clerk session' });
+    return respond.fail(req, res, { code: respond.CODES.UNAUTHORIZED, message: 'Invalid or expired Clerk session' });
   }
 }
 
@@ -95,7 +96,7 @@ async function requireClerkToken(req, res, next) {
 router.post('/clerk/link/request', requireClerkToken, async (req, res) => {
   try {
     if (req.linkedBusiness) {
-      return res.json({ success: true, business: sanitize(req.linkedBusiness), alreadyLinked: true });
+      return respond.ok(req, res, { business: sanitize(req.linkedBusiness) }, { meta: { alreadyLinked: true } });
     }
 
     const business = await resolveLinkableBusiness(req, res);
@@ -114,9 +115,9 @@ router.post('/clerk/link/request', requireClerkToken, async (req, res) => {
       const elapsedMs = Date.now() - new Date(lastSent.rows[0].created_at).getTime();
       const waitMs = OTP_RESEND_COOLDOWN_SECONDS * 1000 - elapsedMs;
       if (waitMs > 0) {
-        return res.status(429).json({
-          success: false,
-          error: `Please wait ${Math.ceil(waitMs / 1000)}s before requesting another code.`
+        return respond.fail(req, res, {
+          code: respond.CODES.RATE_LIMITED,
+          message: `Please wait ${Math.ceil(waitMs / 1000)}s before requesting another code.`
         });
       }
     }
@@ -140,13 +141,12 @@ router.post('/clerk/link/request', requireClerkToken, async (req, res) => {
     );
     if (!sent.success) {
       logger.error('link OTP send failed for business %s: %s', business.id, sent.error);
-      return res.status(502).json({ success: false, error: 'Could not send the verification code. Try again shortly.' });
+      return respond.fail(req, res, { code: respond.CODES.UPSTREAM, message: 'Could not send the verification code. Try again shortly.' });
     }
 
-    res.json({ success: true, sent: true, expiresInSeconds: OTP_TTL_MINUTES * 60 });
+    return respond.ok(req, res, {}, { meta: { sent: true, expiresInSeconds: OTP_TTL_MINUTES * 60 } });
   } catch (err) {
-    logger.error('POST /auth/clerk/link/request failed: %s', err.message, { stack: err.stack });
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'POST /auth/clerk/link/request', err);
   }
 });
 
@@ -159,7 +159,7 @@ router.post('/clerk/link/request', requireClerkToken, async (req, res) => {
 router.post('/clerk/link/verify', requireClerkToken, async (req, res) => {
   try {
     if (req.linkedBusiness) {
-      return res.json({ success: true, business: sanitize(req.linkedBusiness), alreadyLinked: true });
+      return respond.ok(req, res, { business: sanitize(req.linkedBusiness) }, { meta: { alreadyLinked: true } });
     }
 
     const business = await resolveLinkableBusiness(req, res);
@@ -167,7 +167,7 @@ router.post('/clerk/link/verify', requireClerkToken, async (req, res) => {
 
     const code = String(req.body?.code || '').trim();
     if (!/^\d{6}$/.test(code)) {
-      return res.status(400).json({ success: false, error: 'Enter the 6-digit code.' });
+      return respond.invalid(req, res, 'Enter the 6-digit code.');
     }
 
     const otpResult = await query(
@@ -176,7 +176,7 @@ router.post('/clerk/link/verify', requireClerkToken, async (req, res) => {
     );
     const otp = otpResult.rows[0];
     if (!otp || new Date(otp.expires_at) < new Date()) {
-      return res.status(400).json({ success: false, error: 'Code expired or never requested. Send a new code.' });
+      return respond.invalid(req, res, 'Code expired or never requested. Send a new code.');
     }
 
     // Consume an attempt ATOMICALLY before checking the code. The previous
@@ -189,14 +189,14 @@ router.post('/clerk/link/verify', requireClerkToken, async (req, res) => {
       [otp.id, OTP_MAX_ATTEMPTS]
     );
     if (!claim.rowCount) {
-      return res.status(429).json({ success: false, error: 'Too many incorrect attempts. Send a new code.' });
+      return respond.fail(req, res, { code: respond.CODES.RATE_LIMITED, message: 'Too many incorrect attempts. Send a new code.' });
     }
 
     if (hashOtp(code) !== otp.code_hash) {
       const remaining = OTP_MAX_ATTEMPTS - claim.rows[0].attempts;
-      return res.status(400).json({
-        success: false,
-        error: remaining > 0 ? `Incorrect code. ${remaining} attempt(s) left.` : 'Incorrect code. Send a new code.'
+      return respond.fail(req, res, {
+        code: respond.CODES.VALIDATION,
+        message: remaining > 0 ? `Incorrect code. ${remaining} attempt(s) left.` : 'Incorrect code. Send a new code.'
       });
     }
 
@@ -206,10 +206,9 @@ router.post('/clerk/link/verify', requireClerkToken, async (req, res) => {
     );
     await query(`DELETE FROM business_link_otps WHERE id = $1`, [otp.id]);
 
-    res.json({ success: true, business: sanitize(updated.rows[0]) });
+    return respond.ok(req, res, { business: sanitize(updated.rows[0]) });
   } catch (err) {
-    logger.error('POST /auth/clerk/link/verify failed: %s', err.message, { stack: err.stack });
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'POST /auth/clerk/link/verify', err);
   }
 });
 
@@ -230,23 +229,27 @@ const MOBILE_OTP_USER = '__mobile__';
 async function resolveMobileBusiness(req, res) {
   const phone = normalizeGhanaPhone(req.body?.whatsapp_number);
   if (!phone) {
-    res.status(400).json({ success: false, error: 'Invalid Ghana whatsapp_number' });
+    respond.fail(req, res, { code: respond.CODES.VALIDATION, message: 'Invalid Ghana whatsapp_number' });
     return null;
   }
   const result = await query('SELECT * FROM businesses WHERE whatsapp_number = $1', [phone]);
   const business = result.rows[0];
   if (!business) {
-    res.status(404).json({
-      success: false,
-      error: 'No business found for that WhatsApp number. Ask an admin to onboard your shop first.'
+    respond.fail(req, res, {
+      code: respond.CODES.NOT_FOUND,
+      message: 'No business found for that WhatsApp number. Ask an admin to onboard your shop first.'
     });
     return null;
   }
   if (!business.clerk_user_id) {
-    res.status(403).json({
-      success: false,
-      error: 'link_required',
-      message: 'Finish setting up your account on the web dashboard first, then log in here.'
+    respond.fail(req, res, {
+      code: 'link_required',
+      status: 403,
+      message: 'Finish setting up your account on the web dashboard first, then log in here.',
+      // login.dart branches on e.code === 'link_required', and the client
+      // derives that from the LEGACY `error` string. Prose there would not
+      // fail loudly — Clerk-linked sign-in would just stop recognising it.
+      legacyErrorIsCode: true
     });
     return null;
   }
@@ -273,9 +276,9 @@ router.post('/mobile/request', async (req, res) => {
       const elapsedMs = Date.now() - new Date(lastSent.rows[0].created_at).getTime();
       const waitMs = OTP_RESEND_COOLDOWN_SECONDS * 1000 - elapsedMs;
       if (waitMs > 0) {
-        return res.status(429).json({
-          success: false,
-          error: `Please wait ${Math.ceil(waitMs / 1000)}s before requesting another code.`
+        return respond.fail(req, res, {
+          code: respond.CODES.RATE_LIMITED,
+          message: `Please wait ${Math.ceil(waitMs / 1000)}s before requesting another code.`
         });
       }
     }
@@ -299,13 +302,12 @@ router.post('/mobile/request', async (req, res) => {
     );
     if (!sent.success) {
       logger.error('mobile OTP send failed for business %s: %s', business.id, sent.error);
-      return res.status(502).json({ success: false, error: 'Could not send the login code. Try again shortly.' });
+      return respond.fail(req, res, { code: respond.CODES.UPSTREAM, message: 'Could not send the login code. Try again shortly.' });
     }
 
-    res.json({ success: true, sent: true, expiresInSeconds: OTP_TTL_MINUTES * 60 });
+    return respond.ok(req, res, {}, { meta: { sent: true, expiresInSeconds: OTP_TTL_MINUTES * 60 } });
   } catch (err) {
-    logger.error('POST /auth/mobile/request failed: %s', err.message, { stack: err.stack });
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'POST /auth/mobile/request', err);
   }
 });
 
@@ -323,7 +325,7 @@ router.post('/mobile/verify', async (req, res) => {
 
     const code = String(req.body?.code || '').trim();
     if (!/^\d{6}$/.test(code)) {
-      return res.status(400).json({ success: false, error: 'Enter the 6-digit code.' });
+      return respond.invalid(req, res, 'Enter the 6-digit code.');
     }
 
     const otpResult = await query(
@@ -332,7 +334,7 @@ router.post('/mobile/verify', async (req, res) => {
     );
     const otp = otpResult.rows[0];
     if (!otp || new Date(otp.expires_at) < new Date()) {
-      return res.status(400).json({ success: false, error: 'Code expired or never requested. Send a new code.' });
+      return respond.invalid(req, res, 'Code expired or never requested. Send a new code.');
     }
 
     // Consume an attempt atomically before checking, same as the Clerk-link
@@ -344,14 +346,14 @@ router.post('/mobile/verify', async (req, res) => {
       [otp.id, OTP_MAX_ATTEMPTS]
     );
     if (!claim.rowCount) {
-      return res.status(429).json({ success: false, error: 'Too many incorrect attempts. Send a new code.' });
+      return respond.fail(req, res, { code: respond.CODES.RATE_LIMITED, message: 'Too many incorrect attempts. Send a new code.' });
     }
 
     if (hashOtp(code) !== otp.code_hash) {
       const remaining = OTP_MAX_ATTEMPTS - claim.rows[0].attempts;
-      return res.status(400).json({
-        success: false,
-        error: remaining > 0 ? `Incorrect code. ${remaining} attempt(s) left.` : 'Incorrect code. Send a new code.'
+      return respond.fail(req, res, {
+        code: respond.CODES.VALIDATION,
+        message: remaining > 0 ? `Incorrect code. ${remaining} attempt(s) left.` : 'Incorrect code. Send a new code.'
       });
     }
 
@@ -364,10 +366,9 @@ router.post('/mobile/verify', async (req, res) => {
       scope: 'tenant'
     });
 
-    res.json({ success: true, api_key: key.plaintext, business: sanitize(business) });
+    return respond.ok(req, res, { api_key: key.plaintext, business: sanitize(business) });
   } catch (err) {
-    logger.error('POST /auth/mobile/verify failed: %s', err.message, { stack: err.stack });
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'POST /auth/mobile/verify', err);
   }
 });
 
@@ -385,7 +386,7 @@ router.post('/mobile/clerk-exchange', async (req, res) => {
   try {
     const token = String(req.body?.clerk_session_token || '').trim();
     if (!token || !JWT_SHAPE_RE.test(token)) {
-      return res.status(400).json({ success: false, error: 'Missing or invalid clerk_session_token' });
+      return respond.invalid(req, res, 'Missing or invalid clerk_session_token');
     }
 
     let business;
@@ -393,13 +394,17 @@ router.post('/mobile/clerk-exchange', async (req, res) => {
       ({ business } = await verifyClerkSession(token));
     } catch (err) {
       if (err.code === 'not_linked') {
-        return res.status(403).json({
-          success: false,
-          error: 'link_required',
-          message: 'Finish setting up your account on the web dashboard first, then log in here.'
+        return respond.fail(req, res, {
+          code: 'link_required',
+          status: 403,
+          message: 'Finish setting up your account on the web dashboard first, then log in here.',
+          // login.dart branches on e.code === 'link_required', and the client
+          // derives that from the LEGACY `error` string. Prose there would not
+          // fail loudly — Clerk-linked sign-in would just stop recognising it.
+          legacyErrorIsCode: true
         });
       }
-      return res.status(401).json({ success: false, error: 'Invalid or expired Clerk session' });
+      return respond.fail(req, res, { code: respond.CODES.UNAUTHORIZED, message: 'Invalid or expired Clerk session' });
     }
 
     const deviceName = String(req.body?.device_name || 'device').slice(0, 80);
@@ -409,10 +414,9 @@ router.post('/mobile/clerk-exchange', async (req, res) => {
       scope: 'tenant'
     });
 
-    res.json({ success: true, api_key: key.plaintext, business: sanitize(business) });
+    return respond.ok(req, res, { api_key: key.plaintext, business: sanitize(business) });
   } catch (err) {
-    logger.error('POST /auth/mobile/clerk-exchange failed: %s', err.message, { stack: err.stack });
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'POST /auth/mobile/clerk-exchange', err);
   }
 });
 
@@ -424,13 +428,12 @@ router.post('/mobile/logout', requireAuth('any'), async (req, res) => {
   try {
     if (!req.auth.keyId) {
       // Clerk-session callers have nothing to revoke.
-      return res.json({ success: true, revoked: false });
+      return respond.ok(req, res, { revoked: false });
     }
     const revoked = await revokeKey(req.auth.keyId);
-    res.json({ success: true, revoked });
+    return respond.ok(req, res, { revoked });
   } catch (err) {
-    logger.error('POST /auth/mobile/logout failed: %s', err.message, { stack: err.stack });
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'POST /auth/mobile/logout', err);
   }
 });
 
@@ -485,7 +488,7 @@ async function consumeWebauthnChallenge(challenge, purpose) {
 router.post('/passkey/register/options', requireAuth('any'), requirePermission('staff'), async (req, res) => {
   try {
     if (req.auth.scope !== 'tenant' || !req.auth.businessId) {
-      return res.status(403).json({ success: false, error: 'Passkeys are only available for a business account.' });
+      return respond.fail(req, res, { code: respond.CODES.FORBIDDEN, message: 'Passkeys are only available for a business account.' });
     }
     const businessId = req.auth.businessId;
 
@@ -494,7 +497,7 @@ router.post('/passkey/register/options', requireAuth('any'), requirePermission('
       query('SELECT credential_id, transports FROM webauthn_credentials WHERE business_id = $1', [businessId])
     ]);
     const business = bizResult.rows[0];
-    if (!business) return res.status(404).json({ success: false, error: 'Business not found' });
+    if (!business) return respond.notFound(req, res, 'Business');
 
     const options = await generateRegistrationOptions({
       rpName: WEBAUTHN_RP_NAME,
@@ -514,10 +517,9 @@ router.post('/passkey/register/options', requireAuth('any'), requirePermission('
     });
 
     await storeWebauthnChallenge(options.challenge, 'register', businessId);
-    res.json({ success: true, options });
+    return respond.ok(req, res, { options });
   } catch (err) {
-    logger.error('POST /auth/passkey/register/options failed: %s', err.message, { stack: err.stack });
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'POST /auth/passkey/register/options', err);
   }
 });
 
@@ -531,19 +533,19 @@ router.post('/passkey/register/options', requireAuth('any'), requirePermission('
 router.post('/passkey/register/verify', requireAuth('any'), requirePermission('staff'), async (req, res) => {
   try {
     if (req.auth.scope !== 'tenant' || !req.auth.businessId) {
-      return res.status(403).json({ success: false, error: 'Passkeys are only available for a business account.' });
+      return respond.fail(req, res, { code: respond.CODES.FORBIDDEN, message: 'Passkeys are only available for a business account.' });
     }
     const businessId = req.auth.businessId;
     const challenge = String(req.body?.challenge || '');
     const response = req.body?.response;
     const deviceName = String(req.body?.device_name || 'device').slice(0, 80);
     if (!challenge || !response) {
-      return res.status(400).json({ success: false, error: 'Missing challenge or response' });
+      return respond.invalid(req, res, 'Missing challenge or response');
     }
 
     const consumed = await consumeWebauthnChallenge(challenge, 'register');
     if (!consumed || consumed.business_id !== businessId) {
-      return res.status(400).json({ success: false, error: 'This passkey setup request expired. Try again.' });
+      return respond.invalid(req, res, 'This passkey setup request expired. Try again.');
     }
 
     let verification;
@@ -556,10 +558,10 @@ router.post('/passkey/register/verify', requireAuth('any'), requirePermission('s
       });
     } catch (err) {
       logger.warn('passkey registration verification threw: %s', err.message);
-      return res.status(400).json({ success: false, error: 'Could not verify that passkey. Try again.' });
+      return respond.invalid(req, res, 'Could not verify that passkey. Try again.');
     }
     if (!verification.verified || !verification.registrationInfo) {
-      return res.status(400).json({ success: false, error: 'Could not verify that passkey. Try again.' });
+      return respond.invalid(req, res, 'Could not verify that passkey. Try again.');
     }
 
     const { credential, credentialDeviceType, credentialBackedUp } = verification.registrationInfo;
@@ -584,10 +586,9 @@ router.post('/passkey/register/verify', requireAuth('any'), requirePermission('s
       ]
     );
 
-    res.json({ success: true });
+    return respond.ok(req, res, {});
   } catch (err) {
-    logger.error('POST /auth/passkey/register/verify failed: %s', err.message, { stack: err.stack });
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'POST /auth/passkey/register/verify', err);
   }
 });
 
@@ -603,10 +604,9 @@ router.post('/passkey/login/options', async (req, res) => {
       userVerification: 'preferred'
     });
     await storeWebauthnChallenge(options.challenge, 'login', null);
-    res.json({ success: true, options });
+    return respond.ok(req, res, { options });
   } catch (err) {
-    logger.error('POST /auth/passkey/login/options failed: %s', err.message, { stack: err.stack });
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'POST /auth/passkey/login/options', err);
   }
 });
 
@@ -622,18 +622,18 @@ router.post('/passkey/login/verify', async (req, res) => {
     const response = req.body?.response;
     const deviceName = String(req.body?.device_name || 'device').slice(0, 80);
     if (!challenge || !response?.id) {
-      return res.status(400).json({ success: false, error: 'Missing challenge or response' });
+      return respond.invalid(req, res, 'Missing challenge or response');
     }
 
     const consumed = await consumeWebauthnChallenge(challenge, 'login');
     if (!consumed) {
-      return res.status(400).json({ success: false, error: 'This sign-in request expired. Try again.' });
+      return respond.invalid(req, res, 'This sign-in request expired. Try again.');
     }
 
     const credResult = await query('SELECT * FROM webauthn_credentials WHERE credential_id = $1', [response.id]);
     const stored = credResult.rows[0];
     if (!stored) {
-      return res.status(400).json({ success: false, error: 'That passkey is not recognized.' });
+      return respond.invalid(req, res, 'That passkey is not recognized.');
     }
 
     let verification;
@@ -652,10 +652,10 @@ router.post('/passkey/login/verify', async (req, res) => {
       });
     } catch (err) {
       logger.warn('passkey login verification threw: %s', err.message);
-      return res.status(400).json({ success: false, error: 'Could not verify that passkey.' });
+      return respond.invalid(req, res, 'Could not verify that passkey.');
     }
     if (!verification.verified) {
-      return res.status(400).json({ success: false, error: 'Could not verify that passkey.' });
+      return respond.invalid(req, res, 'Could not verify that passkey.');
     }
 
     const business = await (async () => {
@@ -667,7 +667,7 @@ router.post('/passkey/login/verify', async (req, res) => {
       return bizResult.rows[0];
     })();
     if (!business) {
-      return res.status(404).json({ success: false, error: 'Business not found' });
+      return respond.notFound(req, res, 'Business');
     }
 
     const key = await issueKey({
@@ -682,10 +682,9 @@ router.post('/passkey/login/verify', async (req, res) => {
       role: stored.role
     });
 
-    res.json({ success: true, api_key: key.plaintext, business: sanitize(business) });
+    return respond.ok(req, res, { api_key: key.plaintext, business: sanitize(business) });
   } catch (err) {
-    logger.error('POST /auth/passkey/login/verify failed: %s', err.message, { stack: err.stack });
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'POST /auth/passkey/login/verify', err);
   }
 });
 
@@ -700,7 +699,7 @@ router.post('/passkey/login/verify', async (req, res) => {
 router.get('/passkey', requireAuth('any'), requirePermission('staff'), async (req, res) => {
   try {
     if (req.auth.scope !== 'tenant' || !req.auth.businessId) {
-      return res.status(403).json({ success: false, error: 'Passkeys are only available for a business account.' });
+      return respond.fail(req, res, { code: respond.CODES.FORBIDDEN, message: 'Passkeys are only available for a business account.' });
     }
     const result = await query(
       `SELECT id, device_name, created_at, last_used_at
@@ -709,10 +708,9 @@ router.get('/passkey', requireAuth('any'), requirePermission('staff'), async (re
        ORDER BY created_at DESC`,
       [req.auth.businessId]
     );
-    res.json({ success: true, passkeys: result.rows });
+    return respond.ok(req, res, { passkeys: result.rows });
   } catch (err) {
-    logger.error('GET /auth/passkey failed: %s', err.message, { stack: err.stack });
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /auth/passkey', err);
   }
 });
 
@@ -725,19 +723,18 @@ router.get('/passkey', requireAuth('any'), requirePermission('staff'), async (re
 router.delete('/passkey/:id', requireAuth('any'), requirePermission('staff'), async (req, res) => {
   try {
     if (req.auth.scope !== 'tenant' || !req.auth.businessId) {
-      return res.status(403).json({ success: false, error: 'Passkeys are only available for a business account.' });
+      return respond.fail(req, res, { code: respond.CODES.FORBIDDEN, message: 'Passkeys are only available for a business account.' });
     }
     const result = await query(
       'DELETE FROM webauthn_credentials WHERE id = $1 AND business_id = $2',
       [req.params.id, req.auth.businessId]
     );
     if (result.rowCount === 0) {
-      return res.status(404).json({ success: false, error: 'Passkey not found' });
+      return respond.notFound(req, res, 'Passkey');
     }
-    res.json({ success: true });
+    return respond.ok(req, res, {});
   } catch (err) {
-    logger.error('DELETE /auth/passkey/:id failed: %s', err.message, { stack: err.stack });
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'DELETE /auth/passkey/:id', err);
   }
 });
 
