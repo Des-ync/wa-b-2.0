@@ -7,6 +7,7 @@ import 'package:wab_app/api/accounting_api.dart';
 import 'package:wab_app/api/broadcast_api.dart';
 import 'package:wab_app/api/client.dart';
 import 'package:wab_app/api/customer_api.dart';
+import 'package:wab_app/api/inventory_api.dart';
 import 'package:wab_app/api/order_api.dart';
 
 /// The API layer.
@@ -226,6 +227,80 @@ void main() {
         api.sendPaymentReminder('ord-1'),
         throwsA(isA<ApiException>().having((e) => e.status, 'status', 429)),
       );
+    });
+  });
+
+  group('InventoryApi', () {
+    test('restock ADDS to stock; adjust SETS it', () async {
+      final cap = Capture();
+      await cap.client().restock('biz-1', productId: 'p1', quantity: 12);
+      expect(cap.last.url.path, '/api/inventory/restock');
+      expect(cap.lastBody, {'business_id': 'biz-1', 'product_id': 'p1', 'quantity': 12});
+
+      await cap.client().adjustStock('biz-1', productId: 'p1', newQuantity: 7);
+      // A different endpoint on purpose: a delivery and a stock take are
+      // different events, and the ledger has to tell them apart.
+      expect(cap.last.url.path, '/api/inventory/adjust');
+      expect(cap.lastBody['new_quantity'], 7);
+      expect(cap.lastBody.containsKey('quantity'), isFalse);
+    });
+
+    test('restock omits blank optional fields rather than sending nulls', () async {
+      final cap = Capture();
+      await cap.client().restock('biz-1',
+          productId: 'p1', quantity: 5, supplierId: '', note: '');
+
+      expect(cap.lastBody, {'business_id': 'biz-1', 'product_id': 'p1', 'quantity': 5});
+    });
+
+    test('restock carries cost and supplier when given', () async {
+      final cap = Capture();
+      await cap.client().restock('biz-1',
+          productId: 'p1', quantity: 5, unitCostGhs: 12.5, supplierId: 's1', note: 'van delivery');
+
+      expect(cap.lastBody['unit_cost_ghs'], 12.5);
+      expect(cap.lastBody['supplier_id'], 's1');
+      expect(cap.lastBody['note'], 'van delivery');
+    });
+
+    test('a stock take of ZERO is a real value, not an omission', () async {
+      final cap = Capture();
+      await cap.client().adjustStock('biz-1', productId: 'p1', newQuantity: 0);
+
+      // "I counted none" must reach the server — dropping it would leave the
+      // old count standing.
+      expect(cap.lastBody['new_quantity'], 0);
+    });
+
+    test('movements can be scoped to one product', () async {
+      final cap = Capture();
+      await cap.client().getStockMovements('biz-1');
+      expect(cap.last.url.queryParameters.containsKey('product_id'), isFalse);
+      expect(cap.last.url.queryParameters['limit'], '50');
+
+      await cap.client().getStockMovements('biz-1', productId: 'p1', limit: 10);
+      expect(cap.last.url.queryParameters['product_id'], 'p1');
+      expect(cap.last.url.queryParameters['limit'], '10');
+    });
+
+    test('margins, suppliers and reorder suggestions are business-scoped', () async {
+      final cap = Capture();
+      for (final call in [
+        () => cap.client().getMargins('biz-1'),
+        () => cap.client().getSuppliers('biz-1'),
+        () => cap.client().getReorderSuggestions('biz-1'),
+      ]) {
+        await call();
+        expect(cap.last.url.queryParameters['business_id'], 'biz-1');
+      }
+    });
+
+    test('adding a supplier requires only a name', () async {
+      final cap = Capture();
+      await cap.client().addSupplier('biz-1', name: 'Kofi Wholesale');
+
+      expect(cap.last.method, 'POST');
+      expect(cap.lastBody, {'business_id': 'biz-1', 'name': 'Kofi Wholesale'});
     });
   });
 

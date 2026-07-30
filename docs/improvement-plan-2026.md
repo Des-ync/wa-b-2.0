@@ -717,3 +717,54 @@ rather than trusting a green suite.
 
 The one remaining `validate()` caller that builds an object rather than passing `req.body`
 is the CSV import, already fixed. Every other call site passes a JSON body.
+
+
+---
+
+## 15. API coverage audit — what the backend does that nobody can reach
+
+The single highest-yield check in this whole program has been "which endpoints have no
+client". It found the Task Center's data, the accounting payout gap, and the customer
+profile. Run systematically across all mounted routes:
+
+**Genuinely unreachable, confirmed by grep across `mobile/` and `public/`:**
+
+| Surface | Status |
+|---|---|
+| `/api/inventory/*` — suppliers CRUD, restock, adjust, movements, margins | **Now shipped** (below). Only `reorder-suggestions` had a caller. |
+| `/api/keys` — issue, revoke, rotate staff keys | No UI. This is Phase 9's "staff roles and permissions UI". |
+| `/api/analytics/{delivery-sla,profit,cohorts,channels}` | Richer analytics, no client. |
+| `/api/products/{variants,addons}/:id` PATCH+DELETE | Can create from mobile, cannot edit or delete. |
+| `/api/business/export`, `/api/business/close` | Data export and account closure — GDPR-adjacent. |
+| `/api/customers/segments/summary` | Segment overview panel. |
+| `/api/admin/{ops,audit-log,risk-flags,impersonation-*}` | Admin surface. |
+| `/api/accounting/inventory-valuation` | Back-office; web-appropriate. |
+
+Webhook and payment-callback routes also show as clientless, correctly — Meta and Paystack
+call those.
+
+### Shipped: the inventory workflow
+
+The largest coherent gap. A merchant could see something was running low and had **no way
+to record restocking it**, so the warning never cleared and stock counts drifted from
+reality until each product was edited by hand.
+
+`lib/screens/inventory.dart` — three tabs in the order a shopkeeper needs them: what to
+buy, what it earns, what happened.
+
+- **Restock** adds to the count with optional unit cost and supplier, writing a
+  `stock_movements` row so the change is auditable rather than an unexplained jump.
+- **Count** sets an exact figure — a stock take. Deliberately a *different* endpoint from
+  restock, because a delivery and a correction are different events and the ledger has to
+  tell them apart.
+- **Margins** shows cost against price, flagging anything under 15% — worth knowing before
+  a discount is offered on top of it. A product with no cost price is excluded rather than
+  displayed as pure profit.
+
+Shapes verified against the SQL before writing the UI: `margin_pct` and `margin_ghs` are
+Postgres NUMERIC and arrive as **strings**, which the fixtures use deliberately.
+
+### Not done
+
+Staff-key management UI, the four richer analytics views, variant/add-on editing from
+mobile, data export and account closure, segment summary. All independent.

@@ -10,6 +10,7 @@ import 'audit_log.dart';
 import 'automations.dart';
 import 'broadcasts.dart';
 import 'customers.dart';
+import 'inventory.dart';
 import 'onboarding_checklist.dart';
 import 'promos.dart';
 import 'settings.dart';
@@ -111,6 +112,10 @@ class MoreScreen extends StatelessWidget {
               'What you\'re owed, today\'s sales, payout history',
               const AccountingScreen(),
               requiresAuth: true),
+          const SizedBox(height: 10),
+          item(Icons.inventory_2_rounded, 'Stock',
+              'What is running low, what it earns, what moved',
+              const InventoryScreen()),
           const SizedBox(height: 10),
           item(Icons.people_alt_rounded, 'Customers',
               'Everyone who has chatted or ordered', const CustomersScreen()),
