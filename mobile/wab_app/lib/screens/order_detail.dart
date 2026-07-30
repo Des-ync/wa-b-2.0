@@ -25,6 +25,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   List<dynamic> _history = [];
   List<dynamic> _refunds = [];
   List<dynamic> _paymentAttempts = [];
+  final Set<String> _expandedAttempts = {};
   String? _error;
   bool _updating = false;
   bool _sendingReminder = false;
@@ -489,17 +490,88 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                       color: WabColors.muted,
                       fontSize: 12)),
               const SizedBox(height: 6),
-              for (final a in _paymentAttempts)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 2),
-                  child: Text(
-                      '${a['method'] ?? 'unknown'} · ${a['reference']} · ${timeAgo(a['created_at'])}',
-                      style: const TextStyle(
-                          color: WabColors.muted, fontSize: 12)),
-                ),
+              for (final a in _paymentAttempts) _attemptRow(a),
             ],
           ],
         ),
+      ),
+    );
+  }
+
+  /// Merchant-facing wording for the normalized failure categories the
+  /// backend stores (webhook.processor.js#normalizeFailureReason). Kept
+  /// separate from the customer's WhatsApp copy in i18n.js — the merchant
+  /// wants "wallet had insufficient funds", not "your wallet".
+  static const _failureLabels = {
+    'insufficient_funds': 'Wallet had insufficient funds',
+    'cancelled': 'Customer cancelled the prompt',
+    'timeout': 'Approval prompt timed out',
+    'wrong_number': 'MoMo number could not be reached',
+    'declined': 'Provider declined the payment',
+    'superseded': 'Superseded by a later attempt',
+  };
+
+  Widget _attemptRow(Map<String, dynamic> a) {
+    final ref = '${a['reference']}';
+    final status = '${a['status'] ?? 'pending'}';
+    final rawCode = '${a['failure_code'] ?? ''}'.trim();
+    final expanded = _expandedAttempts.contains(ref);
+
+    final (Color color, IconData icon) = switch (status) {
+      'success' => (WabColors.accent, Icons.check_circle_rounded),
+      'failed' => (WabColors.danger, Icons.cancel_rounded),
+      _ => (WabColors.muted, Icons.schedule_rounded),
+    };
+    final reason = _failureLabels['${a['failure_reason']}'];
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(icon, size: 14, color: color),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                    '${a['method'] ?? 'unknown'} · $ref · ${timeAgo(a['created_at'])}'
+                    '${reason != null ? '\n$reason' : ''}',
+                    style: TextStyle(
+                        color: status == 'failed' ? color : WabColors.muted,
+                        fontSize: 12,
+                        height: 1.4)),
+              ),
+              // The gateway's own string is unbounded free text and is not
+              // useful day-to-day — kept behind a tap so the common case
+              // stays readable, but reachable when support asks for it.
+              if (rawCode.isNotEmpty)
+                GestureDetector(
+                  onTap: () => setState(() => expanded
+                      ? _expandedAttempts.remove(ref)
+                      : _expandedAttempts.add(ref)),
+                  child: Padding(
+                    padding: const EdgeInsets.only(left: 8, top: 1),
+                    child: Text(expanded ? 'Hide' : 'Details',
+                        style: const TextStyle(
+                            color: WabColors.accent,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600)),
+                  ),
+                ),
+            ],
+          ),
+          if (expanded && rawCode.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(left: 20, top: 4),
+              child: SelectableText('Gateway response: $rawCode',
+                  style: const TextStyle(
+                      color: WabColors.muted,
+                      fontSize: 11,
+                      fontFamily: 'monospace')),
+            ),
+        ],
       ),
     );
   }

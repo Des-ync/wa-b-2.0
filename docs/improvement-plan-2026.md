@@ -1,0 +1,326 @@
+# KweliChat / WA-B — Improvement Plan 2026 (corrected, evidence-backed)
+
+**Status:** Phase 0 complete. **Phases 1 and 2 complete** (§5, §6). **Phase 3 in progress**
+(§7) — both shared layers landed, 2 of 25 route groups migrated. Phases 4–9 not started.
+**Produced:** 2026-07-30, at commit `4d8d48b`.
+**Supersedes:** `improvement-prompt.md` as the execution plan. That file remains the
+statement of intent; this file is the version corrected against the actual code.
+
+---
+
+## 0. Headline finding
+
+**The improvement prompt was written against a stale snapshot of this repo.** Of the ten
+Source A claims it asks to verify, **seven are already fixed**, one is **partially fixed**,
+one is **wrong as stated** (the premise it rests on no longer exists), and one is
+**confirmed**. Large parts of Phases 1, 3, 4 and 6 are already shipped — most of them in
+commits `56d4b18` / `f38d057` / `a173d94` / `3cb391d`.
+
+Implementing this plan as written would mean re-building working code. The corrected
+plan below keeps only what is genuinely missing, and re-sequences accordingly.
+
+The single largest genuinely-open item is **Phase 8's mobile test suite: still zero test
+files**, in an app that holds auth tokens and gates payouts behind biometrics.
+
+---
+
+## 1. Claim-by-claim verification (Phase 0, step 2)
+
+| # | Claim (from `improvement-prompt.md` §Phase 0) | Verdict | Evidence |
+|---|---|---|---|
+| 1 | Mobile "mark paid" doesn't run the webhook pipeline; cash sales miss GMV/analytics/loyalty | **ALREADY FIXED** | `POST /api/orders/:id/mark-paid` at [src/routes/order.routes.js:315](../src/routes/order.routes.js#L315) calls `orderService.markOrderPaid` — the *same* function the gateway path uses ([src/services/conversation.handler.js:2470](../src/services/conversation.handler.js#L2470)). `PATCHABLE_STATUSES` ([order.routes.js:268](../src/routes/order.routes.js#L268)) now **excludes** `paid`, and `PATCH /:id/status` returns a 400 pointing at the correct route. Mobile calls it: [order_api.dart:12](../mobile/wab_app/lib/api/order_api.dart#L12) ← [order_action_sheets.dart:63](../mobile/wab_app/lib/widgets/order_action_sheets.dart#L63). Covered by 5 tests in [test/orderMarkPaid.routes.test.js](../test/orderMarkPaid.routes.test.js). |
+| 2 | WhatsApp drops natural-language quantity; IG/Messenger parse it | **ALREADY FIXED** | The free-text intent block at [conversation.handler.js:947–999](../src/services/conversation.handler.js#L947) is no longer channel-gated; the comment at L941–946 documents the fix explicitly. `case 'PRODUCT'` (L986) rewrites to the canonical `Nx name`, and `tryTypedProductAdd` honours `explicit.quantity` ([L1709](../src/services/conversation.handler.js#L1709)). |
+| 3 | `history` / `refunds` / `payment_attempts` returned but discarded by `order_detail.dart` | **ALREADY FIXED** | All three are read at [order_detail.dart:47–49](../mobile/wab_app/lib/screens/order_detail.dart#L47) and rendered — history timeline L189/L581–591, refunds L67, payment attempts L482–492. |
+| 4 | Rider phone captured in DB but dropped before the API response | **ALREADY FIXED** | `rider_phone` is returned by the receipt API ([receipt.routes.js:85](../src/routes/receipt.routes.js#L85), with a comment justifying it being unmasked) and reaches the order API via `SELECT *` ([order.service.js:350](../src/services/order.service.js#L350)); rendered at [order_detail.dart:525](../mobile/wab_app/lib/screens/order_detail.dart#L525). |
+| 5 | Gateway failure reasons dropped before customer message and merchant view | **PARTIAL** | Fixed for the customer: `normalizeFailureReason` ([webhook.processor.js:48–75](../src/services/webhook.processor.js#L48)) maps both Paystack free-text and MTN's enum onto shared categories, passed to `handlePaymentFailure({reference, reason})` ([conversation.handler.js:2569](../src/services/conversation.handler.js#L2569)) → `payment_failed_retry` i18n template + dashboard notification. Persisted as an `order_status_history` event `payment:failed` with `note = reason` ([order.service.js:905](../src/services/order.service.js#L905)). **Still open:** the *raw* gateway code is persisted nowhere — `payment_attempts` has only `reference, order_id, method, created_at` ([migrate.js:431–436](../src/models/migrate.js#L431)) — and `GET /orders/:id` selects only those columns ([order.routes.js:440](../src/routes/order.routes.js#L440)). The merchant sees a normalized category in the timeline, never the raw code, and an attempt row carries no success/failure state. |
+| 6 | No `address` column on customers; address re-prompted every order | **ALREADY FIXED** (with a gap) | `ALTER TABLE customers ADD COLUMN IF NOT EXISTS address TEXT` at [migrate.js:243](../src/models/migrate.js#L243), written on successful checkout at [conversation.handler.js:2176](../src/services/conversation.handler.js#L2176). **Still open:** no `address_note`, and no delivery-zone reference on the customer row. |
+| 7 | Guided onboarding is web-only and unreachable from mobile | **ALREADY FIXED** | [onboarding_checklist.dart](../mobile/wab_app/lib/screens/onboarding_checklist.dart) (350 lines), reachable from [home.dart:319](../mobile/wab_app/lib/screens/home.dart#L319) and [more.dart:100](../mobile/wab_app/lib/screens/more.dart#L100), backed by [onboarding_api.dart](../mobile/wab_app/lib/api/onboarding_api.dart). |
+| 8 | Cron jobs consolidated into one shared module — **confirm still consolidated** | **CONFIRMED** (guard still missing) | [src/services/cronJobs.js](../src/services/cronJobs.js) is the sole `cron.schedule` site in the codebase; both entry points call it once — [server.js:404](../src/server.js#L404), [worker.js:31](../src/worker.js#L31). The module docstring records why. **Still open:** no assertion or test fails if a job is registered twice, and no test file references `cronJobs` at all. |
+| 9 | `notifyOrderStatusChange` has an unused hook point on `delivered` | **WRONG AS STATED** | `delivered` is a live key in `STATUS_KEYS` ([notification.service.js:311](../src/services/notification.service.js#L311)) — it already notifies. Post-purchase review was not built on that hook; it is a generic automation, `post_purchase_review` ([automations.js:38](../src/services/automations.js#L38), handler at L180), driven by a query over `order_status_history` events `status:delivered` (L162–165). Phase 6's premise — "use the existing unused hook" — no longer applies. |
+| 10 | Zero `*_test.dart` files exist in the mobile app | **CONFIRMED** | `find mobile -name "*_test.dart" -not -path "*/.dart_tool/*"` → **0 results**. No `mobile/wab_app/test/` directory exists. |
+
+### Corrections to the plan that follow from this
+
+- **Phase 1 is ~80% already shipped.** What remains is listed in §2 below and is small.
+- **Phase 3's `order_detail.dart` rebuild is done** — the file is 723 lines and already
+  carries rider assignment, ETA, refunds, the full payment timeline, receipt link + copy,
+  internal notes, and humanized labels (`'pending' || 'unpaid' => 'Awaiting payment'`,
+  [common.dart:470](../mobile/wab_app/lib/widgets/common.dart#L470)).
+- **Phase 6's automation engine already exists** ([src/services/automations.js](../src/services/automations.js),
+  [automations.routes.js](../src/routes/automations.routes.js), [automations.dart](../mobile/wab_app/lib/screens/automations.dart)).
+  The instruction "do not copy-paste the cart_nudge cron six more times" was already heeded.
+- **Phase 5's receipt work is largely done** — merchant logo, order timeline, refund policy
+  and a genuine `wa.me/?text=` share (not a fixed link) are all in [public/receipt.html](../public/receipt.html).
+
+---
+
+## 2. Corrected phase plan
+
+Phases are renumbered to reflect what is actually left. Effort tags: **S** ≤1 day,
+**M** 2–4 days, **L** ≥1 week.
+
+### Phase 1 — Close the residual backend-correctness gaps (**M**)
+
+Everything the original Phase 1 asked for *except* the parts already shipped.
+
+| Task | Files | Acceptance |
+|---|---|---|
+| 1.1 Persist gateway failure state on `payment_attempts`: add `status` (`pending`/`success`/`failed`), `failure_code` (raw gateway string), `failure_reason` (normalized category), `failed_at`. | `src/models/migrate.js`, `src/services/order.service.js` (`markOrderFailed`, `attachPaymentReference`), `src/services/webhook.processor.js` | A failed Paystack charge writes the raw `gateway_response` verbatim to `failure_code` and the normalized category to `failure_reason`. Test asserts both. |
+| 1.2 Surface the raw code in the merchant order view: widen the `payment_attempts` select in `GET /orders/:id`; render it in the mobile payment timeline. | `src/routes/order.routes.js:440`, `mobile/wab_app/lib/screens/order_detail.dart:482` | Merchant sees `NOT_ENOUGH_FUNDS` (raw) alongside the humanized line; customer message is unchanged. |
+| 1.3 Prove the two paid-paths are equivalent. Write a test that runs a cash sale through `POST /:id/mark-paid` and an identical sale through the webhook, then asserts the resulting `orders` row, `order_status_history` events, loyalty ledger and stock deltas match field-for-field (excluding `payment_method`, `payment_ref` and timestamps). | `test/order.paidPathParity.test.js` (new) | The original plan's stated acceptance criterion, now actually enforced by CI. |
+| 1.4 Reconciliation script for orders paid through the historical broken path (status flipped to `paid` while `payment_status` stayed `pending`/`unpaid`). **Report first, mutate only behind an explicit `--apply` flag.** | `src/jobs/reconcile.paidStatus.js` (new) | Dry run prints affected order ids, GMV delta and loyalty delta per business. `--apply` is idempotent and re-runnable. |
+| 1.5 Cron double-registration guard. `startCronJobs()` throws if called twice; each job registers through a small `register(name, expr, fn)` helper that throws on duplicate name. | `src/services/cronJobs.js`, `test/cronJobs.test.js` (new) | Test asserts a second `startCronJobs()` throws, and that registering a duplicate job name throws. |
+| 1.6 Add the two genuinely-missing Today aggregates to the **existing** endpoint: `low_stock_count` and `failed_payments_today`. (`new_customers_count`, `messages_needing_reply_count` and `open_orders` already exist — [order.routes.js:40–90](../src/routes/order.routes.js#L40).) Drop the mobile home screen's separate `/api/inventory/reorder-suggestions` round trip for the *count*; keep it for the drill-down sheet. | `src/routes/order.routes.js`, `mobile/wab_app/lib/screens/home.dart:47–55`, `test/orderStatsToday.routes.test.js` | Home screen makes one fewer request on cold load; both new fields covered by tests. |
+| 1.7 Add `address_note` to `customers` and wire it through checkout + reorder. | `src/models/migrate.js`, `src/services/conversation.handler.js:2176` | Reorder offers back the stored address **and** note without re-prompting. |
+
+**Blocked in this phase:** nothing. All seven tasks are unblocked.
+
+### Phase 2 — Mobile test suite from zero (**M**) — *promoted from Phase 8*
+
+Promoted because it is the only **CONFIRMED** finding from Phase 0, it guards the highest-risk
+surfaces in the product, and every later mobile change is safer behind it.
+
+- Scaffold `mobile/wab_app/test/`, add `flutter_test` + `mocktail` to dev deps, add a
+  `flutter test` step to `.github/workflows/deploy.yml` alongside `npm test`.
+- First four suites, in order: **auth/token refresh** (`state/session.dart`),
+  **payout biometric gating** (`services/biometric_gate.dart`), **order state rendering**
+  (`widgets/common.dart` `StatusChip` label mapping), **the API layer**
+  (`api/*_api.dart` — path and body shape assertions).
+- **Acceptance:** CI fails on a broken Dart test; the four suites above are green.
+
+### Phase 3 — Contracts and validation (**L**) — *was Phase 2*
+
+- Response helper + compatibility shim, then migrate route groups one at a time.
+  There is no `src/utils/response.js` today; envelopes are hand-rolled per route
+  (`{success, order}`, `{success, orders}`, `{success, stats}`…).
+- Shared request-validation layer, generalized from the existing product/variant/add-on
+  validators in `src/routes/product.routes.js`.
+- **Correction to the original plan:** the "typed service layer in Flutter" is *already
+  built* — `lib/api/` holds 11 domain extensions on `ApiClient` (`order_api.dart`,
+  `catalog_api.dart`, `accounting_api.dart`, …). What is missing is **typed models**
+  (they still return `Map<String, dynamic>`). Scope this to model classes, not a new layer.
+- No TypeScript conversion. JSDoc typedefs only.
+
+### Phase 4 — Mobile parity: the two screens that don't exist (**M**) — *was Phase 3*
+
+Most of the original Phase 3 is shipped. What is genuinely missing:
+
+- **Today's Business Snapshot** — `home.dart` already renders the stats; the "snapshot"
+  framing and the Phase 1.6 fields are the delta.
+- **Task Center** — does not exist anywhere (`grep` for it returns nothing). Actionable,
+  tappable, resolves in place: "3 orders need confirmation", "2 customers waiting",
+  "5 products out of stock", "Set your delivery fee", "Trial ends in 2 days".
+- Accounting/payouts/settlement on mobile is **already shipped**
+  ([accounting.dart](../mobile/wab_app/lib/screens/accounting.dart), 287 lines) — verify
+  coverage against `src/routes/accounting.routes.js` rather than rebuilding.
+
+### Phase 5 — WhatsApp conversation quality (**S–M**) — *was Phase 4*
+
+- Quantity bug: **already fixed**. Add the Ghanaian-phrasing regression tests the plan asks
+  for ("gimme 2 jollof", "2 pieces of the fried rice", "two waakye") to `test/nl.intent.test.js`.
+- `TRACK` and `REORDER`/`REPEAT` are **already in the vocabulary**
+  ([nl.intent.js:60–69](../src/services/nl.intent.js#L60)). Genuinely missing:
+  **`RECEIPT`, `POINTS`, `HOURS`, `LOCATION`** — plus `HELP` exists as an intent but has no
+  bare-keyword branch in the global command block.
+- Delivery-fee questions are **already handled** (`tryProductInquiry` → `delivery_fee`,
+  including per-zone answers). Still missing: "can I pay with Vodafone cash?".
+- Address memory: shipped in Phase 0 terms; the *reorder offer-back* is Phase 1.7.
+- **Out-of-stock auto-reply with alternatives** — genuinely missing.
+
+### Phase 6 — Customer trust and storefront (**L**) — *was Phase 5*
+
+Receipts are done (logo, timeline, refund policy, real share). What remains:
+
+- **Verified shop badge** — no schema column, no UI. **BLOCKED** (decision 3).
+- **Customer Account Lite** (phone + WhatsApp OTP → orders, receipts, reorder, points,
+  opt-out) — not built.
+- **Storefront depth** — `public/storefront.html` is 419 lines and has no product detail
+  page, no gallery, no variant/add-on selection, no pickup-vs-delivery choice, no zone
+  selector. Backend supports all of it.
+- **PWA + WCAG 2.1 AA + 3G performance budget** on the storefront only. No `manifest.json`
+  or service worker exists today.
+
+### Phase 7 — Lifecycle automation build-out (**S**) — *was Phase 6*
+
+The engine exists. Remaining work is **templates on top of it**, plus the broadcast safety UI:
+
+- Templates not yet registered in `automations.js`: back-in-stock alerts, merchant low-stock
+  digest, birthday offers (exists as a *cron*, `loyalty.jobs.js` — consider folding it in),
+  ETA-change / rider-assigned proactive notifications.
+- **Broadcast safety UI**: audience preview with recipient count, explicit opt-out display,
+  mandatory send-test-to-self, post-send performance. `src/utils/audience.js` already
+  supports the segments.
+
+### Phase 8 — Merchant depth (**L**) — *was Phase 7*
+
+Unchanged from the original plan, minus what exists. Confirmed missing: photo upload
+(paste-URL only), CSV import with preview, bulk edit, duplicate product, drag-and-drop
+ordering, product quality score, Kanban order board, packing slip, CRM profile page with
+LTV, segment builder UI, settings IA rework, search on products/inbox/broadcasts/promos,
+loading skeletons, bulk actions, undo.
+
+### Phase 9 — Codebase health (**L**) — *was Phase 8, minus the mobile tests*
+
+- **No linter or formatter is configured at all** — no `.eslintrc`, no `.prettierrc`.
+  CI runs `npm test` only. Add lint + format gates.
+- **No error tracking** — zero `sentry` references in `src/` or `package.json`.
+- **No CSRF protection** — zero `csrf` references in `src/`.
+- Backend coverage is already substantial (61 test files) — target the named gaps rather
+  than a blanket push.
+- Admin ops surface: [admin_ops.dart](../mobile/wab_app/lib/screens/admin_ops.dart) exists
+  (347 lines); audit it against the plan's list before building.
+- `public/dashboard.html` is **2,879 lines**. Decompose incrementally, as each area is
+  touched. CSP tightening is sequenced *after* that, as the plan correctly states.
+
+---
+
+## 3. Working protocol (unchanged, restated)
+
+- One phase per branch, `phase-N/short-slug`; one logical change per commit.
+- Test before fix for anything in Phase 1.
+- Migrations forward-only; never destructive without an explicit backup step in the PR body.
+- Update this file after each phase with shipped-vs-planned.
+- Raise, don't guess, anything in [decisions-needed.md](./decisions-needed.md).
+
+## 4. Non-goals
+
+Unchanged from `improvement-prompt.md` §Non-goals. Nothing found during Phase 0 argues for
+readmitting any of them.
+
+---
+
+## 5. Phase 1 — shipped vs. planned
+
+Branch `phase-1/backend-correctness`, four commits on top of `4d8d48b`.
+**All seven tasks shipped as planned.** 528 backend tests pass; `flutter analyze` reports
+no new issues; the migration was verified re-runnable against a scratch database.
+
+| Task | Shipped | Notes |
+|---|---|---|
+| 1.1 Persist gateway failure state | ✅ | `payment_attempts` gains `status` / `failure_code` / `failure_reason` / `resolved_at`, with a CHECK constraint and a conservative backfill that only infers an outcome for the order's *current* reference — an order can be paid by an earlier attempt, and a wrong guess here would misattribute money. `markOrderPaid` also retires siblings left `pending`. |
+| 1.2 Raw code in the merchant view | ✅ | Threaded verbatim from both gateways; rendered in the mobile payment timeline behind a collapsed "Details" disclosure, per decision #9. |
+| 1.3 Paid-path parity test | ✅ | `test/order.paidPathParity.test.js`. Compares the write **sequence**, not the end state. Plus route-reaches-markOrderPaid and PATCH-can't-set-paid assertions. |
+| 1.4 Reconciliation script | ✅ | `src/jobs/reconcile.paidStatus.js`. Report-by-default, `--apply` to mutate, optional `--business`. Verified end-to-end on seeded data: finds the broken order, ignores a genuine failed gateway charge, corrects `payment_status` + lifetime spend + audit row, and is a clean no-op on re-run. |
+| 1.5 Cron double-registration guard | ✅ | `register()` throws on a duplicate job name; `startCronJobs()` throws on a second call. `test/cronJobs.test.js`. |
+| 1.6 Missing Today aggregates | ✅ | `low_stock_count` + `failed_payments_count` added to the existing endpoint. Bonus: removed a request from every cold load by making the low-stock drill-down lazy. |
+| 1.7 `address_note` | ✅ | Plus `address_zone`. **Scope note:** the "read-on-reorder" half of this task was already shipped — `askForAddress` has offered the saved address back since before this program started. |
+
+### What changed in the plan as a result
+
+- **Nothing downstream broke.** No Phase 1 finding invalidates a later phase's premise.
+- **Decision #4 (refunds don't restock) is now the highest-value open item.** It is a live
+  bug — `createRefund` never restocks, so refunded stock is permanently lost — but the
+  correct behaviour is a business rule, so it stays blocked rather than guessed at.
+- **Decision #8 is now actionable.** The reconciliation report can be run against
+  production at any time; it is read-only without `--apply`.
+- Phase 2 (mobile tests) is unchanged and remains the next phase.
+
+### Not done, and why
+
+- The production reconciliation has **not been run** — that touches live merchant books and
+  is the user's call, not a side effect of this branch.
+- Nothing has been pushed or merged.
+
+---
+
+## 6. Phase 2 — shipped vs. planned
+
+Branch `phase-2/mobile-tests`, one commit. **Shipped as planned**, with one addition the
+plan did not anticipate (the production test seams, below).
+
+**58 tests, 4 suites** — `mobile/wab_app/test/`. All green; `flutter analyze
+--fatal-warnings` passes.
+
+| Suite | Covers | Notable cases pinned |
+|---|---|---|
+| `session_test.dart` (18) | restore, OTP, admin login, logout, device registration | A revoked key (401/403) signs the device out; **being offline does not** — a merchant on bad 3G can still run their shop from cache. Push-token unregister precedes key clearing. A rejected admin key never becomes the session credential. |
+| `biometric_gate_test.dart` (7) | the payout gate | Its two failure directions are deliberately opposite: nothing enrolled → fail **open**; platform error → fail **closed**. Neither is visible when testing by hand on an enrolled handset. |
+| `order_state_rendering_test.dart` (13) | `StatusChip`, `paymentStatusLabel`, `timeAgo` | An unpaid order can never render as settled — the exact confusion the mark-paid bug produced. A label overrides the text but never the colour. |
+| `api_client_test.dart` (20) | transport + `OrderApi` + `AccountingApi` | Every path and body shape. `markOrderPaid` posts to `/mark-paid`, **not** `PATCH /status`. A 200 carrying `success:false` is still an error. |
+
+### Decisions taken (were #11, #12 — now closed)
+
+- **#11 mocktail**, not mockito — no `build_runner`, so `flutter test` stays one command
+  and the repo gains no generated files.
+- **#12 separate PR-only workflow** (`.github/workflows/mobile-test.yml`), not a step in
+  `deploy.yml` — the Flutter SDK install would add 2–3 minutes to the gate in front of
+  every production deploy, for a suite that cannot break the backend it is shipping.
+
+### Deviation from the plan: two production seams were required
+
+The plan said "scaffold tests"; it did not anticipate that the app is **untestable by
+construction**. `ApiClient` called `package:http`'s top-level functions and `Session`
+constructed its own `ApiClient`, so neither could be driven by a test. Both now take an
+optional injected dependency defaulting to today's behaviour, and `loginAdmin`'s throwaway
+probe client comes from a new `api.sibling()` — preserving the intent that a bad key
+cannot clobber a good session, while making it reachable. No call site changed.
+
+This is worth recording because it is the same root cause as the audit's cross-area risk
+#6: the absence of a seam is why the mark-paid gap could only ever have been caught by
+grepping.
+
+### Not done
+
+- `analyze` runs with `--fatal-warnings`, not `--fatal-infos` — 10 pre-existing info-level
+  lints remain (all `curly_braces_in_flow_control_structures`). Clearing them and
+  tightening the gate belongs to Phase 9's lint work.
+- Widget/screen-level tests are out of scope; these four suites are logic and contract
+  tests. Screen tests become worthwhile after Phase 3's typed models land.
+- Nothing pushed or merged.
+
+---
+
+## 7. Phase 3 — in progress
+
+Branch `phase-3/contracts-and-validation`. Both shared layers are **done and tested**; the
+route migration they exist to enable is **2 of 25 groups in** and tracked separately in
+[api-envelope-migration.md](./api-envelope-migration.md).
+
+### Shipped
+
+| Piece | Where | Tests |
+|---|---|---|
+| Response envelope + version negotiation | `src/utils/response.js` | `test/response.test.js` (13) |
+| Declarative request validation | `src/utils/validate.js` | `test/validate.test.js` (23) |
+| `category.routes.js` migrated | — | `test/category.routes.test.js` (19) |
+| `notification.routes.js` migrated | — | `test/notification.routes.test.js` (10) |
+| Client parses both envelopes | `mobile/.../api/client.dart` | 8 added to `api_client_test.dart` |
+
+**Key decision: the envelope is negotiated by an `X-API-Version` header, not emitted in
+both shapes at once.** Sending `data: {orders}` *and* a top-level `orders` would double
+every list response. On the 3G connections this product targets, that is a real cost to a
+real merchant on every request for the whole migration. Legacy stays the default, so a
+migrated route is invisible to `public/dashboard.html` and every deployed mobile build.
+
+### Corrections to the plan
+
+- The plan said "build a typed service layer in Flutter". **It already exists** —
+  `lib/api/` holds 11 domain extensions on `ApiClient`. The real gap was typed *models*
+  (still `Map<String, dynamic>`) and structured *errors*. Errors are now done:
+  `ApiException` carries `code` and a `fields` map, with `e.fieldError('name')` for
+  form-level display. Typed models remain open.
+- The plan implied a single sweep across all route groups. At 673 response sites across
+  8,140 lines that is one enormous, unreviewable diff — hence the negotiated envelope and
+  the group-by-group tracker.
+
+### Two traps found, both now documented
+
+- `validate`'s `max` **truncates** strings and arrays, but several routes **reject** past
+  their limit. Category reorder was one: silently reordering the first 200 of 250
+  categories and reporting success is worse than refusing.
+- `auth.routes.js` uses the legacy `error` **string** as a machine-readable code
+  (`link_required`), and `login.dart` branches on it. Migrating that group without
+  mapping it to `error.code` verbatim would silently break Clerk-linked sign-in. Pinned
+  by a test that explains why.
+
+### Not done
+
+- 23 route groups remain. `order` and `product` are the highest-value next targets;
+  `product`'s hand-rolled validators are what `validate.js` was generalized from, so
+  migrating it should delete them.
+- `ApiClient.useV2Envelope` is **off**. Turn it on only once the groups the app actually
+  calls are migrated.
+- Typed Flutter models.
+- `webhook`/`payment`/`receipt`/`storefront` responses are third-party contracts read by
+  Paystack, Meta and the static HTML in `public/` — flagged as probably-never-migrate.
+- Nothing pushed or merged.

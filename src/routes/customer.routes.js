@@ -162,6 +162,40 @@ router.patch('/:id/tags', requirePermission('customers', 'write'), async (req, r
 });
 
 /**
+ * PATCH /api/customers/:id/address-note — body: { address_note }
+ * Standing delivery directions for this customer, written by the merchant
+ * (typically after a rider struggled to find the place). Distinct from the
+ * customer's own `address`, which checkout maintains automatically and this
+ * route deliberately cannot touch — a merchant note must never silently
+ * rewrite where the customer said to deliver.
+ */
+router.patch('/:id/address-note', requirePermission('customers', 'write'), async (req, res) => {
+  try {
+    const existing = await query('SELECT * FROM customers WHERE id = $1', [req.params.id]);
+    const customer = existing.rows[0];
+    if (!customer) return res.status(404).json({ success: false, error: 'Customer not found' });
+    if (tenantBlocksBusinessId(req, customer.business_id)) {
+      return res.status(403).json({ success: false, error: 'Key does not match business' });
+    }
+    const raw = req.body?.address_note;
+    if (raw != null && typeof raw !== 'string') {
+      return res.status(400).json({ success: false, error: 'address_note must be a string or null' });
+    }
+    // Capped: this is pasted verbatim into the rider's WhatsApp message, and
+    // an unbounded note would blow past the text-message limit.
+    const note = raw == null ? null : (raw.trim().slice(0, 300) || null);
+    const result = await query(
+      'UPDATE customers SET address_note = $2 WHERE id = $1 RETURNING *',
+      [req.params.id, note]
+    );
+    res.json({ success: true, customer: result.rows[0] });
+  } catch (err) {
+    logger.error('PATCH /customers/:id/address-note failed: %s', err.message);
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+/**
  * GET /api/customers/:id/loyalty — points, stamps progress, VIP tier,
  * referral code, and reward history for the customer profile panel.
  */

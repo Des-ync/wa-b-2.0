@@ -125,7 +125,10 @@ async function processPaystack(payload) {
     } else {
       await conversation.handlePaymentFailure({
         reference,
-        reason: normalizeFailureReason('paystack', data.gateway_response)
+        reason: normalizeFailureReason('paystack', data.gateway_response),
+        // Raw and un-normalized, for the merchant order view and for support
+        // to quote back to Paystack. Never shown to the customer.
+        failureCode: data.gateway_response || null
       });
     }
     return;
@@ -261,7 +264,11 @@ async function processMtnMomo(payload) {
   if (status.status === 'FAILED') {
     await conversation.handlePaymentFailure({
       reference: attempt.reference,
-      reason: normalizeFailureReason('mtn_momo', status.reason)
+      reason: normalizeFailureReason('mtn_momo', status.reason),
+      // MTN's reason is a { code, message } object; keep the code string.
+      failureCode: (status.reason && typeof status.reason === 'object'
+        ? status.reason.code
+        : status.reason) || null
     });
     return;
   }

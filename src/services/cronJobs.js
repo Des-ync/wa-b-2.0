@@ -18,93 +18,95 @@ const dailySummary = require('../jobs/daily.summary');
  * deploy/ecosystem.config.js only ever started server.js, so it never fired
  * in production). Keeping exactly one copy makes that class of bug
  * structurally impossible — add a job here once and both entry points get it.
+ *
+ * The two guards below make the OTHER half of that bug class structurally
+ * impossible too: a job registered twice fires twice, which for a job like
+ * the broadcast drain or the birthday coupon means duplicate customer
+ * messages. Both failures are loud at startup rather than silent in
+ * production, which is the whole point — the original bug survived for
+ * months precisely because nothing ever complained.
  */
+
+const registered = new Set();
+let started = false;
+
+/**
+ * Schedule one job. Throws on a duplicate name so a copy-paste that reuses an
+ * existing job's name fails at boot instead of double-firing forever.
+ */
+function register(name, expression, run) {
+  if (registered.has(name)) {
+    throw new Error(
+      `Cron job "${name}" is already registered — a job must be scheduled exactly once. ` +
+      'Registering it twice makes it fire twice per tick.'
+    );
+  }
+  registered.add(name);
+  cron.schedule(expression, () => {
+    run().catch(err =>
+      logger.error('%s crashed: %s', name, err.message, { stack: err.stack })
+    );
+  }, { timezone: 'Africa/Accra' });
+}
+
 function startCronJobs() {
+  // Guard against BOTH entry points running in one process (e.g. a future
+  // change that requires server.js from worker.js, or a test harness that
+  // boots the app twice) — that would double every job below.
+  if (started) {
+    throw new Error(
+      'startCronJobs() has already run in this process. Exactly one of src/server.js ' +
+      'or src/worker.js may schedule jobs — see README.md section 13.'
+    );
+  }
+  started = true;
+
   // Each job acquires a DB-backed worker_lock first, so even if multiple
   // instances run this scheduler (RUN_CRON=true everywhere), only one will
   // execute the body of each job per fire.
-  cron.schedule('0 8 * * *', () => {
-    notification.runRenewalJob().catch(err =>
-      logger.error('renewalJob crashed: %s', err.message, { stack: err.stack })
-    );
-  }, { timezone: 'Africa/Accra' });
-
-  cron.schedule('0 9 * * *', () => {
-    notification.runReminderJob().catch(err =>
-      logger.error('reminderJob crashed: %s', err.message, { stack: err.stack })
-    );
-  }, { timezone: 'Africa/Accra' });
-
-  cron.schedule('0 10 * * *', () => {
-    notification.runSuspensionJob().catch(err =>
-      logger.error('suspensionJob crashed: %s', err.message, { stack: err.stack })
-    );
-  }, { timezone: 'Africa/Accra' });
+  register('renewalJob', '0 8 * * *', () => notification.runRenewalJob());
+  register('reminderJob', '0 9 * * *', () => notification.runReminderJob());
+  register('suspensionJob', '0 10 * * *', () => notification.runSuspensionJob());
 
   // Reconcile stuck pending payments every 5 minutes.
-  cron.schedule('*/5 * * * *', () => {
-    paymentSweeper.runPaymentSweeper().catch(err =>
-      logger.error('paymentSweeper crashed: %s', err.message, { stack: err.stack })
-    );
-  }, { timezone: 'Africa/Accra' });
+  register('paymentSweeper', '*/5 * * * *', () => paymentSweeper.runPaymentSweeper());
 
   // Weekly retention prune (Sunday 02:30).
-  cron.schedule('30 2 * * 0', () => {
-    notification.runPruneJob().catch(err =>
-      logger.error('pruneJob crashed: %s', err.message, { stack: err.stack })
-    );
-  }, { timezone: 'Africa/Accra' });
+  register('pruneJob', '30 2 * * 0', () => notification.runPruneJob());
 
   // Cart-abandonment nudges every 15 minutes (leader-locked, once per cart).
-  cron.schedule('*/15 * * * *', () => {
-    cartNudge.runCartNudgeJob().catch(err =>
-      logger.error('cartNudgeJob crashed: %s', err.message, { stack: err.stack })
-    );
-  }, { timezone: 'Africa/Accra' });
+  register('cartNudgeJob', '*/15 * * * *', () => cartNudge.runCartNudgeJob());
 
   // Birthday loyalty coupons, daily 07:00 — self-locked via worker_locks
   // (birthday_coupon_job), so this is safe even if RUN_CRON=true on more
   // than one instance.
-  cron.schedule('0 7 * * *', () => {
-    loyaltyJobs.runBirthdayCouponJob().catch(err =>
-      logger.error('birthdayCouponJob crashed: %s', err.message, { stack: err.stack })
-    );
-  }, { timezone: 'Africa/Accra' });
+  register('birthdayCouponJob', '0 7 * * *', () => loyaltyJobs.runBirthdayCouponJob());
 
   // Broadcast queue drain, once a minute — small rate-limited batches so a
   // merchant's re-engagement blast never bursts past Meta's send limits.
-  cron.schedule('* * * * *', () => {
-    broadcastSender.runBroadcastSenderJob().catch(err =>
-      logger.error('broadcastSenderJob crashed: %s', err.message, { stack: err.stack })
-    );
-  }, { timezone: 'Africa/Accra' });
+  register('broadcastSenderJob', '* * * * *', () => broadcastSender.runBroadcastSenderJob());
 
   // Lifecycle automations (reorder reminder / win-back / post-purchase
   // review / delivery feedback) every 30 minutes — hour/day-granularity
   // triggers, no need for tighter polling.
-  cron.schedule('*/30 * * * *', () => {
-    automations.runAutomationsJob().catch(err =>
-      logger.error('automationsJob crashed: %s', err.message, { stack: err.stack })
-    );
-  }, { timezone: 'Africa/Accra' });
+  register('automationsJob', '*/30 * * * *', () => automations.runAutomationsJob());
 
   // Nightly DB backup (03:15 Africa/Accra, low-traffic hour). No-op unless
   // DB_BACKUP_ENABLED=true — see .env.example.
-  cron.schedule('15 3 * * *', () => {
-    dbBackup.runDbBackupJob().catch(err =>
-      logger.error('dbBackupJob crashed: %s', err.message, { stack: err.stack })
-    );
-  }, { timezone: 'Africa/Accra' });
+  register('dbBackupJob', '15 3 * * *', () => dbBackup.runDbBackupJob());
 
   // End-of-day merchant summary (20:30 Africa/Accra) — orders, revenue, top
   // product, low stock, failed payments, via WhatsApp + mobile push.
-  cron.schedule('30 20 * * *', () => {
-    dailySummary.runDailySummaryJob().catch(err =>
-      logger.error('dailySummaryJob crashed: %s', err.message, { stack: err.stack })
-    );
-  }, { timezone: 'Africa/Accra' });
+  register('dailySummaryJob', '30 20 * * *', () => dailySummary.runDailySummaryJob());
 
-  logger.info('Cron jobs scheduled (Africa/Accra) — 08:00 renewals, 09:00 reminders, 10:00 suspensions, 5-min payment sweeper, 15-min cart nudges, 07:00 birthday coupons, 1-min broadcast drain, 30-min lifecycle automations, 20:30 daily summary, 03:15 db backup, weekly prune.');
+  logger.info('Cron jobs scheduled (Africa/Accra), %d jobs: %s',
+    registered.size, [...registered].join(', '));
 }
 
-module.exports = { startCronJobs };
+/** Test-only: clear the guards so a suite can exercise startCronJobs twice. */
+function __resetForTests() {
+  registered.clear();
+  started = false;
+}
+
+module.exports = { startCronJobs, __resetForTests };

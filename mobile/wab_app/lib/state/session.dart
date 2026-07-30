@@ -15,8 +15,13 @@ enum SessionRole { merchant, admin }
 /// Holds the logged-in credential + business profile. Persisted in secure
 /// storage (Keychain / Android Keystore), restored on app start.
 class Session extends ChangeNotifier {
-  final ApiClient api = ApiClient();
+  final ApiClient api;
   static const _storage = FlutterSecureStorage();
+
+  /// [api] is injectable so tests can drive the session against a mock
+  /// transport; production callers construct it with no arguments exactly
+  /// as before.
+  Session({ApiClient? api}) : api = api ?? ApiClient();
 
   bool restoring = true;
   SessionRole? role;
@@ -146,7 +151,7 @@ class Session extends ChangeNotifier {
 
   /// Team login: paste an sk_admin key; validated with a live stats call.
   Future<void> loginAdmin(String adminKey) async {
-    final probe = ApiClient()..apiKey = adminKey.trim();
+    final probe = api.sibling()..apiKey = adminKey.trim();
     await probe.get('/api/admin/stats'); // throws if the key is bad
     api.apiKey = adminKey.trim();
     role = SessionRole.admin;

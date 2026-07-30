@@ -1630,6 +1630,16 @@ async function continueOrderingFlow({ business, customer, state, inbound }) {
         : zones.find(z => normalizeIntent(z.name) === normalizeIntent(inbound.text)) || null;
     }
     if (zone) {
+      // Remember the zone alongside the address so the next order to the same
+      // place can skip this question entirely (best-effort — a failure here
+      // must never block a checkout that is otherwise good to go).
+      if (zone.name !== customer.address_zone) {
+        try {
+          await query('UPDATE customers SET address_zone = $2 WHERE id = $1', [customer.id, zone.name]);
+        } catch (err) {
+          logger.debug('failed to remember delivery zone for customer %s: %s', customer.id, err.message);
+        }
+      }
       return showOrderConfirm({
         business, customer, cart,
         address: data.delivery_address,
@@ -2183,6 +2193,22 @@ async function captureAddress({ business, customer, cart, address, location, pro
   // apply the business's flat delivery fee (0 if unset).
   const zones = deliveryZonesOf(business);
   if (zones.length) {
+    // Same address as last time and its zone still exists → don't re-ask.
+    // Re-matched by name on every order rather than trusted blindly, so a
+    // merchant who renames or removes a zone gets a fresh question instead of
+    // the customer being charged a fee that no longer exists.
+    const remembered = trimmed === customer.address
+      ? zones.find(z => z.name === customer.address_zone)
+      : null;
+    if (remembered) {
+      return showOrderConfirm({
+        business, customer, cart,
+        address: trimmed,
+        fee: remembered.fee_ghs,
+        zoneName: remembered.name,
+        promoCode
+      });
+    }
     return askForDeliveryZone({ business, customer, cart, address: trimmed, promoCode });
   }
   return showOrderConfirm({
@@ -2566,7 +2592,7 @@ async function handlePaymentSuccess({ reference, gatewayRef, amount }) {
   return { handled: true, order: updated };
 }
 
-async function handlePaymentFailure({ reference, reason }) {
+async function handlePaymentFailure({ reference, reason, failureCode }) {
   const order = await orderService.getOrderByPaymentRef(reference);
   if (!order) return { handled: false };
   // A failure for a SUPERSEDED attempt (customer already retried with a new
@@ -2576,7 +2602,7 @@ async function handlePaymentFailure({ reference, reason }) {
       reference, order.order_number, order.payment_ref);
     return { handled: true, stale: true };
   }
-  await orderService.markOrderFailed({ orderId: order.id, paymentRef: reference, reason });
+  await orderService.markOrderFailed({ orderId: order.id, paymentRef: reference, reason, failureCode });
   dashboardNotify.notifyDashboard(order.business_id, {
     type: 'failed_payment', title: '⚠️ Payment failed',
     body: `Order #${order.order_number} — GH₵${Number(order.total_ghs).toFixed(2)} payment did not go through${reason ? ` (${reason})` : ''}.`,

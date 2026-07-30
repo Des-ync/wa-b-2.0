@@ -75,7 +75,24 @@ router.get('/stats/today', async (req, res) => {
                ORDER BY created_at DESC, id DESC LIMIT 1
             ) lm ON TRUE
            WHERE c.business_id = $1 AND c.bot_paused = TRUE AND lm.direction = 'inbound')
-                                                                                     AS messages_needing_reply_count`,
+                                                                                     AS messages_needing_reply_count,
+         -- Products at or below their OWN reorder threshold. Same rule as
+         -- /api/inventory/reorder-suggestions, which backs the drill-down
+         -- sheet — this is only the count, so the Today view doesn't need a
+         -- second round trip on a 3G connection just to render one tile.
+         (SELECT COUNT(*)::int FROM products
+           WHERE business_id = $1
+             AND stock_qty IS NOT NULL
+             AND stock_qty <= low_stock_threshold)                                   AS low_stock_count,
+         -- Payment attempts that bounced today, across all of today's orders.
+         -- Counted from payment_attempts (not orders.payment_status) so an
+         -- order that failed twice and then succeeded still shows both
+         -- failures — the merchant is troubleshooting attempts, not orders.
+         (SELECT COUNT(*)::int
+            FROM payment_attempts pa
+            JOIN today t ON t.id = pa.order_id
+           WHERE pa.status = 'failed'
+             AND COALESCE(pa.failure_reason, '') <> 'superseded')                    AS failed_payments_count`,
       [business_id]
     );
     const s = r.rows[0];
@@ -437,7 +454,11 @@ router.get('/:id', async (req, res) => {
     const [history, refunds, attempts, customerRes] = await Promise.all([
       orderService.getOrderHistory(order.id),
       orderService.getOrderRefunds(order.id),
-      query('SELECT reference, method, created_at FROM payment_attempts WHERE order_id = $1 ORDER BY created_at ASC', [order.id]),
+      query(
+        `SELECT reference, method, created_at, status, failure_reason, failure_code, resolved_at
+           FROM payment_attempts WHERE order_id = $1 ORDER BY created_at ASC`,
+        [order.id]
+      ),
       query('SELECT id, display_name, whatsapp_number, channel FROM customers WHERE id = $1', [order.customer_id])
     ]);
     res.json({

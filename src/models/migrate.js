@@ -241,6 +241,17 @@ ALTER TABLE customers ADD COLUMN IF NOT EXISTS referral_reward_granted_at TIMEST
 -- Last delivery address that successfully cleared checkout — offered back
 -- as a one-tap default on the next order instead of re-typing every time.
 ALTER TABLE customers ADD COLUMN IF NOT EXISTS address TEXT;
+-- Standing directions for THIS customer's address ("blue gate opposite the
+-- mosque, call on arrival"). Merchant-authored, not customer-typed: it's the
+-- knowledge a rider accumulates after a failed delivery, and it must outlive
+-- the single order it was learned on. Sent to the rider on every assignment.
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS address_note TEXT;
+-- The delivery zone the customer last checked out with, matched by name
+-- against businesses.delivery_zones. Lets a reorder skip the zone question
+-- entirely when the address hasn't changed. Denormalized by name on purpose:
+-- delivery_zones is a JSONB array with no stable ids, and a merchant renaming
+-- a zone should simply cause a re-ask rather than resolve to a stale fee.
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS address_zone TEXT;
 
 -- =========================================================================
 -- customer_rewards: issued, per-customer redemption codes — stamp free
@@ -1053,6 +1064,91 @@ ALTER TABLE payment_attempts ADD COLUMN IF NOT EXISTS gateway_ref TEXT;
 DROP INDEX IF EXISTS idx_payment_attempts_gateway_ref;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_attempts_gateway_ref
   ON payment_attempts(gateway_ref) WHERE gateway_ref IS NOT NULL;
+
+-- Per-attempt outcome. Until now the table recorded only that a reference was
+-- ISSUED, never how it ended, so a merchant looking at an order with three
+-- attempts could not tell which one bounced or why — the failure reason
+-- reached the customer's WhatsApp message and then existed nowhere else.
+-- failure_code is the gateway's OWN string, stored verbatim and never
+-- normalized (Paystack's free-text gateway_response, MTN's enum code) so
+-- support can quote it back to the gateway; failure_reason is the small
+-- normalized category from webhook.processor.js#normalizeFailureReason that
+-- the customer-facing i18n templates key off. Both, because the raw string is
+-- the one thing a normalizer can never reconstruct after the fact.
+-- Whether a FULL refund returns the order's items to stock. Until now a
+-- refund never restocked anything, so every refunded sale permanently lost
+-- its inventory: markOrderPaid decremented on the way in and nothing ever
+-- reversed it. The correct behaviour is genuinely per-merchant rather than
+-- universal — a refunded plate of jollof cannot go back on the shelf, a
+-- refunded dress can — so this is a setting, defaulted by industry rather
+-- than guessed at globally. See docs/decisions-needed.md #4.
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS refund_restocks_inventory BOOLEAN NOT NULL DEFAULT TRUE;
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM schema_backfills WHERE name = 'refund_restock_industry_default') THEN
+    -- Perishables: food is consumed or spoiled by the time it is refunded,
+    -- and pharmacy stock cannot be resold once it has left the counter.
+    UPDATE businesses SET refund_restocks_inventory = FALSE
+     WHERE industry IN ('food', 'grocery', 'pharmacy');
+    INSERT INTO schema_backfills (name) VALUES ('refund_restock_industry_default');
+  END IF;
+END $$;
+-- The backfill above only ever touches rows that existed when it ran. A shop
+-- onboarded afterwards would fall back to the column default and a new chop
+-- bar would silently start restocking refunded food.
+--
+-- Derived in a BEFORE INSERT trigger rather than at each of the (currently
+-- two, historically more) INSERT sites in the app, because the failure mode
+-- is precisely that a future third insert path forgets. Dropping the column
+-- default is what makes this work: an INSERT that omits the column now
+-- arrives as NULL, the trigger fills it from the industry, and the NOT NULL
+-- constraint — checked AFTER before-triggers — is satisfied. An INSERT that
+-- states the column explicitly is left alone.
+ALTER TABLE businesses ALTER COLUMN refund_restocks_inventory DROP DEFAULT;
+
+CREATE OR REPLACE FUNCTION set_refund_restock_default() RETURNS TRIGGER AS $$
+BEGIN
+  IF NEW.refund_restocks_inventory IS NULL THEN
+    NEW.refund_restocks_inventory :=
+      COALESCE(NEW.industry, 'general') NOT IN ('food', 'grocery', 'pharmacy');
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_businesses_refund_restock_default ON businesses;
+CREATE TRIGGER trg_businesses_refund_restock_default
+  BEFORE INSERT ON businesses
+  FOR EACH ROW EXECUTE FUNCTION set_refund_restock_default();
+
+ALTER TABLE payment_attempts ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'pending';
+ALTER TABLE payment_attempts DROP CONSTRAINT IF EXISTS payment_attempts_status_check;
+ALTER TABLE payment_attempts ADD CONSTRAINT payment_attempts_status_check
+  CHECK (status IN ('pending','success','failed'));
+ALTER TABLE payment_attempts ADD COLUMN IF NOT EXISTS failure_code TEXT;
+ALTER TABLE payment_attempts ADD COLUMN IF NOT EXISTS failure_reason TEXT;
+ALTER TABLE payment_attempts ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ;
+-- Existing rows predate outcome tracking. The order's CURRENT payment_ref is
+-- the only attempt whose outcome we can infer with certainty from the order
+-- row itself; every earlier retry stays 'pending' rather than being guessed
+-- at, because an order can be paid by an EARLIER reference (see
+-- getOrderByPaymentRef) and a wrong backfill here would misattribute money.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM schema_backfills WHERE name = 'payment_attempts_status') THEN
+    UPDATE payment_attempts pa
+       SET status      = CASE o.payment_status
+                           WHEN 'paid'   THEN 'success'
+                           WHEN 'failed' THEN 'failed'
+                         END,
+           resolved_at = o.updated_at
+      FROM orders o
+     WHERE o.id = pa.order_id
+       AND o.payment_ref = pa.reference
+       AND o.payment_status IN ('paid','failed');
+    INSERT INTO schema_backfills (name) VALUES ('payment_attempts_status');
+  END IF;
+END $$;
 
 ALTER TABLE webhook_events DROP CONSTRAINT IF EXISTS webhook_events_source_check;
 ALTER TABLE webhook_events ADD CONSTRAINT webhook_events_source_check

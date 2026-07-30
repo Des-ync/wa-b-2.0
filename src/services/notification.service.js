@@ -358,7 +358,7 @@ async function notifyRiderAssigned({ order, business, riderPhone }) {
   }
   try {
     const customerRes = order.customer_id
-      ? await query('SELECT display_name, whatsapp_number FROM customers WHERE id = $1', [order.customer_id])
+      ? await query('SELECT display_name, whatsapp_number, address_note FROM customers WHERE id = $1', [order.customer_id])
       : { rows: [] };
     const customer = customerRes.rows[0];
 
@@ -370,6 +370,9 @@ async function notifyRiderAssigned({ order, business, riderPhone }) {
       itemsLine ? `Items: ${itemsLine}` : null,
       `Total: ${formatGhs(order.total_ghs)} (${order.payment_status === 'paid' ? 'already paid' : 'collect on delivery'})`,
       order.delivery_address ? `Deliver to: ${order.delivery_address}` : null,
+      // Standing directions the merchant saved for this customer — the whole
+      // reason the note persists on the customer rather than on one order.
+      customer?.address_note ? `Directions: ${customer.address_note}` : null,
       mapsLink ? `Map: ${mapsLink}` : null,
       customer?.whatsapp_number ? `Customer: ${customer.display_name || 'Customer'} — ${customer.whatsapp_number}` : null
     ].filter(Boolean);

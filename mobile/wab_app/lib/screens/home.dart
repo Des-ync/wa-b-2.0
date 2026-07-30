@@ -45,12 +45,14 @@ class _HomeScreenState extends State<HomeScreen> {
       _error = null;
     });
     try {
+      // The low-stock COUNT now comes back inside stats/today, so the
+      // reorder-suggestions list is fetched lazily when the merchant actually
+      // opens the drill-down sheet — one fewer request on every cold load,
+      // which matters on the 3G connections this app is designed for.
       final results = await Future.wait([
         session.api.get('/api/orders/stats/today', query: {'business_id': bid}),
         session.api
             .get('/api/orders', query: {'business_id': bid, 'limit': 10}),
-        session.api.get('/api/inventory/reorder-suggestions',
-            query: {'business_id': bid}),
         session.api.getNotifications(bid, limit: 1),
         // A banner about setup progress is a nice-to-have, not core to the
         // Today view — a failure here must never blank out the rest of it.
@@ -62,17 +64,15 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         _stats = results[0]['stats'] as Map<String, dynamic>?;
         _recentOrders = (results[1]['orders'] as List?) ?? [];
-        _lowStock = (results[2]['suggestions'] as List?) ?? [];
         _unreadNotifications =
-            (results[3]['unread_count'] as num?)?.toInt() ?? 0;
-        _onboarding = results[4];
+            (results[2]['unread_count'] as num?)?.toInt() ?? 0;
+        _onboarding = results[3];
         _loading = false;
         _offline = false;
       });
       unawaited(OfflineCache.saveHomeSnapshot(
         stats: _stats ?? {},
         recentOrders: _recentOrders,
-        lowStock: _lowStock,
         unreadNotifications: _unreadNotifications,
       ));
     } catch (e) {
@@ -82,7 +82,6 @@ class _HomeScreenState extends State<HomeScreen> {
         setState(() {
           _stats = cached['stats'] as Map<String, dynamic>?;
           _recentOrders = (cached['recent_orders'] as List?) ?? [];
-          _lowStock = (cached['low_stock'] as List?) ?? [];
           _unreadNotifications =
               (cached['unread_notifications'] as num?)?.toInt() ?? 0;
           _loading = false;
@@ -103,7 +102,21 @@ class _HomeScreenState extends State<HomeScreen> {
     _load();
   }
 
+  /// Fetch the low-stock drill-down list. Called when the sheet opens, not on
+  /// page load — the tile itself is driven by stats/today's low_stock_count.
+  Future<void> _loadLowStock() async {
+    final session = context.read<Session>();
+    final bid = session.businessId;
+    if (bid == null) return;
+    final res = await session.api.get('/api/inventory/reorder-suggestions',
+        query: {'business_id': bid});
+    if (!mounted) return;
+    setState(() => _lowStock = (res['suggestions'] as List?) ?? []);
+  }
+
   void _showLowStockSheet() {
+    // Kick the fetch off as the sheet opens so the two happen in parallel.
+    final pending = _loadLowStock();
     showModalBottomSheet(
       context: context,
       backgroundColor: WabColors.bg,
@@ -127,7 +140,20 @@ class _HomeScreenState extends State<HomeScreen> {
                       color: WabColors.muted, fontWeight: FontWeight.w600)),
               const SizedBox(height: 16),
               Expanded(
-                child: _lowStock.isEmpty
+                child: FutureBuilder<void>(
+                  future: pending,
+                  builder: (_, snap) {
+                    if (snap.connectionState == ConnectionState.waiting &&
+                        _lowStock.isEmpty) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    if (snap.hasError && _lowStock.isEmpty) {
+                      return const Center(
+                          child: EmptyState(
+                              icon: Icons.wifi_off_rounded,
+                              title: "Couldn't load low stock"));
+                    }
+                    return _lowStock.isEmpty
                     ? const Center(
                         child: EmptyState(
                             icon: Icons.inventory_2_rounded,
@@ -165,7 +191,9 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                           );
                         },
-                      ),
+                      );
+                  },
+                ),
               ),
             ],
           ),
@@ -431,10 +459,37 @@ class _HomeScreenState extends State<HomeScreen> {
               _divider(),
               _statCell(
                 'Low stock',
-                '${_lowStock.length}',
-                _lowStock.isNotEmpty ? WabColors.warning : WabColors.muted,
-                onTap: _lowStock.isNotEmpty ? _showLowStockSheet : null,
+                '${s['low_stock_count'] ?? 0}',
+                (s['low_stock_count'] ?? 0) > 0
+                    ? WabColors.warning
+                    : WabColors.muted,
+                onTap: (s['low_stock_count'] ?? 0) > 0
+                    ? _showLowStockSheet
+                    : null,
               ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
+        Container(
+          decoration: BoxDecoration(
+            color: WabColors.paper,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: WabColors.line),
+          ),
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          child: Row(
+            children: [
+              _statCell(
+                'Failed payments',
+                '${s['failed_payments_count'] ?? 0}',
+                (s['failed_payments_count'] ?? 0) > 0
+                    ? WabColors.danger
+                    : WabColors.muted,
+              ),
+              _divider(),
+              _statCell('Cancelled', '${s['cancelled_count'] ?? 0}',
+                  WabColors.muted),
             ],
           ),
         ),

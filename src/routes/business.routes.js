@@ -13,7 +13,7 @@ router.use(requireAuth('any'));
 
 const SETTINGS_COLUMNS =
   'id, name, owner_name, slug, industry, vat_rate_pct, welcome_message, support_phone, delivery_fee_ghs, delivery_zones, open_time, close_time, ' +
-  'logo_url, banner_url, refund_policy, ' +
+  'logo_url, banner_url, refund_policy, refund_restocks_inventory, ' +
   'bot_language, payout_momo_number, payout_momo_network, ' +
   'cart_nudge_enabled, cart_nudge_delay_minutes, cart_nudge_max_per_cart, ' +
   'cart_nudge_message_template, cart_nudge_template_b, cart_nudge_coupon_code, ' +
@@ -204,6 +204,12 @@ router.patch('/settings', requirePermission('settings'), async (req, res) => {
     if ('cart_nudge_coupon_code' in body) {
       const v = body.cart_nudge_coupon_code == null ? null : String(body.cart_nudge_coupon_code).trim().toUpperCase().slice(0, 40);
       set('cart_nudge_coupon_code', v || null);
+    }
+    // Whether a full refund returns the items to stock. Defaulted by industry
+    // at migration time (off for food/grocery/pharmacy), overridable here —
+    // a bakery that also sells branded mugs is a real case.
+    if ('refund_restocks_inventory' in body) {
+      set('refund_restocks_inventory', !!body.refund_restocks_inventory);
     }
     if ('loyalty_enabled' in body) set('loyalty_enabled', !!body.loyalty_enabled);
     for (const [col, min, max] of [

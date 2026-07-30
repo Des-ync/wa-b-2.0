@@ -30,6 +30,11 @@ function makeClient(orderRow, {
         const hit = knownAttemptRefs.includes(params[0]);
         return { rows: hit ? [{ '?column?': 1 }] : [], rowCount: hit ? 1 : 0 };
       }
+      // Attempt outcome stamping — the settled reference becomes 'success',
+      // any sibling still 'pending' is retired as 'superseded'.
+      if (sql.includes('UPDATE payment_attempts')) {
+        return { rows: [], rowCount: 1 };
+      }
       if (sql.includes('UPDATE orders')) {
         const updated = {
           ...orderRow,

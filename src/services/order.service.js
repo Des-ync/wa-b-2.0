@@ -607,17 +607,120 @@ async function createRefund({ orderId, businessId, amountGhs, reason }) {
     );
 
     const totalAfter = alreadyRefunded + (status === 'processed' ? amount : 0);
-    if (status === 'processed' && totalAfter >= Number(order.total_ghs) - 0.01) {
-      await client.query(`UPDATE orders SET payment_status = 'refunded' WHERE id = $1`, [orderId]);
+    const nowFullyRefunded = status === 'processed'
+      && totalAfter >= Number(order.total_ghs) - 0.01;
+
+    let restocked = [];
+    if (nowFullyRefunded) {
+      // Guarded on the TRANSITION, not on the end state: an order can take
+      // several partial refunds, and only the one that completes it may
+      // restock. Combined with the FOR UPDATE lock above, this makes a
+      // double-click physically unable to restock twice.
+      const flipped = await client.query(
+        `UPDATE orders SET payment_status = 'refunded'
+          WHERE id = $1 AND payment_status <> 'refunded'
+          RETURNING id`,
+        [orderId]
+      );
+      if (flipped.rowCount) {
+        restocked = await restockRefundedOrder(client, order);
+      }
     }
 
     await logOrderEvent(orderId, `refund:${status}`, {
-      note: `GH₵${amount.toFixed(2)}${reason ? ' — ' + reason : ''}`,
+      note: `GH₵${amount.toFixed(2)}${reason ? ' — ' + reason : ''}`
+        + (restocked.length ? ` · restocked ${restocked.length} item(s)` : ''),
       changedBy: 'merchant'
     }, client);
 
-    return inserted.rows[0];
+    return { ...inserted.rows[0], restocked };
   });
+}
+
+/**
+ * Return a fully-refunded order's items to stock, exactly reversing what
+ * markOrderPaid took out — same products, same variant handling, same
+ * low-stock bookkeeping. Only ever called on the transition into 'refunded',
+ * so it cannot double-apply.
+ *
+ * Deliberately mirrors markOrderPaid rather than sharing code with it: the
+ * two run at opposite ends of the order lifecycle and a shared helper
+ * parameterized by sign would make the (asymmetric) low_stock_notified
+ * handling harder to read, not easier.
+ *
+ * PARTIAL refunds never restock. There is no way to know which of three
+ * items a GH₵20 refund covered, and guessing would corrupt the count in a
+ * way the merchant would have to notice by hand to fix.
+ *
+ * No-op when the business has refund_restocks_inventory = FALSE (food,
+ * grocery, pharmacy by default) — a refunded meal does not go back on the
+ * shelf. Returns the products it touched, for the caller's audit note.
+ */
+async function restockRefundedOrder(client, order) {
+  const bizRes = await client.query(
+    'SELECT refund_restocks_inventory FROM businesses WHERE id = $1',
+    [order.business_id]
+  );
+  if (!bizRes.rows[0]?.refund_restocks_inventory) return [];
+
+  const restocked = [];
+  // Byte-identical comparator to the decrement path in markOrderPaid, so a
+  // concurrent sale and refund of the same items take row locks in the same
+  // order and cannot deadlock. Identical, not merely equivalent — a
+  // localeCompare here would order some strings differently from the `<`
+  // above, which is exactly the kind of difference that produces a deadlock
+  // once a month and never reproduces.
+  const items = (Array.isArray(order.items) ? [...order.items] : []).sort((a, b) => {
+    const pa = String(a.product_id || '');
+    const pb = String(b.product_id || '');
+    if (pa !== pb) return pa < pb ? -1 : 1;
+    const va = String(a.variant_id || '');
+    const vb = String(b.variant_id || '');
+    return va < vb ? -1 : va > vb ? 1 : 0;
+  });
+
+  for (const item of items) {
+    if (!item.product_id) continue;
+    const qty = Number(item.quantity) || 1;
+
+    // stock_qty IS NOT NULL mirrors the decrement: a product the merchant
+    // does not track quantities for must not suddenly acquire a count.
+    const upd = await client.query(
+      `UPDATE products
+          SET stock_qty = stock_qty + $2,
+              in_stock  = TRUE
+        WHERE id = $1 AND business_id = $3 AND stock_qty IS NOT NULL
+        RETURNING id, name, stock_qty, low_stock_threshold, low_stock_notified`,
+      [item.product_id, qty, order.business_id]
+    );
+    const p = upd.rows[0];
+    if (!p) continue;
+
+    await client.query(
+      `INSERT INTO stock_movements
+         (business_id, product_id, type, quantity_delta, quantity_after, order_id, note, created_by)
+       VALUES ($1,$2,'return',$3,$4,$5,'Refund restock','system')`,
+      [order.business_id, p.id, qty, p.stock_qty, order.id]
+    );
+
+    // Back above its threshold — clear the flag so the next genuine dip
+    // notifies again, same rule as the sale path applies in reverse.
+    if (p.stock_qty > p.low_stock_threshold && p.low_stock_notified) {
+      await client.query('UPDATE products SET low_stock_notified = FALSE WHERE id = $1', [p.id]);
+    }
+
+    if (item.variant_id) {
+      await client.query(
+        `UPDATE product_variants
+            SET stock_qty = stock_qty + $2
+          WHERE id = $1 AND business_id = $3 AND stock_qty IS NOT NULL`,
+        [item.variant_id, qty, order.business_id]
+      );
+    }
+
+    restocked.push({ id: p.id, name: p.name, stock_qty: p.stock_qty, quantity: qty });
+  }
+  return restocked;
 }
 
 async function getOrderHistory(orderId) {
@@ -811,6 +914,23 @@ async function markOrderPaid({ orderId, paymentRef, paymentMethod, amount, chang
       client
     );
 
+    // Close out the attempt that actually paid, and retire any sibling
+    // attempts still sitting 'pending' — once the order is paid, an older
+    // in-flight reference can never resolve to anything but a duplicate.
+    // A cash/manual mark-paid has no reference at all, which is why this is
+    // conditional rather than assumed.
+    const settledRef = paymentRef || existing.payment_ref;
+    if (settledRef) {
+      await client.query(
+        `UPDATE payment_attempts
+            SET status = CASE WHEN reference = $2 THEN 'success' ELSE 'failed' END,
+                failure_reason = CASE WHEN reference = $2 THEN NULL ELSE 'superseded' END,
+                resolved_at = NOW()
+          WHERE order_id = $1 AND status = 'pending'`,
+        [orderId, settledRef]
+      );
+    }
+
     let loyalty = null;
     if (order.customer_id) {
       const custRes = await client.query(
@@ -888,7 +1008,7 @@ async function markOrderPaid({ orderId, paymentRef, paymentMethod, amount, chang
   });
 }
 
-async function markOrderFailed({ orderId, paymentRef, reason }) {
+async function markOrderFailed({ orderId, paymentRef, reason, failureCode }) {
   // 'failed' (not 'unpaid') so the payment history distinguishes an attempt
   // that bounced from an order that never entered payment. Retry still works:
   // attachPaymentReference moves any non-paid/refunded order back to 'pending'.
@@ -902,7 +1022,20 @@ async function markOrderFailed({ orderId, paymentRef, reason }) {
     [orderId, paymentRef || null]
   );
   const order = res.rows[0] || null;
-  if (order) await logOrderEvent(orderId, 'payment:failed', { note: reason || null, changedBy: 'system' });
+  if (!order) return null;
+  await logOrderEvent(orderId, 'payment:failed', { note: reason || null, changedBy: 'system' });
+  // Stamp the outcome on the attempt itself. The order row only ever holds
+  // the LATEST attempt's state, so without this a retry overwrites all trace
+  // of why the previous one bounced. Guarded on order_id so a reference
+  // belonging to a different order can never be marked from here.
+  if (paymentRef) {
+    await query(
+      `UPDATE payment_attempts
+          SET status = 'failed', failure_reason = $3, failure_code = $4, resolved_at = NOW()
+        WHERE reference = $1 AND order_id = $2 AND status = 'pending'`,
+      [paymentRef, orderId, reason || null, failureCode || null]
+    );
+  }
   return order;
 }
 

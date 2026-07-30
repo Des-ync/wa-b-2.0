@@ -84,10 +84,13 @@ class OfflineCache {
   /// count) are always fetched and shown together, so they're cached as one
   /// snapshot rather than four separate entries — simpler, and there's never
   /// a case where you'd want one without the others.
+  /// The low-stock LIST is deliberately not cached: it is a drill-down the
+  /// merchant opens on demand, fetched lazily, and a stale copy behind a live
+  /// count reads as authoritative when it isn't. The count itself lives in
+  /// [stats] and is cached with everything else.
   static Future<void> saveHomeSnapshot({
     required Map<String, dynamic> stats,
     required List<dynamic> recentOrders,
-    required List<dynamic> lowStock,
     required int unreadNotifications,
   }) async {
     try {
@@ -96,7 +99,6 @@ class OfflineCache {
           value: jsonEncode({
             'stats': stats,
             'recent_orders': recentOrders,
-            'low_stock': lowStock,
             'unread_notifications': unreadNotifications,
           }));
     } catch (_) {

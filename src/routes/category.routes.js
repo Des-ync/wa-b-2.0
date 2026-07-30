@@ -3,10 +3,45 @@ const logger = require('../utils/logger');
 const { query, transaction } = require('../config/database');
 const { requireAuth, requirePermission } = require('../middleware/auth');
 const { tenantBlocksBusinessId } = require('../middleware/tenantAccess');
+const respond = require('../utils/response');
+const { validate, summarize, str, int, bool, arrayOf } = require('../utils/validate');
 
 const router = express.Router();
 
 router.use(requireAuth('any'));
+
+/**
+ * First route group migrated to the shared response + validation layer
+ * (see src/utils/response.js). Legacy callers are unaffected: without an
+ * `X-API-Version: 2` header every response below is byte-for-byte what it
+ * was before. The category-routes tests assert exactly that.
+ */
+
+// Category names are the join key between `categories` and `products.category`
+// free text, so they are normalized identically in both places: trimmed,
+// lower-cased, capped at 60.
+const NAME = str({ max: 60, lower: true });
+
+const CREATE_SCHEMA = {
+  name: str({ required: true, max: 60, lower: true }),
+  sort_order: int({ default: 0 }),
+  hidden: bool({ default: false })
+};
+
+const PATCH_SCHEMA = {
+  name: str({ required: true, max: 60, lower: true }),
+  sort_order: int(),
+  hidden: bool()
+};
+
+// No `max` here on purpose: arrayOf's max TRUNCATES, and the original route
+// REJECTED an over-long list. Silently reordering the first 200 of 250
+// categories and reporting success would be worse than refusing, so the
+// bound is enforced explicitly below.
+const REORDER_MAX = 200;
+const REORDER_SCHEMA = {
+  order: arrayOf(NAME, { required: true })
+};
 
 /**
  * GET /api/categories?business_id= — display metadata (sort order, hidden)
@@ -17,10 +52,11 @@ router.use(requireAuth('any'));
 router.get('/', async (req, res) => {
   try {
     const businessId = req.query.business_id || req.auth?.businessId;
-    if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
-    if (tenantBlocksBusinessId(req, businessId)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+    if (!businessId) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
     }
+    if (tenantBlocksBusinessId(req, businessId)) return respond.forbidden(req, res);
+
     const result = await query(
       `SELECT id, name, sort_order, hidden FROM categories WHERE business_id = $1
        UNION ALL
@@ -30,10 +66,9 @@ router.get('/', async (req, res) => {
        ORDER BY sort_order ASC, name ASC`,
       [businessId]
     );
-    res.json({ success: true, categories: result.rows });
+    return respond.ok(req, res, { categories: result.rows });
   } catch (err) {
-    logger.error('GET /categories failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /categories', err);
   }
 });
 
@@ -41,26 +76,23 @@ router.get('/', async (req, res) => {
 router.post('/', requirePermission('products', 'write'), async (req, res) => {
   try {
     const businessId = req.body?.business_id || req.auth?.businessId;
-    if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
-    if (tenantBlocksBusinessId(req, businessId)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+    if (!businessId) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
     }
-    const name = String(req.body?.name || '').trim().toLowerCase().slice(0, 60);
-    if (!name) return res.status(400).json({ success: false, error: 'name is required' });
-    const sortOrder = req.body?.sort_order !== undefined ? Number(req.body.sort_order) : 0;
-    if (!Number.isInteger(sortOrder)) return res.status(400).json({ success: false, error: 'sort_order must be an integer' });
-    const hidden = !!req.body?.hidden;
+    if (tenantBlocksBusinessId(req, businessId)) return respond.forbidden(req, res);
+
+    const { valid, value, fields } = validate(req.body, CREATE_SCHEMA);
+    if (!valid) return respond.invalid(req, res, summarize(fields), fields);
 
     const result = await query(
       `INSERT INTO categories (business_id, name, sort_order, hidden) VALUES ($1,$2,$3,$4)
        ON CONFLICT (business_id, lower(name)) DO UPDATE SET sort_order = $3, hidden = $4
        RETURNING *`,
-      [businessId, name, sortOrder, hidden]
+      [businessId, value.name, value.sort_order, value.hidden]
     );
-    res.status(201).json({ success: true, category: result.rows[0] });
+    return respond.ok(req, res, { category: result.rows[0] }, { status: 201 });
   } catch (err) {
-    logger.error('POST /categories failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'POST /categories', err);
   }
 });
 
@@ -69,35 +101,31 @@ router.patch('/:id', requirePermission('products', 'write'), async (req, res) =>
   try {
     const existing = await query('SELECT * FROM categories WHERE id = $1', [req.params.id]);
     const category = existing.rows[0];
-    if (!category) return res.status(404).json({ success: false, error: 'Category not found' });
-    if (tenantBlocksBusinessId(req, category.business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
-    }
+    if (!category) return respond.notFound(req, res, 'Category');
+    if (tenantBlocksBusinessId(req, category.business_id)) return respond.forbidden(req, res);
+
+    // partial: only the keys actually sent are validated or written. `name`
+    // is marked required in the schema so that SENDING it empty is an error
+    // ("name cannot be empty"), while omitting it is fine.
+    const { valid, value, fields } = validate(req.body, PATCH_SCHEMA, { partial: true });
+    if (!valid) return respond.invalid(req, res, summarize(fields), fields);
+
     const sets = [];
     const params = [req.params.id];
-    if (req.body?.name !== undefined) {
-      const name = String(req.body.name || '').trim().toLowerCase().slice(0, 60);
-      if (!name) return res.status(400).json({ success: false, error: 'name cannot be empty' });
-      params.push(name);
-      sets.push(`name = $${params.length}`);
+    for (const col of ['name', 'sort_order', 'hidden']) {
+      if (col in value) {
+        params.push(value[col]);
+        sets.push(`${col} = $${params.length}`);
+      }
     }
-    if (req.body?.sort_order !== undefined) {
-      const n = Number(req.body.sort_order);
-      if (!Number.isInteger(n)) return res.status(400).json({ success: false, error: 'sort_order must be an integer' });
-      params.push(n);
-      sets.push(`sort_order = $${params.length}`);
+    if (!sets.length) {
+      return respond.invalid(req, res, 'No fields to update');
     }
-    if (req.body?.hidden !== undefined) {
-      params.push(!!req.body.hidden);
-      sets.push(`hidden = $${params.length}`);
-    }
-    if (!sets.length) return res.status(400).json({ success: false, error: 'No fields to update' });
 
     const result = await query(`UPDATE categories SET ${sets.join(', ')} WHERE id = $1 RETURNING *`, params);
-    res.json({ success: true, category: result.rows[0] });
+    return respond.ok(req, res, { category: result.rows[0] });
   } catch (err) {
-    logger.error('PATCH /categories/:id failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'PATCH /categories/:id', err);
   }
 });
 
@@ -106,15 +134,13 @@ router.delete('/:id', requirePermission('products', 'write'), async (req, res) =
   try {
     const existing = await query('SELECT * FROM categories WHERE id = $1', [req.params.id]);
     const category = existing.rows[0];
-    if (!category) return res.status(404).json({ success: false, error: 'Category not found' });
-    if (tenantBlocksBusinessId(req, category.business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
-    }
+    if (!category) return respond.notFound(req, res, 'Category');
+    if (tenantBlocksBusinessId(req, category.business_id)) return respond.forbidden(req, res);
+
     await query('DELETE FROM categories WHERE id = $1', [req.params.id]);
-    res.json({ success: true });
+    return respond.ok(req, res, {});
   } catch (err) {
-    logger.error('DELETE /categories/:id failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'DELETE /categories/:id', err);
   }
 });
 
@@ -125,19 +151,24 @@ router.delete('/:id', requirePermission('products', 'write'), async (req, res) =
 router.post('/reorder', requirePermission('products', 'write'), async (req, res) => {
   try {
     const businessId = req.body?.business_id || req.auth?.businessId;
-    if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
-    if (tenantBlocksBusinessId(req, businessId)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+    if (!businessId) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
     }
-    const order = req.body?.order;
-    if (!Array.isArray(order) || !order.length || order.length > 200) {
-      return res.status(400).json({ success: false, error: 'order must be a non-empty array of category names (max 200)' });
+    if (tenantBlocksBusinessId(req, businessId)) return respond.forbidden(req, res);
+
+    const { valid, value, fields } = validate(req.body, REORDER_SCHEMA);
+    const order = value.order || [];
+    if (!valid || !order.length || order.length > REORDER_MAX) {
+      const message = `order must be a non-empty array of category names (max ${REORDER_MAX})`;
+      return respond.invalid(req, res, message,
+        Object.keys(fields).length ? fields : { order: message });
     }
+
     // All-or-nothing: a failure partway through must not leave the category
     // ordering half-applied.
     await transaction(async client => {
       for (let i = 0; i < order.length; i++) {
-        const name = String(order[i] || '').trim().toLowerCase().slice(0, 60);
+        const name = order[i];
         if (!name) continue;
         await client.query(
           `INSERT INTO categories (business_id, name, sort_order) VALUES ($1,$2,$3)
@@ -150,10 +181,9 @@ router.post('/reorder', requirePermission('products', 'write'), async (req, res)
       'SELECT * FROM categories WHERE business_id = $1 ORDER BY sort_order ASC, name ASC',
       [businessId]
     );
-    res.json({ success: true, categories: result.rows });
+    return respond.ok(req, res, { categories: result.rows });
   } catch (err) {
-    logger.error('POST /categories/reorder failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'POST /categories/reorder', err);
   }
 });
 

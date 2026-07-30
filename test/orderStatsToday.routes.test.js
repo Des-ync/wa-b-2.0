@@ -58,6 +58,44 @@ test('GET /orders/stats/today surfaces new_customers_count and messages_needing_
   assert.deepEqual(sawQuery.params, ['biz-1']);
 });
 
+test('GET /orders/stats/today surfaces low_stock_count and failed_payments_count', async () => {
+  let sawQuery = null;
+  withKeyLookup(async (sql) => {
+    if (sql.includes('WITH today AS')) {
+      sawQuery = sql;
+      return {
+        rows: [{
+          orders_count: 12, paid_count: 8, gmv_ghs: '450.00', awaiting_payment: 2,
+          cancelled_count: 1, payment_attempts: 10, open_orders: 3,
+          new_customers_count: 4, messages_needing_reply_count: 2,
+          low_stock_count: 5, failed_payments_count: 3
+        }]
+      };
+    }
+    return { rows: [] };
+  });
+
+  const res = await request(buildApp())
+    .get('/api/orders/stats/today')
+    .query({ business_id: 'biz-1' })
+    .set('Authorization', 'Bearer sk_live_abc');
+
+  assert.equal(res.status, 200);
+  assert.equal(res.body.stats.low_stock_count, 5);
+  assert.equal(res.body.stats.failed_payments_count, 3);
+
+  // Low stock uses each product's OWN threshold, not a hard-coded number —
+  // same rule as /api/inventory/reorder-suggestions, which backs the
+  // drill-down sheet the tile opens.
+  assert.match(sawQuery, /stock_qty <= low_stock_threshold/);
+  // Failed payments are counted per ATTEMPT, not per order, so an order that
+  // bounced twice before succeeding still shows both failures.
+  assert.match(sawQuery, /FROM payment_attempts/);
+  // ...but attempts retired by a later success are not failures the merchant
+  // needs to troubleshoot.
+  assert.match(sawQuery, /<> 'superseded'/);
+});
+
 test('GET /orders/stats/today is blocked for a business_id the tenant key does not own', async () => {
   withKeyLookup(async () => { throw new Error('should not query stats for a blocked business'); });
 

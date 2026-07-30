@@ -107,6 +107,24 @@ test('processPaystack routes an ORD- failure to the order flow with a normalized
   assert.equal(handlePaymentFailureCalls.length, 1);
   assert.equal(handlePaymentFailureCalls[0].reference, 'ORD-FAIL-1');
   assert.equal(handlePaymentFailureCalls[0].reason, 'insufficient_funds');
+  // The gateway's own wording is carried alongside the normalized category:
+  // the customer sees the humanized reason, the merchant and support see this.
+  // A normalizer can never reconstruct it after the fact, so it must survive
+  // the trip verbatim.
+  assert.equal(handlePaymentFailureCalls[0].failureCode, 'Insufficient Funds');
+});
+
+test('processPaystack carries an unrecognized gateway_response through verbatim', async () => {
+  await processPaystack({
+    event: 'charge.failed',
+    data: { reference: 'ORD-FAIL-2', status: 'failed', gateway_response: 'Transaction limit exceeded [ref 88213]' }
+  });
+
+  assert.equal(handlePaymentFailureCalls.length, 1);
+  // Nothing matched the keyword map, so the customer gets the safe generic
+  // category — but the merchant still gets the exact string to act on.
+  assert.equal(handlePaymentFailureCalls[0].reason, 'declined');
+  assert.equal(handlePaymentFailureCalls[0].failureCode, 'Transaction limit exceeded [ref 88213]');
 });
 
 test('processPaystack drops a charge in an unexpected (non-GHS) currency instead of crediting it', async () => {
