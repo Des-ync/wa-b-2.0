@@ -674,3 +674,46 @@ Bulk edit, duplicate product, drag-and-drop ordering, product quality score, pho
 IA rework, undo. Each is independent; none blocks the others.
 
 Nothing pushed or merged.
+
+
+---
+
+## 14. Regression audit of the Phase 3 validator swap
+
+After two regressions from the same migration surfaced by building on top of it rather
+than by any test, the swap was audited properly instead of waiting for a third to be
+found in production.
+
+### Method
+
+The pre-migration validators were extracted from git (`8c61c56`), isolated, and run
+against the current schemas over a matrix of inputs — empty, padded, null, empty-string,
+negative, fractional, over-length, and boundary values for every field, in both full and
+`partial` mode. Any difference in **accept/reject** or in the **coerced output** is a
+behaviour change the migration made silently.
+
+### Result
+
+**114 cases. One divergence, now fixed.**
+
+An emptied `category` returned `''` where the old validator returned `'general'`. The
+CREATE paths hid it behind their own `out.category || 'general'` fallback, but **PATCH
+writes the validated object straight into the UPDATE** — so a merchant clearing the field
+persisted an empty string, and that product then grouped under nothing and matched no row
+in `categories`.
+
+### The pattern across all three regressions
+
+| Regression | Why no test caught it |
+|---|---|
+| `req` undefined in 18 handlers | Nothing exercised those branches; a hung request emits no log |
+| `undefined` treated as a value | JSON has no `undefined` — only object-building callers were affected, and every test posted JSON |
+| Empty category | The CREATE fallback masked it; only PATCH was exposed, and no test cleared a category |
+
+Each survived because the tests covered the *paths* but not the *inputs*. A scripted
+migration preserves whatever the tests exercise and quietly changes the rest — which is
+the argument for differential-testing a mechanical refactor against the thing it replaced,
+rather than trusting a green suite.
+
+The one remaining `validate()` caller that builds an object rather than passing `req.body`
+is the CSV import, already fixed. Every other call site passes a JSON body.

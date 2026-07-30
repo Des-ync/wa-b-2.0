@@ -60,6 +60,14 @@ const PRODUCT_SCHEMA = {
  *     nudge flag and let a future dip notify again.
  */
 function refineProduct(value, source) {
+  // An emptied category falls back to 'general', as the hand-rolled validator
+  // did with `String(body.category || 'general') ... || 'general'`. The
+  // CREATE paths have their own `out.category || 'general'` fallback, but
+  // PATCH writes this object straight into the UPDATE — so without this, a
+  // merchant clearing the field persisted '', and the product then grouped
+  // under nothing and matched no row in `categories`.
+  if ('category' in value && !value.category) value.category = 'general';
+
   if (value.stock_qty != null) {
     if (source.in_stock === undefined) value.in_stock = value.stock_qty > 0;
     if (value.stock_qty > 0) value.low_stock_notified = false;

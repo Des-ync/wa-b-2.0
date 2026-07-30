@@ -608,3 +608,45 @@ test('a failure part-way through rolls the whole file back', async () => {
   assert.equal(res.status, 500);
   assert.equal(res.body.error, 'Internal server error');
 });
+
+/**
+ * Regression tests for the category fallback, found by differential-testing
+ * the schema validators against the hand-rolled ones they replaced.
+ *
+ * The old validator did `String(body.category || 'general')... || 'general'`,
+ * so an emptied category became 'general'. The schema returned '' instead.
+ * The CREATE paths hid it behind their own `out.category || 'general'`
+ * fallback — but PATCH writes the validated object straight into the UPDATE,
+ * so clearing the field persisted an empty string, and the product then
+ * grouped under nothing and matched no row in `categories`.
+ */
+test('clearing a category falls back to general, not an empty string', async () => {
+  const seen = captureWrite();
+
+  await auth(request(app()).patch('/api/products/p1')).send({ category: '' });
+
+  const idx = seen.updateSql.indexOf('category');
+  assert.ok(idx > 0, 'category should still be written');
+  assert.ok(seen.updateParams.includes('general'),
+    `expected the general fallback, got ${JSON.stringify(seen.updateParams)}`);
+  assert.ok(!seen.updateParams.includes(''),
+    'an empty category groups the product under nothing');
+});
+
+test('a real category is still normalized, not replaced', async () => {
+  const seen = captureWrite();
+
+  await auth(request(app()).patch('/api/products/p1')).send({ category: '  DRINKS ' });
+
+  assert.ok(seen.updateParams.includes('drinks'));
+});
+
+test('creating with an empty category also lands on general', async () => {
+  const seen = captureWrite();
+
+  await auth(request(app()).post('/api/products'))
+    .send({ name: 'X', price_ghs: 10, category: '' });
+
+  // Position 4 in the INSERT column list.
+  assert.equal(seen.insert[4], 'general');
+});
