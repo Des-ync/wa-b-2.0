@@ -49,7 +49,7 @@ router.get('/:slug', async (req, res) => {
     const business = await findPublicBusiness(req.params.slug);
     if (!business) return respond.notFound(req, res, 'Shop');
 
-    const [productsRes, categoriesRes, bundlesRes] = await Promise.all([
+    const [productsRes, categoriesRes, bundlesRes, variantsRes, addonsRes] = await Promise.all([
       query(
         `SELECT id, name, description, price_ghs, category, image_url, in_stock, featured
            FROM products
@@ -74,8 +74,47 @@ router.get('/:slug', async (req, res) => {
           GROUP BY b.id
           ORDER BY b.sort_order ASC, b.name ASC`,
         [business.id]
+      ),
+      // Variants and add-ons were backend-complete but absent from this
+      // endpoint, so the web storefront could not offer a size or an extra
+      // that a WhatsApp customer of the same shop could. Returned grouped by
+      // product so the page can render them without a second round trip.
+      query(
+        `SELECT id, product_id, name, price_delta_ghs, stock_qty
+           FROM product_variants WHERE business_id = $1
+          ORDER BY sort_order ASC, name ASC`,
+        [business.id]
+      ),
+      query(
+        `SELECT id, product_id, name, price_ghs
+           FROM product_addons WHERE business_id = $1
+          ORDER BY sort_order ASC, name ASC`,
+        [business.id]
       )
     ]);
+
+    const variantsByProduct = new Map();
+    for (const v of variantsRes.rows) {
+      // A variant that tracks stock and has none left is not orderable, and
+      // showing it just produces a checkout error later.
+      if (v.stock_qty !== null && v.stock_qty <= 0) continue;
+      if (!variantsByProduct.has(v.product_id)) variantsByProduct.set(v.product_id, []);
+      variantsByProduct.get(v.product_id).push({
+        id: v.id, name: v.name, price_delta_ghs: Number(v.price_delta_ghs)
+      });
+    }
+    const addonsByProduct = new Map();
+    for (const a of addonsRes.rows) {
+      if (!addonsByProduct.has(a.product_id)) addonsByProduct.set(a.product_id, []);
+      addonsByProduct.get(a.product_id).push({
+        id: a.id, name: a.name, price_ghs: Number(a.price_ghs)
+      });
+    }
+    const products = productsRes.rows.map(p => ({
+      ...p,
+      variants: variantsByProduct.get(p.id) || [],
+      addons: addonsByProduct.get(p.id) || []
+    }));
 
     return respond.ok(req, res, {
       shop: {
@@ -90,7 +129,7 @@ router.get('/:slug', async (req, res) => {
         delivery_zones: business.delivery_zones
       },
       categories: categoriesRes.rows.map(r => r.name),
-      products: productsRes.rows,
+      products,
       bundles: bundlesRes.rows
     });
   } catch (err) {
@@ -167,12 +206,26 @@ router.post('/:slug/checkout', async (req, res) => {
     const cart = [];
     if (items.length) {
       const ids = items.map(it => it?.product_id).filter(Boolean);
-      const productsRes = await query(
-        `SELECT id, name, price_ghs, in_stock FROM products
-          WHERE business_id = $1 AND id = ANY($2::uuid[]) AND hidden = FALSE`,
-        [business.id, ids]
-      );
+      const variantIds = items.map(it => it?.variant_id).filter(Boolean);
+      const addonIds = items.flatMap(it => Array.isArray(it?.addon_ids) ? it.addon_ids : []).filter(Boolean);
+
+      const [productsRes, variantsRes, addonsRes] = await Promise.all([
+        query(
+          `SELECT id, name, price_ghs, in_stock FROM products
+            WHERE business_id = $1 AND id = ANY($2::uuid[]) AND hidden = FALSE`,
+          [business.id, ids]
+        ),
+        variantIds.length
+          ? query(`SELECT id, product_id, name, price_delta_ghs FROM product_variants WHERE business_id = $1 AND id = ANY($2::uuid[])`, [business.id, variantIds])
+          : Promise.resolve({ rows: [] }),
+        addonIds.length
+          ? query(`SELECT id, product_id, name, price_ghs FROM product_addons WHERE business_id = $1 AND id = ANY($2::uuid[])`, [business.id, addonIds])
+          : Promise.resolve({ rows: [] })
+      ]);
       const byId = new Map(productsRes.rows.map(p => [p.id, p]));
+      const variantById = new Map(variantsRes.rows.map(v => [v.id, v]));
+      const addonById = new Map(addonsRes.rows.map(a => [a.id, a]));
+
       for (const it of items) {
         const p = byId.get(it?.product_id);
         if (!p) return respond.invalid(req, res, `Unknown product in cart: ${it?.product_id}`);
@@ -182,8 +235,39 @@ router.post('/:slug/checkout', async (req, res) => {
             message: `${p.name} is out of stock`
           });
         }
+
+        // Priced exactly as the WhatsApp path does (order.routes.js): base
+        // price + variant delta + add-ons. Re-resolved server-side from ids
+        // rather than trusting anything the page sent — this endpoint is
+        // PUBLIC and unauthenticated, so a posted price is an offer, not a
+        // fact. The product_id ownership check is what stops one shop's
+        // variant being attached to another shop's product.
+        const variant = it?.variant_id ? variantById.get(String(it.variant_id)) : null;
+        if (it?.variant_id && (!variant || variant.product_id !== p.id)) {
+          return respond.invalid(req, res, `Unknown option for ${p.name}`);
+        }
+        const wantedAddons = Array.isArray(it?.addon_ids) ? it.addon_ids : [];
+        const addons = wantedAddons
+          .map(id => addonById.get(String(id)))
+          .filter(a => a && a.product_id === p.id);
+        if (addons.length !== wantedAddons.length) {
+          return respond.invalid(req, res, `Unknown extra for ${p.name}`);
+        }
+
+        const addonsTotal = addons.reduce((sum, a) => sum + Number(a.price_ghs), 0);
+        const unitPrice = Number(p.price_ghs) + (variant ? Number(variant.price_delta_ghs) : 0) + addonsTotal;
+        const displayName = (variant ? `${p.name} (${variant.name})` : p.name)
+          + (addons.length ? ` + ${addons.map(a => a.name).join(', ')}` : '');
+
         const qty = Number.isInteger(Number(it.quantity)) && Number(it.quantity) > 0 ? Number(it.quantity) : 1;
-        cart.push({ product_id: p.id, name: p.name, price_ghs: Number(p.price_ghs), quantity: qty });
+        cart.push({
+          product_id: p.id,
+          variant_id: variant ? variant.id : undefined,
+          addons: addons.length ? addons.map(a => ({ id: a.id, name: a.name, price_ghs: Number(a.price_ghs) })) : undefined,
+          name: displayName,
+          price_ghs: Number(unitPrice.toFixed(2)),
+          quantity: qty
+        });
       }
     }
     if (bundles.length) {
@@ -212,7 +296,39 @@ router.post('/:slug/checkout', async (req, res) => {
     );
 
     const deliveryAddress = req.body?.delivery_address ? String(req.body.delivery_address).trim().slice(0, 400) : null;
-    const deliveryFee = deliveryAddress ? Number(business.delivery_fee_ghs || 0) : 0;
+
+    // Delivery zones were being returned to the page and then ignored when
+    // pricing, so a shop with zones charged its flat fee on the web and the
+    // per-zone fee on WhatsApp — the same shop quoting two different prices
+    // for the same delivery. The zone is matched by NAME against the shop's
+    // own configured list rather than trusted as a fee, so a posted zone
+    // cannot invent a cheaper one.
+    const zones = Array.isArray(business.delivery_zones) ? business.delivery_zones : [];
+    const requestedZone = req.body?.delivery_zone
+      ? String(req.body.delivery_zone).trim()
+      : null;
+    let matchedZone = null;
+    if (deliveryAddress && requestedZone && zones.length) {
+      matchedZone = zones.find(z =>
+        z && typeof z.name === 'string'
+        && z.name.trim().toLowerCase() === requestedZone.toLowerCase()) || null;
+      if (!matchedZone) {
+        return respond.invalid(req, res,
+          'Choose a delivery area from the list', { delivery_zone: 'is not one of this shop\'s areas' });
+      }
+    }
+    // A shop that HAS zones charges by zone; picking one is how the customer
+    // says where they are. Falling back to the flat fee there would quietly
+    // undercharge for a far zone.
+    if (deliveryAddress && zones.length && !matchedZone) {
+      return respond.invalid(req, res,
+        'Choose a delivery area from the list', { delivery_zone: 'is required for delivery' });
+    }
+    const deliveryFee = !deliveryAddress
+      ? 0
+      : matchedZone
+        ? Number(matchedZone.fee_ghs || 0)
+        : Number(business.delivery_fee_ghs || 0);
 
     const order = await orderService.createOrder({
       businessId: business.id, customerId: customer.id, cart,

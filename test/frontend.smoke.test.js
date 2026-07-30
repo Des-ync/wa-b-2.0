@@ -67,3 +67,58 @@ test('every page references only same-origin or well-known CDN assets (no stray 
     }
   }
 });
+
+/**
+ * Storefront variant/add-on selection and the pickup-vs-delivery choice
+ * (Phase 6). These are static assertions rather than a rendered-DOM test —
+ * matching how this file already works — but they pin the parts that would
+ * silently stop working: the escaping, and the wiring between the page and
+ * the fields the checkout endpoint validates.
+ */
+test('storefront.html offers product options and a fulfilment choice', () => {
+  const html = readPage('storefront.html');
+
+  assertInlineScriptsParse(html, 'storefront.html');
+
+  // A variant is a choice, an add-on is an extra — radios and checkboxes.
+  assert.match(html, /name="sf-variant"[^>]*type="radio"|type="radio"[^>]*name="sf-variant"/);
+  assert.match(html, /name="sf-addon"[^>]*type="checkbox"|type="checkbox"[^>]*name="sf-addon"/);
+
+  // Pickup must be reachable without inventing an address.
+  assert.match(html, /name="sf-fulfil"/);
+  assert.match(html, /I'll collect it myself/);
+
+  // The zone selector the checkout endpoint now requires when a shop uses zones.
+  assert.match(html, /id="custZone"/);
+  assert.match(html, /delivery_zone: zone \|\| undefined/);
+
+  // The configuration has to reach the server, or the price silently reverts
+  // to the base product.
+  assert.match(html, /variant_id: l\.variant_id/);
+  assert.match(html, /addon_ids: l\.addon_ids/);
+});
+
+test('storefront escapes every merchant-controlled option string', () => {
+  const html = readPage('storefront.html');
+
+  // Variant, add-on and zone names are merchant-entered and land in innerHTML.
+  for (const expr of ['esc(v.id)', 'esc(v.name)', 'esc(a.id)', 'esc(a.name)', 'esc(z.name)']) {
+    assert.ok(html.includes(expr), `expected ${expr} — unescaped merchant text reaches innerHTML`);
+  }
+  // ...and never raw.
+  for (const raw of ['${v.name}', '${a.name}', '${z.name}']) {
+    assert.ok(!html.includes(raw), `${raw} is interpolated without esc()`);
+  }
+});
+
+test('the options dialog is reachable and labelled for assistive tech', () => {
+  const html = readPage('storefront.html');
+
+  assert.match(html, /id="optsModal"[\s\S]{0,200}role="dialog"/);
+  assert.match(html, /aria-modal="true"/);
+  assert.match(html, /aria-labelledby="optsTitle"/);
+  // Quantity steppers are icon-only buttons; without a label a screen reader
+  // announces them as "minus" with no object.
+  assert.match(html, /aria-label="Remove one/);
+  assert.match(html, /aria-label="Add one/);
+});

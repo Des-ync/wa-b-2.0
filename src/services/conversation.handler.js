@@ -22,13 +22,14 @@ const {
   decayedTypingDelay,
   buildMenuPage,
   parseQuantityExpression,
-  isWithinBusinessHours
+  isWithinBusinessHours,
+  mapsLinkForAddress
 } = require('../utils/helpers');
 const { t, langOf, detectLikelyLanguage } = require('../utils/i18n');
 const { detectProductQuery } = require('../utils/productQuery');
 const { fuzzyMatchProducts } = require('../utils/fuzzyMatch');
 const { pickFrequentlyBoughtSuggestion, pickVariantUpgrade } = require('../utils/upsell');
-const { generateReferralCode } = require('../utils/loyalty');
+const { generateReferralCode, computePointsRedemptionValue } = require('../utils/loyalty');
 const { setBusinessId } = require('../utils/requestContext');
 
 /* -----------------------------------------------------------------
@@ -973,6 +974,15 @@ async function handleCommerce({ business, inbound }) {
           case 'HELP': inbound.interactiveId = 'support_request'; break;
           case 'REPEAT': inbound.interactiveId = 'repeat_order'; break;
           case 'TRACK': inbound.interactiveId = 'track_order'; break;
+          // Self-service answers. Handled inline rather than by rewriting to
+          // a button id, because none of them has a button — they exist for
+          // customers who type a question the shop would otherwise answer by
+          // hand a dozen times a day.
+          case 'RECEIPT': return sendLastReceipt({ business, customer });
+          case 'POINTS': return sendPointsBalance({ business, customer });
+          case 'HOURS': return sendShopHours({ business, customer });
+          case 'LOCATION': return sendShopLocation({ business, customer });
+          case 'PAYMENT_METHODS': return sendPaymentMethods({ business, customer });
           case 'CHECKOUT': inbound.interactiveId = 'checkout'; break;
           case 'CANCEL': inbound.text = 'CANCEL'; break;
           case 'YES':
@@ -1456,6 +1466,56 @@ async function fetchVisibleProducts(businessId) {
   return products.rows.filter(p => isWithinBusinessHours(p.available_from, p.available_to));
 }
 
+/**
+ * Did the customer ask for something we sell but have run out of?
+ *
+ * fetchVisibleProducts filters on in_stock = TRUE, so a finished item is
+ * invisible to the matcher and the customer gets "we couldn't find jollof on
+ * the menu" — which is simply untrue, and reads as though the shop never sold
+ * it. This looks specifically at the out-of-stock shelf so the bot can say
+ * "finished for now" and offer something else, which is what a person behind
+ * the counter would do.
+ *
+ * Returns { product, alternatives } or null.
+ */
+async function findOutOfStockMatch(businessId, name) {
+  const res = await query(
+    `SELECT id, name, description, price_ghs, category
+       FROM products
+      WHERE business_id = $1 AND hidden = FALSE AND in_stock = FALSE
+      LIMIT 200`,
+    [businessId]
+  );
+  if (!res.rows.length) return null;
+
+  const [hit] = fuzzyMatchProducts(name, res.rows, { maxResults: 1 });
+  if (!hit) return null;
+
+  // Alternatives from the same category first — someone who wanted jollof
+  // wants another meal, not a drink. Falls back to whatever is popular when
+  // the category has nothing left, which is better than an empty suggestion.
+  const visible = await fetchVisibleProducts(businessId);
+  const sameCategory = visible.filter(p =>
+    (p.category || '').toLowerCase() === (hit.category || '').toLowerCase());
+  const alternatives = (sameCategory.length ? sameCategory : visible).slice(0, 3);
+
+  return { product: hit, alternatives };
+}
+
+/** Tell the customer an item is finished, and what they could have instead. */
+async function sendOutOfStock({ business, customer, match }) {
+  const lang = langOf(business);
+  const list = match.alternatives
+    .map(p => `• ${p.name} — ${formatGhs(p.price_ghs)}`)
+    .join('\n');
+  await chOf(customer).sendText(destOf(customer),
+    t(lang, 'out_of_stock_alternatives', {
+      name: match.product.name,
+      alternatives: list || null
+    }),
+    { businessId: business.id, customerId: customer.id });
+}
+
 async function startOrderingFlow({ business, customer, page = 0 }) {
   const lang = langOf(business);
   const available = await fetchVisibleProducts(business.id);
@@ -1714,6 +1774,13 @@ async function tryTypedProductAdd({ business, customer, cart, inbound, page = 0 
     });
     return true;
   }
+  // Not on the shelf — but we might simply have run out of it.
+  const oos = await findOutOfStockMatch(business.id, name);
+  if (oos) {
+    await sendOutOfStock({ business, customer, match: oos });
+    return true;
+  }
+
   if (explicit) {
     const lang = langOf(business);
     await chOf(customer).sendText(destOf(customer),
@@ -1723,6 +1790,109 @@ async function tryTypedProductAdd({ business, customer, cart, inbound, page = 0 
     return true;
   }
   return false;
+}
+
+/**
+ * Self-service answers to the questions a shop fields by hand every day.
+ *
+ * Each one is deliberately terminal — it answers and stops, rather than
+ * dragging the customer into the ordering flow. Someone asking "are you
+ * open?" at 11pm wants a time, not a menu; every reply ends with a nudge
+ * back to MENU so the path forward is still one word away.
+ */
+async function sendLastReceipt({ business, customer }) {
+  const lang = langOf(business);
+  const dest = destOf(customer);
+  const ch = chOf(customer);
+  const meta = { businessId: business.id, customerId: customer.id };
+
+  const order = await orderService.getLastOrderForCustomer(customer.id);
+  if (!order) {
+    return ch.sendText(dest, t(lang, 'receipt_none'), meta);
+  }
+  // A receipt is proof of PAYMENT. Offering one for an unpaid order would
+  // hand the customer something that looks like a receipt but isn't.
+  if (order.payment_status !== 'paid') {
+    return ch.sendText(dest, t(lang, 'receipt_unpaid', { n: order.order_number }), meta);
+  }
+  const base = (process.env.PUBLIC_BASE_URL || '').replace(/\/$/, '');
+  if (!base) {
+    logger.warn('RECEIPT asked for but PUBLIC_BASE_URL is unset; cannot build a link');
+    return ch.sendText(dest, t(lang, 'receipt_none'), meta);
+  }
+  return ch.sendText(dest,
+    t(lang, 'receipt_link', { n: order.order_number, url: `${base}/wa-b/receipt.html?order=${order.id}` }),
+    meta);
+}
+
+async function sendPointsBalance({ business, customer }) {
+  const lang = langOf(business);
+  const meta = { businessId: business.id, customerId: customer.id };
+
+  const bizRes = await query(
+    `SELECT loyalty_enabled, loyalty_points_redemption_rate_ghs, loyalty_stamps_target
+       FROM businesses WHERE id = $1`,
+    [business.id]
+  );
+  const biz = bizRes.rows[0];
+  if (!biz?.loyalty_enabled) {
+    return chOf(customer).sendText(destOf(customer),
+      t(lang, 'points_disabled', { shop: business.name }), meta);
+  }
+
+  const points = Number(customer.loyalty_points) || 0;
+  const value = computePointsRedemptionValue(points, biz.loyalty_points_redemption_rate_ghs);
+  return chOf(customer).sendText(destOf(customer),
+    t(lang, 'points_balance', {
+      points,
+      shop: business.name,
+      // Only quote a cash value when the shop has actually configured a
+      // redemption rate; "worth about GH₵0.00" is worse than saying nothing.
+      value: value > 0 ? formatGhs(value) : null,
+      stamps: Number(customer.loyalty_stamps) || 0,
+      stampsTarget: biz.loyalty_stamps_target || 0
+    }), meta);
+}
+
+async function sendShopHours({ business, customer }) {
+  const lang = langOf(business);
+  return chOf(customer).sendText(destOf(customer),
+    t(lang, 'shop_hours', {
+      shop: business.name,
+      open: business.open_time,
+      close: business.close_time,
+      isOpenNow: isWithinBusinessHours(business.open_time, business.close_time)
+    }), { businessId: business.id, customerId: customer.id });
+}
+
+async function sendShopLocation({ business, customer }) {
+  const lang = langOf(business);
+  const meta = { businessId: business.id, customerId: customer.id };
+  const address = (business.address || '').trim();
+
+  if (!address) {
+    // Plenty of these shops genuinely have no walk-in address — saying so is
+    // more useful than an apologetic "we don't know".
+    return chOf(customer).sendText(destOf(customer),
+      t(lang, 'shop_location_unknown', {
+        phone: business.support_phone || business.whatsapp_number
+      }), meta);
+  }
+  return chOf(customer).sendText(destOf(customer),
+    t(lang, 'shop_location', {
+      shop: business.name,
+      address,
+      maps: mapsLinkForAddress(address)
+    }), meta);
+}
+
+async function sendPaymentMethods({ business, customer }) {
+  const lang = langOf(business);
+  return chOf(customer).sendText(destOf(customer),
+    t(lang, 'payment_methods', {
+      // Cash only makes sense where the merchant delivers themselves.
+      cashOnDelivery: Number(business.delivery_fee_ghs) > 0 || deliveryZonesOf(business).length > 0
+    }), { businessId: business.id, customerId: customer.id });
 }
 
 /**
@@ -1769,6 +1939,15 @@ async function tryProductInquiry({ business, customer, text }) {
   }
 
   if (!matches.length) {
+    // "Do you have jollof?" when jollof is finished deserves the same honest
+    // answer as typing the name does — not "we don't sell that".
+    if (parsed.type === 'availability') {
+      const oos = await findOutOfStockMatch(business.id, parsed.term);
+      if (oos) {
+        await sendOutOfStock({ business, customer, match: oos });
+        return true;
+      }
+    }
     await chOf(customer).sendText(destOf(customer), t(lang, 'product_query_none', { shop: business.name }),
       { businessId: business.id, customerId: customer.id });
     return true;

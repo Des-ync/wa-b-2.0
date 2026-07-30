@@ -82,6 +82,13 @@ ALTER TABLE businesses ADD COLUMN IF NOT EXISTS delivery_fee_ghs NUMERIC(10,2) N
 ALTER TABLE businesses ADD COLUMN IF NOT EXISTS delivery_zones JSONB NOT NULL DEFAULT '[]'::jsonb;
 ALTER TABLE businesses ADD COLUMN IF NOT EXISTS open_time TEXT;
 ALTER TABLE businesses ADD COLUMN IF NOT EXISTS close_time TEXT;
+-- Where the shop physically is, for customers who ask "where are you?" or
+-- want to collect rather than pay for delivery. Free text on purpose: a
+-- Ghanaian small business address is usually a landmark description
+-- ("Blue kiosk opposite Melcom, Madina") rather than anything a geocoder
+-- would recognise, and forcing it into structured fields would lose exactly
+-- the part a customer needs to find the place.
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS address TEXT;
 -- Customer-facing bot language: 'en' | 'tw' (Twi). Merchant flows stay English.
 ALTER TABLE businesses ADD COLUMN IF NOT EXISTS bot_language TEXT NOT NULL DEFAULT 'en';
 -- Onboarding: where settlement payouts land, and proof the merchant fired a

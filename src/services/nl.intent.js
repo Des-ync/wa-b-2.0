@@ -70,6 +70,38 @@ const VOCAB = new Map([
     'ORDER STATUS', 'STATUS', 'WHERE IS MY ORDER', 'WHERES MY ORDER',
     'WHERE IS MY STUFF', 'WHERE IS MY FOOD', 'WHERE IS MY DELIVERY'
   ]],
+  // Post-purchase self-service. These are the questions a shop answers by
+  // hand a dozen times a day, so the bot answering them is worth more than
+  // another ordering shortcut. No Twi yet for the same reason as TRACK
+  // above: guessing a phrase is worse than missing one.
+  ['RECEIPT', [
+    'RECEIPT', 'MY RECEIPT', 'SEND RECEIPT', 'SEND MY RECEIPT', 'INVOICE',
+    'PROOF OF PAYMENT', 'PAYMENT PROOF', 'SEND ME THE RECEIPT'
+  ]],
+  ['POINTS', [
+    'POINTS', 'MY POINTS', 'LOYALTY', 'LOYALTY POINTS', 'HOW MANY POINTS',
+    'POINTS BALANCE', 'MY BALANCE', 'REWARDS', 'MY REWARDS', 'STAMPS',
+    'MY STAMPS'
+  ]],
+  ['HOURS', [
+    'HOURS', 'OPENING HOURS', 'OPEN', 'ARE YOU OPEN', 'WHAT TIME DO YOU OPEN',
+    'WHAT TIME DO YOU CLOSE', 'WHEN DO YOU OPEN', 'WHEN DO YOU CLOSE',
+    'CLOSING TIME', 'OPENING TIME', 'WHAT TIME'
+  ]],
+  ['LOCATION', [
+    'LOCATION', 'WHERE ARE YOU', 'WHERE ARE YOU LOCATED', 'YOUR LOCATION',
+    'ADDRESS', 'YOUR ADDRESS', 'WHERE IS YOUR SHOP', 'WHERE IS THE SHOP',
+    'HOW DO I FIND YOU', 'DIRECTIONS', 'CAN I COME AND BUY', 'PICKUP',
+    'PICK UP', 'CAN I PICK UP'
+  ]],
+  ['PAYMENT_METHODS', [
+    'PAYMENT', 'PAYMENT METHODS', 'HOW DO I PAY', 'HOW CAN I PAY',
+    'WHAT PAYMENT DO YOU ACCEPT', 'DO YOU ACCEPT MOMO', 'DO YOU TAKE MOMO',
+    'CAN I PAY WITH MOMO', 'CAN I PAY WITH MTN', 'CAN I PAY WITH VODAFONE',
+    'CAN I PAY WITH VODAFONE CASH', 'CAN I PAY WITH AIRTELTIGO',
+    'CAN I PAY WITH TELECEL', 'DO YOU ACCEPT CASH', 'CAN I PAY CASH',
+    'CAN I PAY ON DELIVERY', 'CASH ON DELIVERY'
+  ]],
   ['YES', [
     'YES', 'YEAH', 'YEP', 'OK', 'OKAY', 'SURE', 'CONFIRM', 'CONFIRM & PAY',
     'AANE', 'YOO', 'AMPA'                                              // NEEDS_NATIVE_REVIEW
@@ -92,10 +124,41 @@ const FILLER_PREFIXES = [
   'I WANT TO ORDER', 'I WANT TO BUY', 'I WANT', 'I WOULD LIKE', 'ID LIKE',
   'I D LIKE', 'CAN I GET', 'CAN I HAVE', 'CAN I ORDER', 'GIVE ME', 'LET ME GET',
   'LET ME HAVE', 'I WILL TAKE', 'ILL TAKE', 'I LL TAKE', 'ORDER',
+  // Spoken register, which is how most of these arrive: "gimme 2 jollof",
+  // "make I get waakye". Cheap to accept and common enough that missing them
+  // sent real orders down the generic-chatter path.
+  'GIMME', 'GIMMIE', 'GIMMEE', 'BRING ME', 'BRING', 'I NEED', 'INEED',
+  'MAKE I GET', 'MAKE I TAKE', 'ABEG GIVE ME', 'ABEG',
   'ME PE SE METO', 'ME PE', 'MEPE', 'MA ME', 'MESRE WO', 'FA MA ME'    // NEEDS_NATIVE_REVIEW
 ];
 // Sorted longest-first so "I WANT TO ORDER" wins over "I WANT".
 FILLER_PREFIXES.sort((a, b) => b.length - a.length);
+
+/**
+ * Spelled-out quantities, which people type as readily as digits — "two
+ * waakye" is at least as common as "2 waakye". Capped at twelve: beyond that
+ * everybody writes the numeral, and a longer list would start colliding with
+ * product names.
+ */
+const WORD_NUMBERS = new Map([
+  ['ONE', 1], ['TWO', 2], ['THREE', 3], ['FOUR', 4], ['FIVE', 5], ['SIX', 6],
+  ['SEVEN', 7], ['EIGHT', 8], ['NINE', 9], ['TEN', 10], ['ELEVEN', 11], ['TWELVE', 12],
+  // Ghanaian English/Twi counting a customer may reach for.
+  ['A', 1], ['AN', 1], ['COUPLE OF', 2], ['A COUPLE OF', 2]
+]);
+
+/** "two waakye" -> { quantity: 2, name: 'WAAKYE' }; null when it isn't one. */
+function parseWordQuantity(norm) {
+  for (const [word, quantity] of WORD_NUMBERS) {
+    if (norm.startsWith(word + ' ')) {
+      const name = norm.slice(word.length + 1).trim();
+      // Guard the single-letter entries: "A JOLLOF" is a quantity, but a
+      // three-letter product would be swallowed whole without a length floor.
+      if (name.length >= 3) return { quantity, name };
+    }
+  }
+  return null;
+}
 
 /** Strip one filler lead-in (and any trailing "PLEASE"). */
 function stripFiller(norm) {
@@ -146,7 +209,8 @@ function detectIntent(text, opts = {}) {
   // "2x jollof", "jollof x2", or plain "2 jollof".
   const qty = parseQuantityExpression(stripped)
     || (m => m && { quantity: Math.min(99, parseInt(m[1], 10)), name: m[2].trim() })(
-         stripped.match(/^(\d{1,2})\s+(.{3,})$/));
+         stripped.match(/^(\d{1,2})\s+(.{3,})$/))
+    || parseWordQuantity(stripped);
   if (qty && qty.name) return { intent: 'PRODUCT', name: qty.name, quantity: qty.quantity };
 
   if (hadFiller && stripped.length >= 3) {

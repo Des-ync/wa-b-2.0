@@ -68,6 +68,70 @@ const STRINGS = {
     en: p => `You've been unsubscribed from ${p.shop}'s promotional messages. You can still order anytime — reply *MENU* to shop, or *START* to resubscribe to updates.`,
     tw: p => `Yɛayi wo afi ${p.shop} nsɛm a wɔde bɛto gua no mu. Wubetumi ato bere biara — kyerɛw *MENU* na tɔ adeɛ, anaa *START* na san gye nsɛm.`
   },
+  /* ---------- self-service answers (RECEIPT/POINTS/HOURS/LOCATION) ---------- */
+  receipt_link: {
+    en: p => `🧾 Here's your receipt for order *${p.n}*:\n${p.url}`,
+    tw: p => `🧾 Wo nhyehyɛe *${p.n}* ho receipt nie:\n${p.url}`
+  },
+  receipt_none: {
+    en: () => `You don't have an order with us yet. Reply *MENU* to see what we have.`,
+    tw: () => `Wonnyaa nhyehyɛe biara wɔ yɛn nkyɛn. Kyerɛw *MENU* na hwɛ deɛ yɛwɔ.`
+  },
+  receipt_unpaid: {
+    en: p => `Order *${p.n}* hasn't been paid yet, so there's no receipt for it. Reply *TRACK* to check its status.`,
+    tw: p => `Wontuaa nhyehyɛe *${p.n}* ho ka, enti receipt biara nni hɔ. Kyerɛw *TRACK* na hwɛ.`
+  },
+  points_balance: {
+    en: p => `⭐ You have *${p.points} points* with ${p.shop}` +
+      (p.value ? ` — worth about ${p.value} off your next order.` : '.') +
+      (p.stampsTarget ? `\n\nStamps: ${p.stamps}/${p.stampsTarget} towards a free item.` : ''),
+    tw: p => `⭐ Wowɔ *points ${p.points}* wɔ ${p.shop} nkyɛn` +
+      (p.value ? ` — ɛbɛso ${p.value} wɔ wo nhyehyɛe a edi so no so.` : '.') +
+      (p.stampsTarget ? `\n\nStamps: ${p.stamps}/${p.stampsTarget} na woanya adeɛ kwa.` : '')
+  },
+  points_disabled: {
+    en: p => `${p.shop} doesn't run a points programme right now — but you can always reply *MENU* to order.`,
+    tw: p => `${p.shop} nni points nhyehyɛe biara seesei — nanso kyerɛw *MENU* bere biara na to.`
+  },
+  shop_hours: {
+    en: p => p.open
+      ? `🕐 *${p.shop}* is open ${p.open}${p.close ? ` to ${p.close}` : ''} daily.${p.isOpenNow ? `\n\nWe're open right now — reply *MENU* to order.` : `\n\nWe're closed at the moment.`}`
+      : `${p.shop} takes orders any time — reply *MENU* to see what we have.`,
+    tw: p => p.open
+      ? `🕐 *${p.shop}* bue ${p.open}${p.close ? ` kɔsi ${p.close}` : ''} da biara.${p.isOpenNow ? `\n\nYɛabue seesei — kyerɛw *MENU* na to.` : `\n\nYɛato mu seesei.`}`
+      : `${p.shop} gye nhyehyɛe bere biara — kyerɛw *MENU* na hwɛ deɛ yɛwɔ.`
+  },
+  shop_location: {
+    en: p => `📍 *${p.shop}*\n${p.address}` + (p.maps ? `\n\nMap: ${p.maps}` : '') +
+      `\n\nReply *MENU* to order for delivery or pickup.`,
+    tw: p => `📍 *${p.shop}*\n${p.address}` + (p.maps ? `\n\nMap: ${p.maps}` : '') +
+      `\n\nKyerɛw *MENU* na to sɛ wopɛ sɛ yɛde brɛ wo anaa woba bɛfa.`
+  },
+  shop_location_unknown: {
+    en: p => `We deliver rather than run a walk-in shop.` +
+      (p.phone ? ` For directions or anything else, call ${p.phone}.` : '') +
+      `\n\nReply *MENU* to order.`,
+    tw: p => `Yɛde adeɛ brɛ wo; yɛnni dwaso a wobɛtumi aba.` +
+      (p.phone ? ` Sɛ wopɛ akwankyerɛ a, frɛ ${p.phone}.` : '') +
+      `\n\nKyerɛw *MENU* na to.`
+  },
+  payment_methods: {
+    en: p => `💳 You can pay with *Mobile Money* — MTN, Telecel (Vodafone) or AirtelTigo — or by card.` +
+      (p.cashOnDelivery ? `\n\nCash on delivery is also fine.` : '') +
+      `\n\nWe send you a payment prompt once your order is confirmed. Reply *MENU* to start.`,
+    tw: p => `💳 Wubetumi de *Mobile Money* atua — MTN, Telecel (Vodafone) anaa AirtelTigo — anaa card.` +
+      (p.cashOnDelivery ? `\n\nWubetumi nso atua sika bere a yɛde bɛba.` : '') +
+      `\n\nSɛ yɛgye wo nhyehyɛe to mu a, yɛbɛsoma akatua ho nkrasɛm. Kyerɛw *MENU* na fi ase.`
+  },
+  out_of_stock_alternatives: {
+    en: p => `Sorry, *${p.name}* is finished for now.` +
+      (p.alternatives ? `\n\nThese are available:\n${p.alternatives}` : '') +
+      `\n\nReply *MENU* to see everything.`,
+    tw: p => `Kafra, *${p.name}* asa seesei.` +
+      (p.alternatives ? `\n\nYeinom wɔ hɔ:\n${p.alternatives}` : '') +
+      `\n\nKyerɛw *MENU* na hwɛ ne nyinaa.`
+  },
+
   reply_menu: {
     en: () => `Reply *MENU* to start over.`,
     tw: () => `Kyerɛw *MENU* na fi ase bio.`

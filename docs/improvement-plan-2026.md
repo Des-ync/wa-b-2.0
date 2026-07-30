@@ -1,6 +1,6 @@
 # KweliChat / WA-B — Improvement Plan 2026 (corrected, evidence-backed)
 
-**Status:** Phases 0–4 complete (§5–§8). Phase 3's envelope migration covers 22 of 26 route
+**Status:** Phases 0–6 complete (§5–§10) — Phase 6 partially; see §10. Phase 3's envelope migration covers 22 of 26 route
 groups; the four left out are deliberate. Phases 5–9 not started.
 **Produced:** 2026-07-30, at commit `4d8d48b`.
 **Supersedes:** `improvement-prompt.md` as the execution plan. That file remains the
@@ -377,4 +377,120 @@ and the card says so explicitly when no expenses are recorded.
 
 - `vat-export` and `inventory-valuation` remain web-only. Both are back-office exports, not
   things a merchant does from a phone — a deliberate call, not an oversight.
+- Nothing pushed or merged.
+
+
+---
+
+## 9. Phase 5 — shipped vs. planned
+
+Branch `phase-5/whatsapp-quality`. **Complete.**
+
+| Task | Shipped | Notes |
+|---|---|---|
+| Ghanaian-phrasing quantity tests | ✅ | Found two real gaps, below. |
+| `RECEIPT` / `POINTS` / `HOURS` / `LOCATION` | ✅ | Plus `PAYMENT_METHODS`. |
+| Payment-method questions | ✅ | "can I pay with Vodafone cash?" |
+| Out-of-stock auto-reply with alternatives | ✅ | Fixed a real lie, below. |
+| Address memory | already shipped in Phase 1 | — |
+
+### The phrasing tests found two real gaps
+
+Writing them as *regressions* turned up two things the parser genuinely could not do,
+both named in the original plan:
+
+- **`gimme` was not a filler prefix.** "gimme 2 jollof" fell through to generic chatter.
+  Added alongside the rest of the spoken register a customer actually types — `bring me`,
+  `I need`, `make I get`, `abeg`.
+- **Spelled-out numbers were not parsed.** "two waakye" — explicitly in the plan — read as
+  a bare name with no quantity. Now handled up to twelve; beyond that everyone writes the
+  numeral, and a longer list starts colliding with product names.
+
+Also corrected two wrong assumptions of my own: a **bare** product name returning null is
+*by design* (the caller's own matcher handles it, where context makes it safe), and
+"1000 jollof" never parsed as a quantity at all because the matcher accepts at most two
+digits.
+
+### Out-of-stock was telling customers a lie
+
+`fetchVisibleProducts` filters on `in_stock = TRUE`, so a finished item is invisible to the
+matcher and the customer got **"We couldn't find jollof on the menu"** — untrue, and it
+reads as though the shop never sold it. Both entry points (typing the name, and asking
+"do you have jollof?") now check the out-of-stock shelf and answer "finished for now",
+with up to three alternatives **from the same category first** — someone who wanted jollof
+wants another meal, not a drink.
+
+### Design principle the tests pin
+
+Every new answer is honest when the shop has nothing useful to say, and every one is
+terminal — it answers and stops rather than dragging the customer into checkout:
+
+- no cash value quoted for points when no redemption rate is configured
+- `POINTS` says the shop runs no programme rather than reporting "0 points"
+- `HOURS` says orders are taken any time rather than inventing a window
+- `LOCATION` says "we deliver, call this number" rather than apologising, because plenty
+  of these shops genuinely have no premises
+- `RECEIPT` refuses to produce one for an **unpaid** order — a receipt is proof of payment
+
+### Not done
+
+- Twi phrasings for the five new intents. The existing `TRACK` entry documents why:
+  guessing a phrase ships something wrong rather than merely missing. They need a native
+  speaker, and the `NEEDS_NATIVE_REVIEW` convention is already in place for when one is
+  available.
+- Nothing pushed or merged.
+
+
+---
+
+## 10. Phase 6 — shipped vs. planned
+
+Branch `phase-6/storefront`. **Storefront depth done; two items remain open.**
+
+### Shipped
+
+| Piece | Notes |
+|---|---|
+| Variants + add-ons in the public catalogue | Backend-complete but absent from this endpoint, so a web customer could not order a size or an extra that a WhatsApp customer of the same shop could. |
+| Variant/add-on pricing at checkout | Priced exactly as `order.routes.js` does. |
+| Pickup vs delivery choice | Pickup no longer means "leave the address blank and hope". |
+| Delivery-zone selector and pricing | **Fixed a real pricing bug** — see below. |
+
+### The zone pricing bug
+
+`delivery_zones` was being returned to the page and then **ignored when pricing**:
+checkout charged `delivery_fee_ghs` flat whenever an address was present. A shop with
+zones therefore quoted **two different prices for the same delivery** — per-zone on
+WhatsApp, flat on the web. Now matched by name against the shop's own list, and a shop
+that *has* zones requires one to be chosen rather than falling back to the flat fee, which
+would quietly undercharge for a far zone.
+
+### The rule this endpoint turns on
+
+`/storefront/:slug/checkout` is **public and unauthenticated**, so everything is
+re-resolved server-side from ids: a posted price is an offer, never a fact. A variant
+belonging to another product, an unknown add-on, or a zone the shop does not have are all
+refused rather than silently dropped — dropping an add-on would charge less than the shop
+expected to be paid, and the merchant would only find out at handover.
+
+### Verified in a browser, not just asserted
+
+Looking at the page caught a mobile layout bug static tests could not: `.field label` and
+`.field input { width: 100% }` from the shared stylesheet beat `.opts-row` on specificity,
+stacking each radio above its label at full width. Fixed by taking the fulfilment control
+out of `.field` and raising the selector specificity.
+
+Confirmed live: GH¢40 + GH¢10 (Large) + GH¢15 (extra chicken) = **GH¢65**, matching the
+server; East Legon GH¢20 vs Madina GH¢10 vs pickup free; and two differently-configured
+lines of the same product staying separate in the cart.
+
+### Not done
+
+- **Verified shop badge — BLOCKED on decision #3.** No schema, no criteria, no approver.
+  Not guessed at.
+- **Customer Account Lite** (phone + WhatsApp OTP → orders, receipts, reorder, points,
+  opt-out). Genuinely large; it is its own phase, not a tail on this one.
+- **PWA + full WCAG 2.1 AA audit.** The new controls are labelled (`role="dialog"`,
+  `aria-modal`, `aria-labelledby`, `aria-label` on the icon-only steppers) and have visible
+  focus, but a full audit and a service worker are separate work.
 - Nothing pushed or merged.

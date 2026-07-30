@@ -14,7 +14,7 @@ router.use(requireAuth('any'));
 
 const SETTINGS_COLUMNS =
   'id, name, owner_name, slug, industry, vat_rate_pct, welcome_message, support_phone, delivery_fee_ghs, delivery_zones, open_time, close_time, ' +
-  'logo_url, banner_url, refund_policy, refund_restocks_inventory, ' +
+  'logo_url, banner_url, refund_policy, refund_restocks_inventory, address, ' +
   'bot_language, payout_momo_number, payout_momo_network, ' +
   'cart_nudge_enabled, cart_nudge_delay_minutes, cart_nudge_max_per_cart, ' +
   'cart_nudge_message_template, cart_nudge_template_b, cart_nudge_coupon_code, ' +
@@ -62,6 +62,13 @@ router.patch('/settings', requirePermission('settings'), async (req, res) => {
       sets.push(`${col} = $${params.length}`);
     };
 
+    // Where the shop physically is, answered by the LOCATION command. Free
+    // text: a Ghanaian small-business address is usually a landmark
+    // description, and structuring it would lose the useful part.
+    if ('address' in body) {
+      const v = body.address == null ? null : String(body.address).trim().slice(0, 300);
+      set('address', v || null);
+    }
     if ('welcome_message' in body) {
       const v = body.welcome_message == null ? null : String(body.welcome_message).trim().slice(0, 900);
       set('welcome_message', v || null);

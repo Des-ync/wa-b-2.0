@@ -243,3 +243,14 @@ test('only the fields sent are written', async () => {
   assert.ok(!setClause.includes('delivery_fee_ghs'), 'an omitted setting must not be touched');
   assert.deepEqual(seen.params, ['biz-1', 'Akwaaba!']);
 });
+
+test('the shop address is settable and clearable', async () => {
+  const seen = captureSettings();
+
+  await patchSettings({ address: '  Blue kiosk opposite Melcom, Madina  ' });
+  assert.ok(seen.params.includes('Blue kiosk opposite Melcom, Madina'));
+
+  // Blank clears it, so the LOCATION reply falls back to "we deliver".
+  await patchSettings({ address: '   ' });
+  assert.ok(seen.params.includes(null));
+});
