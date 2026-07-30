@@ -3,6 +3,8 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../api/accounting_api.dart';
+import '../api/client.dart';
+import '../services/biometric_gate.dart';
 import '../state/session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
@@ -20,10 +22,12 @@ class _AccountingScreenState extends State<AccountingScreen> {
   Map<String, dynamic>? _balance;
   List<dynamic> _payouts = [];
   Map<String, dynamic>? _dailyReport;
+  Map<String, dynamic>? _profitLoss;
   int _unmatchedCount = 0;
   DateTime _reportDate = DateTime.now();
   String? _error;
   bool _loading = true;
+  bool _busy = false;
 
   @override
   void initState() {
@@ -32,6 +36,11 @@ class _AccountingScreenState extends State<AccountingScreen> {
   }
 
   String get _reportDateParam => DateFormat('yyyy-MM-dd').format(_reportDate);
+
+  String get _monthStartParam {
+    final now = DateTime.now();
+    return DateFormat('yyyy-MM-dd').format(DateTime(now.year, now.month, 1));
+  }
 
   Future<void> _load() async {
     setState(() {
@@ -46,6 +55,11 @@ class _AccountingScreenState extends State<AccountingScreen> {
         session.api.getPayouts(bid),
         session.api.getDailySales(bid, date: _reportDateParam),
         session.api.getReconciliation(bid),
+        // Month to date. A failure here must not blank the whole screen —
+        // the balance and settlement report are the load-bearing parts.
+        session.api
+            .getProfitLoss(bid, from: _monthStartParam)
+            .catchError((_) => <String, dynamic>{}),
       ]);
       if (!mounted) return;
       setState(() {
@@ -53,6 +67,7 @@ class _AccountingScreenState extends State<AccountingScreen> {
         _payouts = (results[1]['payouts'] as List?) ?? [];
         _dailyReport = results[2]['report'] as Map<String, dynamic>?;
         _unmatchedCount = (results[3]['unmatched_count'] as num?)?.toInt() ?? 0;
+        _profitLoss = results[4];
         _loading = false;
       });
     } catch (e) {
@@ -106,6 +121,10 @@ class _AccountingScreenState extends State<AccountingScreen> {
                               _sectionTitle('Daily settlement report'),
                               const SizedBox(height: 8),
                               _dailyReportCard(),
+                              const SizedBox(height: 24),
+                              _sectionTitle('Profit this month'),
+                              const SizedBox(height: 8),
+                              _profitCard(),
                               const SizedBox(height: 24),
                               _sectionTitle('Payout history'),
                               const SizedBox(height: 8),
@@ -170,9 +189,237 @@ class _AccountingScreenState extends State<AccountingScreen> {
               ),
             ],
           ),
+          if ((b['balance_ghs'] as num? ?? 0) > 0) ...[
+            const SizedBox(height: 18),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _busy ? null : _withdraw,
+                icon: const Icon(Icons.account_balance_wallet_rounded, size: 18),
+                label: Text(_busy ? 'Sending…' : 'Withdraw to MoMo'),
+                style: FilledButton.styleFrom(
+                    backgroundColor: WabColors.gold,
+                    foregroundColor: WabColors.ink),
+              ),
+            ),
+          ],
         ],
       ),
     );
+  }
+
+  /// Move the merchant's balance to their own payout MoMo number.
+  ///
+  /// The only action in the app that sends money, so it is gated twice: the
+  /// device's own biometric/passcode check, then an explicit confirmation
+  /// showing the exact amount and destination. A mis-tap here is not
+  /// recoverable from inside the app.
+  Future<void> _withdraw() async {
+    final session = context.read<Session>();
+    final bid = session.businessId;
+    if (bid == null) return;
+
+    final balance = (_balance?['balance_ghs'] as num?)?.toDouble() ?? 0;
+    if (balance <= 0) return;
+
+    final destination = session.business?['payout_momo_number']?.toString();
+    if (destination == null || destination.isEmpty) {
+      _toast('Add your payout MoMo number in Settings first.', error: true);
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Withdraw to MoMo?'),
+        content: Text(
+            '${ghs(balance)} will be sent to $destination.\n\n'
+            'This usually arrives within a few minutes.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Withdraw')),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    if (!await BiometricGate.authenticate('Confirm your withdrawal of ${ghs(balance)}')) {
+      if (mounted) _toast('Withdrawal cancelled.', error: true);
+      return;
+    }
+    if (!mounted) return;
+
+    setState(() => _busy = true);
+    try {
+      await session.api.requestAutoPayout(bid, amountGhs: balance);
+      if (!mounted) return;
+      _toast('Withdrawal sent — it will show as paid out once confirmed.');
+      await _load();
+    } catch (e) {
+      if (!mounted) return;
+      // A 409 here means the platform's Paystack account needs a human to
+      // approve the transfer — retrying will not help, so say so plainly.
+      final msg = e is ApiException && e.status == 409
+          ? 'This withdrawal needs manual approval. Contact support — your money is safe.'
+          : '$e';
+      _toast(msg, error: true);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  void _toast(String message, {bool error = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(message),
+      backgroundColor: error ? WabColors.danger : WabColors.accentInk,
+    ));
+  }
+
+  /// Revenue minus recorded expenses for the current month.
+  ///
+  /// Paired with the "Add expense" action rather than shown alone: a profit
+  /// figure that only ever counts revenue is worse than no figure, because it
+  /// reads as profit when it is really turnover. Making the expense entry
+  /// point sit next to the number is what keeps it honest.
+  Widget _profitCard() {
+    final pl = _profitLoss ?? {};
+    // The endpoint sends these as fixed-precision STRINGS (toFixed(2)), not
+    // numbers, so a plain `as num?` cast silently yields null and every
+    // figure renders as zero.
+    double money(String key) =>
+        double.tryParse('${pl[key] ?? ''}') ?? 0;
+    final revenue = money('revenue_ghs');
+    final expenses = money('expenses_ghs');
+    final net = revenue - expenses;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: WabColors.paper,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: WabColors.line),
+      ),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _row('Revenue', ghs(revenue)),
+          const SizedBox(height: 6),
+          _row('Expenses', ghs(expenses)),
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 10),
+            child: Divider(height: 1),
+          ),
+          _row(net >= 0 ? 'Profit' : 'Loss', ghs(net.abs()), bold: true),
+          if (expenses == 0) ...[
+            const SizedBox(height: 10),
+            const Text(
+                'No expenses recorded this month — this is turnover, not profit.',
+                style: TextStyle(
+                    color: WabColors.muted, fontSize: 12, height: 1.4)),
+          ],
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: _addExpense,
+              icon: const Icon(Icons.add_rounded, size: 18),
+              label: const Text('Add expense'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _addExpense() async {
+    final amountCtrl = TextEditingController();
+    final noteCtrl = TextEditingController();
+    String category = 'general';
+
+    final saved = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: WabColors.bg,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.fromLTRB(
+            24, 24, 24, MediaQuery.of(ctx).viewInsets.bottom + 24),
+        child: StatefulBuilder(
+          builder: (ctx, setSheet) => Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Add expense',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 16),
+              TextField(
+                controller: amountCtrl,
+                autofocus: true,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(
+                    labelText: 'Amount (GH¢)', prefixText: 'GH¢ '),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                initialValue: category,
+                decoration: const InputDecoration(labelText: 'Category'),
+                items: const [
+                  DropdownMenuItem(value: 'general', child: Text('General')),
+                  DropdownMenuItem(value: 'stock', child: Text('Stock / supplies')),
+                  DropdownMenuItem(value: 'transport', child: Text('Transport')),
+                  DropdownMenuItem(value: 'rent', child: Text('Rent')),
+                  DropdownMenuItem(value: 'utilities', child: Text('Utilities')),
+                  DropdownMenuItem(value: 'staff', child: Text('Staff')),
+                ],
+                onChanged: (v) => setSheet(() => category = v ?? 'general'),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: noteCtrl,
+                decoration: const InputDecoration(labelText: 'Note (optional)'),
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text('Save expense'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    if (saved != true || !mounted) return;
+    final amount = double.tryParse(amountCtrl.text.trim());
+    if (amount == null || amount <= 0) {
+      _toast('Enter an amount greater than zero.', error: true);
+      return;
+    }
+
+    final session = context.read<Session>();
+    final bid = session.businessId;
+    if (bid == null) return;
+    try {
+      await session.api.addExpense(bid,
+          amountGhs: amount,
+          category: category,
+          description: noteCtrl.text.trim());
+      if (!mounted) return;
+      _toast('Expense recorded.');
+      await _load();
+    } catch (e) {
+      if (mounted) _toast('$e', error: true);
+    }
   }
 
   Widget _balanceStat(String label, String value) => Column(

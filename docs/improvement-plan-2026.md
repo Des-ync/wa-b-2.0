@@ -1,7 +1,7 @@
 # KweliChat / WA-B — Improvement Plan 2026 (corrected, evidence-backed)
 
-**Status:** Phase 0 complete. **Phases 1 and 2 complete** (§5, §6). **Phase 3 in progress**
-(§7) — both shared layers landed, 2 of 25 route groups migrated. Phases 4–9 not started.
+**Status:** Phases 0–4 complete (§5–§8). Phase 3's envelope migration covers 22 of 26 route
+groups; the four left out are deliberate. Phases 5–9 not started.
 **Produced:** 2026-07-30, at commit `4d8d48b`.
 **Supersedes:** `improvement-prompt.md` as the execution plan. That file remains the
 statement of intent; this file is the version corrected against the actual code.
@@ -323,4 +323,58 @@ migrated route is invisible to `public/dashboard.html` and every deployed mobile
 - Typed Flutter models.
 - `webhook`/`payment`/`receipt`/`storefront` responses are third-party contracts read by
   Paystack, Meta and the static HTML in `public/` — flagged as probably-never-migrate.
+- Nothing pushed or merged.
+
+
+---
+
+## 8. Phase 4 — shipped vs. planned
+
+Branch `phase-4/finish`. **Complete**, but the plan's premise was wrong in one place and
+that is the more useful finding.
+
+### Shipped
+
+| Piece | Where | Tests |
+|---|---|---|
+| Task Center | `lib/state/task_center.dart`, `lib/widgets/task_center.dart` | 26 |
+| `needs_confirmation_count` aggregate | `src/routes/order.routes.js` | in `orderStatsToday` |
+| Shell tab-switch channel | `lib/state/shell_tabs.dart` | covered by the widget tests |
+| "Today's snapshot" framing | `lib/screens/home.dart` | — |
+| Withdraw to MoMo (biometric-gated) | `lib/screens/accounting.dart` | API layer, 5 |
+| Expense capture + month-to-date P&L | `lib/screens/accounting.dart` | API layer |
+
+### The plan was wrong about accounting
+
+§2 said accounting/payouts was "already shipped — verify coverage rather than
+rebuilding". Verifying showed **mobile called 4 of 11 accounting endpoints**. The gaps
+included the merchant actually *getting paid*: `POST /payouts/auto` moves money via
+Paystack Transfers and had no client at all, so the app could show a merchant their
+balance but gave them no way to withdraw it.
+
+Now wired, gated twice — the device biometric/passcode check **and** an explicit
+confirmation naming the amount and destination — because it is the only action in the app
+that sends money and a mis-tap is not recoverable from inside the app. A 409 (Paystack
+OTP-approval enabled) is surfaced as "needs manual approval, your money is safe" rather
+than a retry prompt, because retrying cannot help.
+
+Expenses and profit-and-loss came with it: a profit figure that only counts revenue reads
+as profit when it is really turnover, so the expense entry point sits next to the number,
+and the card says so explicitly when no expenses are recorded.
+
+### Design notes worth keeping
+
+- **The Task Center costs nothing on a cold load.** It is a pure function of data the home
+  screen already fetches. One extra round trip would be paid by a merchant on 3G every
+  morning.
+- **`needs_confirmation_count` is deliberately not scoped to today.** An order left
+  unconfirmed since yesterday is more urgent than one placed an hour ago.
+- **Nothing outstanding renders nothing** — no daily "all clear" card to scroll past.
+- **The P&L endpoint returns fixed-precision strings, not numbers.** A plain `as num?` cast
+  silently yields null and every figure renders as zero; caught before shipping.
+
+### Not done
+
+- `vat-export` and `inventory-valuation` remain web-only. Both are back-office exports, not
+  things a merchant does from a phone — a deliberate call, not an oversight.
 - Nothing pushed or merged.

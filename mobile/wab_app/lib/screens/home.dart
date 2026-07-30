@@ -272,6 +272,15 @@ class _HomeScreenState extends State<HomeScreen> {
                       ],
                       TaskCenter(tasks: tasks),
                       if (tasks.isNotEmpty) const SizedBox(height: 24),
+                      // Named so it reads as a distinct section from the Task
+                      // Center above it: that one is what to DO, this is how
+                      // today is going.
+                      const Text("Today's snapshot",
+                          style: TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w800,
+                              color: WabColors.ink)),
+                      const SizedBox(height: 12),
                       _statGrid(),
                       const SizedBox(height: 24),
                       const Text('Recent orders',

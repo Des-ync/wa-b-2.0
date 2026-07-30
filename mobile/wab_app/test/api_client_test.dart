@@ -245,6 +245,69 @@ void main() {
       expect(cap.last.url.queryParameters['business_id'], 'biz-1');
     });
 
+    test('requestAutoPayout is the one call that moves money', () async {
+      final cap = Capture();
+      await cap.client().requestAutoPayout('biz-1', amountGhs: 450.0);
+
+      expect(cap.last.method, 'POST');
+      // NOT /payouts, which only records a transfer already sent by hand.
+      expect(cap.last.url.path, '/api/accounting/payouts/auto');
+      expect(cap.lastBody, {'business_id': 'biz-1', 'amount_ghs': 450.0});
+    });
+
+    test('an OTP-blocked payout surfaces the 409 rather than looking pending',
+        () async {
+      final api = Capture().client(
+          body: {
+            'success': false,
+            'error': 'Transfer requires OTP approval on the Paystack dashboard'
+          },
+          status: 409);
+
+      await expectLater(
+        api.requestAutoPayout('biz-1', amountGhs: 10),
+        throwsA(isA<ApiException>().having((e) => e.status, 'status', 409)),
+      );
+    });
+
+    test('recordManualPayout omits blank optional fields', () async {
+      final cap = Capture();
+      await cap.client().recordManualPayout('biz-1',
+          amountGhs: 200, momoNumber: '', momoNetwork: 'mtn', note: 'cash out');
+
+      expect(cap.last.url.path, '/api/accounting/payouts');
+      expect(cap.lastBody,
+          {'business_id': 'biz-1', 'amount_ghs': 200.0, 'momo_network': 'mtn', 'note': 'cash out'});
+    });
+
+    test('addExpense defaults category and date server-side when omitted',
+        () async {
+      final cap = Capture();
+      await cap.client().addExpense('biz-1', amountGhs: 35.5);
+
+      expect(cap.last.url.path, '/api/accounting/expenses');
+      expect(cap.lastBody, {'business_id': 'biz-1', 'amount_ghs': 35.5});
+
+      await cap.client().addExpense('biz-1',
+          amountGhs: 35.5, category: 'transport', expenseDate: '2026-07-30');
+      expect(cap.lastBody['category'], 'transport');
+      expect(cap.lastBody['expense_date'], '2026-07-30');
+    });
+
+    test('profit-loss and expenses accept an optional date range', () async {
+      final cap = Capture();
+      await cap.client().getProfitLoss('biz-1');
+      expect(cap.last.url.queryParameters, {'business_id': 'biz-1'});
+
+      await cap.client().getProfitLoss('biz-1', from: '2026-07-01', to: '2026-07-31');
+      expect(cap.last.url.queryParameters['from'], '2026-07-01');
+      expect(cap.last.url.queryParameters['to'], '2026-07-31');
+
+      await cap.client().getExpenses('biz-1', from: '2026-07-01');
+      expect(cap.last.url.path, '/api/accounting/expenses');
+      expect(cap.last.url.queryParameters['from'], '2026-07-01');
+    });
+
     test('getDailySales omits the date to mean today', () async {
       final cap = Capture();
       await cap.client().getDailySales('biz-1');
