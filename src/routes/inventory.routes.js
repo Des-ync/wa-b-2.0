@@ -4,6 +4,7 @@ const { query, transaction } = require('../config/database');
 const { requireAuth, requirePermission } = require('../middleware/auth');
 const { tenantBlocksBusinessId, resolveBusinessId } = require('../middleware/tenantAccess');
 const { recordAudit } = require('../utils/auditLog');
+const respond = require('../utils/response');
 
 const router = express.Router();
 
@@ -21,18 +22,19 @@ router.use(requireAuth('any'));
 router.get('/suppliers', async (req, res) => {
   try {
     const businessId = resolveBusinessId(req);
-    if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!businessId) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
     if (tenantBlocksBusinessId(req, businessId)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const result = await query(
       `SELECT * FROM suppliers WHERE business_id = $1 ORDER BY name ASC`,
       [businessId]
     );
-    res.json({ success: true, suppliers: result.rows });
+    return respond.ok(req, res, { suppliers: result.rows });
   } catch (err) {
-    logger.error('GET /inventory/suppliers failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /inventory/suppliers', err);
   }
 });
 
@@ -40,13 +42,15 @@ router.get('/suppliers', async (req, res) => {
 router.post('/suppliers', requirePermission('products', 'write'), async (req, res) => {
   try {
     const businessId = resolveBusinessId(req);
-    if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!businessId) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
     if (tenantBlocksBusinessId(req, businessId)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const name = String(req.body?.name || '').trim();
     if (!name || name.length > 200) {
-      return res.status(400).json({ success: false, error: 'name is required (max 200 chars)' });
+      return respond.invalid(req, res, 'name is required (max 200 chars)', { name: 'is invalid' });
     }
     const result = await query(
       `INSERT INTO suppliers (business_id, name, contact_name, contact_phone, notes)
@@ -58,10 +62,9 @@ router.post('/suppliers', requirePermission('products', 'write'), async (req, re
         req.body?.notes ? String(req.body.notes).trim().slice(0, 1000) : null
       ]
     );
-    res.status(201).json({ success: true, supplier: result.rows[0] });
+    return respond.ok(req, res, { supplier: result.rows[0] }, { status: 201 });
   } catch (err) {
-    logger.error('POST /inventory/suppliers failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'POST /inventory/suppliers', err);
   }
 });
 
@@ -70,9 +73,9 @@ router.patch('/suppliers/:id', requirePermission('products', 'write'), async (re
   try {
     const existing = await query('SELECT business_id FROM suppliers WHERE id = $1', [req.params.id]);
     const supplier = existing.rows[0];
-    if (!supplier) return res.status(404).json({ success: false, error: 'Supplier not found' });
+    if (!supplier) return respond.notFound(req, res, 'Supplier');
     if (tenantBlocksBusinessId(req, supplier.business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const sets = [];
     const params = [];
@@ -80,23 +83,22 @@ router.patch('/suppliers/:id', requirePermission('products', 'write'), async (re
 
     if ('name' in (req.body || {})) {
       const v = String(req.body.name || '').trim();
-      if (!v || v.length > 200) return res.status(400).json({ success: false, error: 'name is required (max 200 chars)' });
+      if (!v || v.length > 200) return respond.invalid(req, res, 'name is required (max 200 chars)', { name: 'is invalid' });
       set('name', v);
     }
     if ('contact_name' in (req.body || {})) set('contact_name', req.body.contact_name ? String(req.body.contact_name).trim().slice(0, 200) : null);
     if ('contact_phone' in (req.body || {})) set('contact_phone', req.body.contact_phone ? String(req.body.contact_phone).trim().slice(0, 40) : null);
     if ('notes' in (req.body || {})) set('notes', req.body.notes ? String(req.body.notes).trim().slice(0, 1000) : null);
-    if (!sets.length) return res.status(400).json({ success: false, error: 'No recognized fields in body' });
+    if (!sets.length) return respond.invalid(req, res, 'No recognized fields in body');
 
     params.push(req.params.id);
     const result = await query(
       `UPDATE suppliers SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $${params.length} RETURNING *`,
       params
     );
-    res.json({ success: true, supplier: result.rows[0] });
+    return respond.ok(req, res, { supplier: result.rows[0] });
   } catch (err) {
-    logger.error('PATCH /inventory/suppliers/:id failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'PATCH /inventory/suppliers/:id', err);
   }
 });
 
@@ -110,15 +112,14 @@ router.delete('/suppliers/:id', requirePermission('products', 'write'), async (r
   try {
     const existing = await query('SELECT business_id FROM suppliers WHERE id = $1', [req.params.id]);
     const supplier = existing.rows[0];
-    if (!supplier) return res.status(404).json({ success: false, error: 'Supplier not found' });
+    if (!supplier) return respond.notFound(req, res, 'Supplier');
     if (tenantBlocksBusinessId(req, supplier.business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     await query('DELETE FROM suppliers WHERE id = $1', [req.params.id]);
-    res.json({ success: true });
+    return respond.ok(req, res, {});
   } catch (err) {
-    logger.error('DELETE /inventory/suppliers/:id failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'DELETE /inventory/suppliers/:id', err);
   }
 });
 
@@ -137,21 +138,23 @@ router.delete('/suppliers/:id', requirePermission('products', 'write'), async (r
 router.post('/restock', requirePermission('products', 'write'), async (req, res) => {
   try {
     const businessId = resolveBusinessId(req);
-    if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!businessId) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
     if (tenantBlocksBusinessId(req, businessId)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const productId = req.body?.product_id;
     const quantity = Number(req.body?.quantity);
-    if (!productId) return res.status(400).json({ success: false, error: 'product_id is required' });
+    if (!productId) return respond.invalid(req, res, 'product_id is required', { product_id: 'is invalid' });
     if (!Number.isInteger(quantity) || quantity <= 0) {
-      return res.status(400).json({ success: false, error: 'quantity must be a positive integer' });
+      return respond.invalid(req, res, 'quantity must be a positive integer', { quantity: 'is invalid' });
     }
     let unitCost = null;
     if (req.body?.unit_cost_ghs !== undefined && req.body.unit_cost_ghs !== null && req.body.unit_cost_ghs !== '') {
       unitCost = Number(req.body.unit_cost_ghs);
       if (!Number.isFinite(unitCost) || unitCost < 0) {
-        return res.status(400).json({ success: false, error: 'unit_cost_ghs must be a non-negative number' });
+        return respond.invalid(req, res, 'unit_cost_ghs must be a non-negative number', { unit_cost_ghs: 'is invalid' });
       }
     }
     const supplierId = req.body?.supplier_id || null;
@@ -193,9 +196,9 @@ router.post('/restock', requirePermission('products', 'write'), async (req, res)
       return { product: updateRes.rows[0] };
     });
 
-    if (result.notFound) return res.status(404).json({ success: false, error: 'Product not found' });
+    if (result.notFound) return respond.notFound(req, res, 'Product');
     if (result.untracked) {
-      return res.status(400).json({ success: false, error: 'This product has untracked/unlimited stock (stock_qty is empty) — set a stock quantity on the product before restocking' });
+      return respond.invalid(req, res, 'This product has untracked/unlimited stock (stock_qty is empty) — set a stock quantity on the product before restocking');
     }
     recordAudit({
       actorType: req.auth?.scope === 'admin' ? 'admin' : 'merchant',
@@ -203,10 +206,9 @@ router.post('/restock', requirePermission('products', 'write'), async (req, res)
       businessId, action: 'inventory.restock',
       detail: { product_id: productId, quantity, unit_cost_ghs: unitCost }
     });
-    res.json({ success: true, product: result.product });
+    return respond.ok(req, res, { product: result.product });
   } catch (err) {
-    logger.error('POST /inventory/restock failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'POST /inventory/restock', err);
   }
 });
 
@@ -219,15 +221,17 @@ router.post('/restock', requirePermission('products', 'write'), async (req, res)
 router.post('/adjust', requirePermission('products', 'write'), async (req, res) => {
   try {
     const businessId = resolveBusinessId(req);
-    if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!businessId) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
     if (tenantBlocksBusinessId(req, businessId)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const productId = req.body?.product_id;
     const newQuantity = Number(req.body?.new_quantity);
-    if (!productId) return res.status(400).json({ success: false, error: 'product_id is required' });
+    if (!productId) return respond.invalid(req, res, 'product_id is required', { product_id: 'is invalid' });
     if (!Number.isInteger(newQuantity) || newQuantity < 0) {
-      return res.status(400).json({ success: false, error: 'new_quantity must be a non-negative integer' });
+      return respond.invalid(req, res, 'new_quantity must be a non-negative integer', { new_quantity: 'is invalid' });
     }
     const note = req.body?.note ? String(req.body.note).trim().slice(0, 500) : null;
 
@@ -257,9 +261,9 @@ router.post('/adjust', requirePermission('products', 'write'), async (req, res) 
       return { product: updateRes.rows[0] };
     });
 
-    if (result.notFound) return res.status(404).json({ success: false, error: 'Product not found' });
+    if (result.notFound) return respond.notFound(req, res, 'Product');
     if (result.untracked) {
-      return res.status(400).json({ success: false, error: 'This product has untracked/unlimited stock (stock_qty is empty)' });
+      return respond.invalid(req, res, 'This product has untracked/unlimited stock (stock_qty is empty)');
     }
     recordAudit({
       actorType: req.auth?.scope === 'admin' ? 'admin' : 'merchant',
@@ -267,10 +271,9 @@ router.post('/adjust', requirePermission('products', 'write'), async (req, res) 
       businessId, action: 'inventory.adjust',
       detail: { product_id: productId, new_quantity: newQuantity }
     });
-    res.json({ success: true, product: result.product });
+    return respond.ok(req, res, { product: result.product });
   } catch (err) {
-    logger.error('POST /inventory/adjust failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'POST /inventory/adjust', err);
   }
 });
 
@@ -282,9 +285,11 @@ router.post('/adjust', requirePermission('products', 'write'), async (req, res) 
 router.get('/movements', async (req, res) => {
   try {
     const businessId = resolveBusinessId(req);
-    if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!businessId) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
     if (tenantBlocksBusinessId(req, businessId)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 50));
     const params = [businessId];
@@ -304,10 +309,9 @@ router.get('/movements', async (req, res) => {
         LIMIT $${params.length}`,
       params
     );
-    res.json({ success: true, movements: result.rows });
+    return respond.ok(req, res, { movements: result.rows });
   } catch (err) {
-    logger.error('GET /inventory/movements failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /inventory/movements', err);
   }
 });
 
@@ -320,9 +324,11 @@ router.get('/movements', async (req, res) => {
 router.get('/reorder-suggestions', async (req, res) => {
   try {
     const businessId = resolveBusinessId(req);
-    if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!businessId) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
     if (tenantBlocksBusinessId(req, businessId)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const result = await query(
       `SELECT p.id, p.name, p.category, p.stock_qty, p.low_stock_threshold,
@@ -335,10 +341,9 @@ router.get('/reorder-suggestions', async (req, res) => {
         ORDER BY p.stock_qty ASC`,
       [businessId]
     );
-    res.json({ success: true, suggestions: result.rows });
+    return respond.ok(req, res, { suggestions: result.rows });
   } catch (err) {
-    logger.error('GET /inventory/reorder-suggestions failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /inventory/reorder-suggestions', err);
   }
 });
 
@@ -350,9 +355,11 @@ router.get('/reorder-suggestions', async (req, res) => {
 router.get('/margins', async (req, res) => {
   try {
     const businessId = resolveBusinessId(req);
-    if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!businessId) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
     if (tenantBlocksBusinessId(req, businessId)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const result = await query(
       `SELECT id, name, category, price_ghs, cost_price_ghs,
@@ -364,10 +371,9 @@ router.get('/margins', async (req, res) => {
         ORDER BY name ASC`,
       [businessId]
     );
-    res.json({ success: true, products: result.rows });
+    return respond.ok(req, res, { products: result.rows });
   } catch (err) {
-    logger.error('GET /inventory/margins failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /inventory/margins', err);
   }
 });
 

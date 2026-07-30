@@ -3,6 +3,7 @@ const logger = require('../utils/logger');
 const { query } = require('../config/database');
 const { requireAuth, requirePermission } = require('../middleware/auth');
 const { resolveBusinessId } = require('../middleware/tenantAccess');
+const respond = require('../utils/response');
 
 const router = express.Router();
 
@@ -22,7 +23,9 @@ router.use(requireAuth('any'));
 router.get('/', requirePermission('staff', 'read'), async (req, res) => {
   try {
     const businessId = resolveBusinessId(req);
-    if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!businessId) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 200);
     const r = await query(
       `SELECT al.id, al.actor_type, al.actor_id, al.action, al.detail, al.created_at,
@@ -34,10 +37,9 @@ router.get('/', requirePermission('staff', 'read'), async (req, res) => {
         LIMIT $2`,
       [businessId, limit]
     );
-    res.json({ success: true, entries: r.rows });
+    return respond.ok(req, res, { entries: r.rows });
   } catch (err) {
-    logger.error('GET /audit-log failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /audit-log', err);
   }
 });
 

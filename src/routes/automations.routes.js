@@ -4,6 +4,7 @@ const { query } = require('../config/database');
 const { requireAuth, requirePermission } = require('../middleware/auth');
 const { resolveBusinessId } = require('../middleware/tenantAccess');
 const { AUTOMATION_DEFS, resolveConfig } = require('../services/automations');
+const respond = require('../utils/response');
 
 const router = express.Router();
 
@@ -23,7 +24,9 @@ router.get('/', async (req, res) => {
     // business.routes.js and onboarding.routes.js use, no separate
     // tenantBlocksBusinessId check needed on top of it.
     const businessId = resolveBusinessId(req);
-    if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!businessId) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
     const result = await query('SELECT * FROM automations WHERE business_id = $1', [businessId]);
     const byKey = new Map(result.rows.map(r => [r.key, r]));
 
@@ -37,10 +40,9 @@ router.get('/', async (req, res) => {
         config: resolveConfig(key, row?.config)
       };
     });
-    res.json({ success: true, automations });
+    return respond.ok(req, res, { automations });
   } catch (err) {
-    logger.error('GET /automations failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /automations', err);
   }
 });
 
@@ -54,17 +56,19 @@ router.patch('/:key', requirePermission('broadcasts', 'write'), async (req, res)
   try {
     const key = req.params.key;
     if (!AUTOMATION_DEFS[key]) {
-      return res.status(400).json({ success: false, error: `Unknown automation key: ${key}` });
+      return respond.invalid(req, res, `Unknown automation key: ${key}`, { key: 'is not a known automation' });
     }
     const businessId = resolveBusinessId(req);
-    if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!businessId) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
 
     const body = req.body || {};
     const enabled = body.enabled !== undefined ? !!body.enabled : undefined;
     let configPatch = null;
     if (body.config !== undefined) {
       if (typeof body.config !== 'object' || body.config === null || Array.isArray(body.config)) {
-        return res.status(400).json({ success: false, error: 'config must be an object' });
+        return respond.invalid(req, res, 'config must be an object', { config: 'must be an object' });
       }
       configPatch = body.config;
     }
@@ -86,8 +90,7 @@ router.patch('/:key', requirePermission('broadcasts', 'write'), async (req, res)
       [businessId, key, enabled, JSON.stringify(mergedConfig)]
     );
     const row = result.rows[0];
-    res.json({
-      success: true,
+    return respond.ok(req, res, {
       automation: {
         key,
         label: AUTOMATION_DEFS[key].label,
@@ -97,8 +100,7 @@ router.patch('/:key', requirePermission('broadcasts', 'write'), async (req, res)
       }
     });
   } catch (err) {
-    logger.error('PATCH /automations/:key failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'PATCH /automations/:key', err);
   }
 });
 

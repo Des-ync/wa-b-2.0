@@ -4,6 +4,10 @@ const { query } = require('../config/database');
 const { requireAuth, requirePermission } = require('../middleware/auth');
 const { tenantBlocksBusinessId } = require('../middleware/tenantAccess');
 const { toCsv, parseCsv } = require('../utils/csv');
+const respond = require('../utils/response');
+const {
+  validate, msg, str, strExact, num, int, bool, pattern
+} = require('../utils/validate');
 const orderService = require('../services/order.service');
 const automations = require('../services/automations');
 
@@ -15,150 +19,96 @@ const TIME_RE = /^([01]?\d|2[0-3]):[0-5]\d$/;
 // pinned to their own business_id.
 router.use(requireAuth('any'));
 
-function validateProductBody(body, { partial = false } = {}) {
-  const errors = [];
-  const out = {};
+/**
+ * Field schemas, replacing three hand-rolled validators that each walked the
+ * body by hand and pushed prose onto an array. Same coercion, same messages —
+ * the messages are pinned with msg() precisely because merchants read them —
+ * but errors now come back keyed by field, so a client can mark the offending
+ * input instead of parsing a semicolon-joined sentence.
+ *
+ * validateX() below keeps the { errors, out } shape the routes already expect,
+ * so this is a swap of the validator internals only. `fields` is exposed
+ * alongside for routes that want per-field reporting.
+ */
+const PRODUCT_SCHEMA = {
+  name: msg(strExact({ required: true, max: 200 }), 'name is required (max 200 chars)'),
+  price_ghs: msg(num({ required: true, min: 0, round: 2 }), 'price_ghs must be a non-negative number'),
+  description: str({ max: 1000, nullable: true, trim: false }),
+  category: str({ max: 60, lower: true }),
+  in_stock: bool(),
+  image_url: str({ max: 500, nullable: true, trim: false }),
+  stock_qty: msg(int({ min: 0, nullable: true }),
+    'stock_qty must be a non-negative integer, or empty for untracked'),
+  low_stock_threshold: msg(int({ min: 0 }), 'low_stock_threshold must be a non-negative integer'),
+  cost_price_ghs: msg(num({ min: 0, round: 2, nullable: true }),
+    'cost_price_ghs must be a non-negative number, or empty to clear it'),
+  supplier_id: str({ nullable: true }),
+  featured: bool(),
+  hidden: bool(),
+  sort_order: msg(int(), 'sort_order must be an integer'),
+  available_from: msg(pattern(TIME_RE, { nullable: true }), 'available_from must be HH:MM (24h)'),
+  available_to: msg(pattern(TIME_RE, { nullable: true }), 'available_to must be HH:MM (24h)')
+};
 
-  if (!partial || body.name !== undefined) {
-    const name = String(body.name || '').trim();
-    if (!name || name.length > 200) errors.push('name is required (max 200 chars)');
-    out.name = name;
+/**
+ * Cross-field rules the per-field schema cannot express, preserved exactly
+ * as the original validator had them:
+ *   - a merchant setting real stock clearly means in/out of stock, so keep
+ *     the two in sync rather than making them flip a second switch...
+ *   - ...unless they said otherwise explicitly, which always wins;
+ *   - and stock back above zero means "restocked", so clear the low-stock
+ *     nudge flag and let a future dip notify again.
+ */
+function refineProduct(value, source) {
+  if (value.stock_qty != null) {
+    if (source.in_stock === undefined) value.in_stock = value.stock_qty > 0;
+    if (value.stock_qty > 0) value.low_stock_notified = false;
   }
-  if (!partial || body.price_ghs !== undefined) {
-    const price = Number(body.price_ghs);
-    if (!Number.isFinite(price) || price < 0) errors.push('price_ghs must be a non-negative number');
-    out.price_ghs = Math.round(price * 100) / 100;
-  }
-  if (body.description !== undefined) {
-    out.description = body.description == null ? null : String(body.description).slice(0, 1000);
-  }
-  if (body.category !== undefined) {
-    out.category = String(body.category || 'general').trim().toLowerCase().slice(0, 60) || 'general';
-  }
-  if (body.in_stock !== undefined) {
-    out.in_stock = !!body.in_stock;
-  }
-  if (body.image_url !== undefined) {
-    out.image_url = body.image_url == null ? null : String(body.image_url).slice(0, 500);
-  }
-  if (body.stock_qty !== undefined) {
-    if (body.stock_qty === null || body.stock_qty === '') {
-      out.stock_qty = null; // untracked/unlimited
-    } else {
-      const qty = Number(body.stock_qty);
-      if (!Number.isInteger(qty) || qty < 0) errors.push('stock_qty must be a non-negative integer, or empty for untracked');
-      out.stock_qty = qty;
-      // A merchant setting real stock back above zero clearly means "in stock"
-      // and clears any stale low-stock nudge state — keep both in sync here
-      // rather than making the merchant flip in_stock separately.
-      if (qty > 0 && body.in_stock === undefined) out.in_stock = true;
-      if (qty === 0 && body.in_stock === undefined) out.in_stock = false;
-      // A merchant manually setting stock back up means they've restocked —
-      // clear the nudge flag so a future dip notifies again.
-      if (qty > 0) out.low_stock_notified = false;
-    }
-  }
-  if (body.low_stock_threshold !== undefined) {
-    const n = Number(body.low_stock_threshold);
-    if (!Number.isInteger(n) || n < 0) errors.push('low_stock_threshold must be a non-negative integer');
-    out.low_stock_threshold = n;
-  }
-  if (body.cost_price_ghs !== undefined) {
-    if (body.cost_price_ghs === null || body.cost_price_ghs === '') {
-      out.cost_price_ghs = null;
-    } else {
-      const n = Number(body.cost_price_ghs);
-      if (!Number.isFinite(n) || n < 0) errors.push('cost_price_ghs must be a non-negative number, or empty to clear it');
-      out.cost_price_ghs = Math.round(n * 100) / 100;
-    }
-  }
-  if (body.supplier_id !== undefined) {
-    out.supplier_id = body.supplier_id || null;
-  }
-  if (body.featured !== undefined) out.featured = !!body.featured;
-  if (body.hidden !== undefined) out.hidden = !!body.hidden;
-  if (body.sort_order !== undefined) {
-    const n = Number(body.sort_order);
-    if (!Number.isInteger(n)) errors.push('sort_order must be an integer');
-    out.sort_order = n;
-  }
-  for (const col of ['available_from', 'available_to']) {
-    if (body[col] !== undefined) {
-      const v = String(body[col] || '').trim();
-      if (v && !TIME_RE.test(v)) errors.push(`${col} must be HH:MM (24h)`);
-      out[col] = v || null;
-    }
-  }
-  return { errors, out };
 }
 
-function validateVariantBody(body, { partial = false } = {}) {
-  const errors = [];
-  const out = {};
-  if (!partial || body.name !== undefined) {
-    const name = String(body.name || '').trim();
-    if (!name || name.length > 100) errors.push('name is required (max 100 chars)');
-    out.name = name;
-  }
-  if (body.price_delta_ghs !== undefined) {
-    const n = Number(body.price_delta_ghs);
-    if (!Number.isFinite(n)) errors.push('price_delta_ghs must be a number');
-    out.price_delta_ghs = Math.round(n * 100) / 100;
-  }
-  if (body.stock_qty !== undefined) {
-    if (body.stock_qty === null || body.stock_qty === '') {
-      out.stock_qty = null;
-    } else {
-      const n = Number(body.stock_qty);
-      if (!Number.isInteger(n) || n < 0) errors.push('stock_qty must be a non-negative integer, or empty for untracked');
-      out.stock_qty = n;
-    }
-  }
-  if (body.sort_order !== undefined) {
-    const n = Number(body.sort_order);
-    if (!Number.isInteger(n)) errors.push('sort_order must be an integer');
-    out.sort_order = n;
-  }
-  return { errors, out };
+const VARIANT_SCHEMA = {
+  name: msg(strExact({ required: true, max: 100 }), 'name is required (max 100 chars)'),
+  price_delta_ghs: msg(num({ round: 2 }), 'price_delta_ghs must be a number'),
+  stock_qty: msg(int({ min: 0, nullable: true }),
+    'stock_qty must be a non-negative integer, or empty for untracked'),
+  sort_order: msg(int(), 'sort_order must be an integer')
+};
+
+const ADDON_SCHEMA = {
+  name: msg(strExact({ required: true, max: 100 }), 'name is required (max 100 chars)'),
+  // An add-on IS a price, unlike a variant's delta, so it cannot go negative.
+  price_ghs: msg(num({ required: true, min: 0, round: 2 }), 'price_ghs must be a non-negative number'),
+  sort_order: msg(int(), 'sort_order must be an integer')
+};
+
+/** Adapts validate() to the { errors, out } shape the routes already use. */
+function runSchema(schema, body, { partial = false, refine } = {}) {
+  const { value, fields } = validate(body, schema, { partial, refine });
+  return { errors: Object.values(fields), out: value, fields };
 }
 
-function validateAddonBody(body, { partial = false } = {}) {
-  const errors = [];
-  const out = {};
-  if (!partial || body.name !== undefined) {
-    const name = String(body.name || '').trim();
-    if (!name || name.length > 100) errors.push('name is required (max 100 chars)');
-    out.name = name;
-  }
-  if (!partial || body.price_ghs !== undefined) {
-    const n = Number(body.price_ghs);
-    if (!Number.isFinite(n) || n < 0) errors.push('price_ghs must be a non-negative number');
-    out.price_ghs = Math.round(n * 100) / 100;
-  }
-  if (body.sort_order !== undefined) {
-    const n = Number(body.sort_order);
-    if (!Number.isInteger(n)) errors.push('sort_order must be an integer');
-    out.sort_order = n;
-  }
-  return { errors, out };
-}
+const validateProductBody = (body, opts = {}) =>
+  runSchema(PRODUCT_SCHEMA, body, { ...opts, refine: refineProduct });
+const validateVariantBody = (body, opts = {}) => runSchema(VARIANT_SCHEMA, body, opts);
+const validateAddonBody = (body, opts = {}) => runSchema(ADDON_SCHEMA, body, opts);
 
 /** GET /api/products?business_id= — list a business's products. */
 router.get('/', async (req, res) => {
   try {
     const businessId = req.query.business_id || req.auth?.businessId;
-    if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!businessId) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
     if (tenantBlocksBusinessId(req, businessId)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const result = await query(
       `SELECT * FROM products WHERE business_id = $1 ORDER BY sort_order ASC, category ASC, name ASC`,
       [businessId]
     );
-    res.json({ success: true, products: result.rows });
+    return respond.ok(req, res, { products: result.rows });
   } catch (err) {
-    logger.error('GET /products failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /products', err);
   }
 });
 
@@ -170,12 +120,14 @@ router.get('/', async (req, res) => {
 router.post('/', requirePermission('products', 'write'), async (req, res) => {
   try {
     const businessId = req.body?.business_id || req.auth?.businessId;
-    if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
-    if (tenantBlocksBusinessId(req, businessId)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+    if (!businessId) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
     }
-    const { errors, out } = validateProductBody(req.body || {});
-    if (errors.length) return res.status(400).json({ success: false, error: errors.join('; ') });
+    if (tenantBlocksBusinessId(req, businessId)) {
+      return respond.forbidden(req, res);
+    }
+    const { errors, out, fields } = validateProductBody(req.body || {});
+    if (errors.length) return respond.invalid(req, res, errors.join('; '), fields);
 
     const result = await query(
       `INSERT INTO products (
@@ -191,10 +143,9 @@ router.post('/', requirePermission('products', 'write'), async (req, res) => {
         out.cost_price_ghs ?? null, out.supplier_id ?? null
       ]
     );
-    res.status(201).json({ success: true, product: result.rows[0] });
+    return respond.ok(req, res, { product: result.rows[0] }, { status: 201 });
   } catch (err) {
-    logger.error('POST /products failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'POST /products', err);
   }
 });
 
@@ -203,15 +154,15 @@ router.patch('/:id', requirePermission('products', 'write'), async (req, res) =>
   try {
     const existing = await query('SELECT * FROM products WHERE id = $1', [req.params.id]);
     const product = existing.rows[0];
-    if (!product) return res.status(404).json({ success: false, error: 'Product not found' });
+    if (!product) return respond.notFound(req, res, 'Product');
     if (tenantBlocksBusinessId(req, product.business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
 
-    const { errors, out } = validateProductBody(req.body || {}, { partial: true });
-    if (errors.length) return res.status(400).json({ success: false, error: errors.join('; ') });
+    const { errors, out, fields } = validateProductBody(req.body || {}, { partial: true });
+    if (errors.length) return respond.invalid(req, res, errors.join('; '), fields);
     if (!Object.keys(out).length) {
-      return res.status(400).json({ success: false, error: 'No fields to update' });
+      return respond.invalid(req, res, 'No fields to update');
     }
 
     const sets = [];
@@ -232,10 +183,9 @@ router.patch('/:id', requirePermission('products', 'write'), async (req, res) =>
         logger.warn('notifyProductRestocked failed for product %s: %s', updated.id, err.message));
     }
 
-    res.json({ success: true, product: updated });
+    return respond.ok(req, res, { product: updated });
   } catch (err) {
-    logger.error('PATCH /products/:id failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'PATCH /products/:id', err);
   }
 });
 
@@ -244,15 +194,14 @@ router.delete('/:id', requirePermission('products', 'write'), async (req, res) =
   try {
     const existing = await query('SELECT * FROM products WHERE id = $1', [req.params.id]);
     const product = existing.rows[0];
-    if (!product) return res.status(404).json({ success: false, error: 'Product not found' });
+    if (!product) return respond.notFound(req, res, 'Product');
     if (tenantBlocksBusinessId(req, product.business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     await query('DELETE FROM products WHERE id = $1', [req.params.id]);
-    res.json({ success: true });
+    return respond.ok(req, res, {});
   } catch (err) {
-    logger.error('DELETE /products/:id failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'DELETE /products/:id', err);
   }
 });
 
@@ -264,15 +213,14 @@ router.get('/:id/frequently-bought-with', async (req, res) => {
   try {
     const productRes = await query('SELECT id, business_id, name FROM products WHERE id = $1', [req.params.id]);
     const product = productRes.rows[0];
-    if (!product) return res.status(404).json({ success: false, error: 'Product not found' });
+    if (!product) return respond.notFound(req, res, 'Product');
     if (tenantBlocksBusinessId(req, product.business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const rows = await orderService.getFrequentlyBoughtWith(product.business_id, [product.name], { limit: 5 });
-    res.json({ success: true, suggestions: rows });
+    return respond.ok(req, res, { suggestions: rows });
   } catch (err) {
-    logger.error('GET /products/:id/frequently-bought-with failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /products/:id/frequently-bought-with', err);
   }
 });
 
@@ -283,18 +231,17 @@ router.get('/:id/variants', async (req, res) => {
   try {
     const productRes = await query('SELECT id, business_id FROM products WHERE id = $1', [req.params.id]);
     const product = productRes.rows[0];
-    if (!product) return res.status(404).json({ success: false, error: 'Product not found' });
+    if (!product) return respond.notFound(req, res, 'Product');
     if (tenantBlocksBusinessId(req, product.business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const result = await query(
       'SELECT * FROM product_variants WHERE product_id = $1 ORDER BY sort_order ASC, name ASC',
       [req.params.id]
     );
-    res.json({ success: true, variants: result.rows });
+    return respond.ok(req, res, { variants: result.rows });
   } catch (err) {
-    logger.error('GET /products/:id/variants failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /products/:id/variants', err);
   }
 });
 
@@ -303,22 +250,21 @@ router.post('/:id/variants', requirePermission('products', 'write'), async (req,
   try {
     const productRes = await query('SELECT id, business_id FROM products WHERE id = $1', [req.params.id]);
     const product = productRes.rows[0];
-    if (!product) return res.status(404).json({ success: false, error: 'Product not found' });
+    if (!product) return respond.notFound(req, res, 'Product');
     if (tenantBlocksBusinessId(req, product.business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
-    const { errors, out } = validateVariantBody(req.body || {});
-    if (errors.length) return res.status(400).json({ success: false, error: errors.join('; ') });
+    const { errors, out, fields } = validateVariantBody(req.body || {});
+    if (errors.length) return respond.invalid(req, res, errors.join('; '), fields);
 
     const result = await query(
       `INSERT INTO product_variants (product_id, business_id, name, price_delta_ghs, stock_qty, sort_order)
        VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
       [product.id, product.business_id, out.name, out.price_delta_ghs ?? 0, out.stock_qty ?? null, out.sort_order ?? 0]
     );
-    res.status(201).json({ success: true, variant: result.rows[0] });
+    return respond.ok(req, res, { variant: result.rows[0] }, { status: 201 });
   } catch (err) {
-    logger.error('POST /products/:id/variants failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'POST /products/:id/variants', err);
   }
 });
 
@@ -327,13 +273,13 @@ router.patch('/variants/:variantId', requirePermission('products', 'write'), asy
   try {
     const existing = await query('SELECT * FROM product_variants WHERE id = $1', [req.params.variantId]);
     const variant = existing.rows[0];
-    if (!variant) return res.status(404).json({ success: false, error: 'Variant not found' });
+    if (!variant) return respond.notFound(req, res, 'Variant');
     if (tenantBlocksBusinessId(req, variant.business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
-    const { errors, out } = validateVariantBody(req.body || {}, { partial: true });
-    if (errors.length) return res.status(400).json({ success: false, error: errors.join('; ') });
-    if (!Object.keys(out).length) return res.status(400).json({ success: false, error: 'No fields to update' });
+    const { errors, out, fields } = validateVariantBody(req.body || {}, { partial: true });
+    if (errors.length) return respond.invalid(req, res, errors.join('; '), fields);
+    if (!Object.keys(out).length) return respond.invalid(req, res, 'No fields to update');
 
     const sets = [];
     const params = [req.params.variantId];
@@ -342,10 +288,9 @@ router.patch('/variants/:variantId', requirePermission('products', 'write'), asy
       sets.push(`${col} = $${params.length}`);
     }
     const result = await query(`UPDATE product_variants SET ${sets.join(', ')} WHERE id = $1 RETURNING *`, params);
-    res.json({ success: true, variant: result.rows[0] });
+    return respond.ok(req, res, { variant: result.rows[0] });
   } catch (err) {
-    logger.error('PATCH /products/variants/:variantId failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'PATCH /products/variants/:variantId', err);
   }
 });
 
@@ -354,15 +299,14 @@ router.delete('/variants/:variantId', requirePermission('products', 'write'), as
   try {
     const existing = await query('SELECT * FROM product_variants WHERE id = $1', [req.params.variantId]);
     const variant = existing.rows[0];
-    if (!variant) return res.status(404).json({ success: false, error: 'Variant not found' });
+    if (!variant) return respond.notFound(req, res, 'Variant');
     if (tenantBlocksBusinessId(req, variant.business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     await query('DELETE FROM product_variants WHERE id = $1', [req.params.variantId]);
-    res.json({ success: true });
+    return respond.ok(req, res, {});
   } catch (err) {
-    logger.error('DELETE /products/variants/:variantId failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'DELETE /products/variants/:variantId', err);
   }
 });
 
@@ -373,18 +317,17 @@ router.get('/:id/addons', async (req, res) => {
   try {
     const productRes = await query('SELECT id, business_id FROM products WHERE id = $1', [req.params.id]);
     const product = productRes.rows[0];
-    if (!product) return res.status(404).json({ success: false, error: 'Product not found' });
+    if (!product) return respond.notFound(req, res, 'Product');
     if (tenantBlocksBusinessId(req, product.business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const result = await query(
       'SELECT * FROM product_addons WHERE product_id = $1 ORDER BY sort_order ASC, name ASC',
       [req.params.id]
     );
-    res.json({ success: true, addons: result.rows });
+    return respond.ok(req, res, { addons: result.rows });
   } catch (err) {
-    logger.error('GET /products/:id/addons failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /products/:id/addons', err);
   }
 });
 
@@ -393,22 +336,21 @@ router.post('/:id/addons', requirePermission('products', 'write'), async (req, r
   try {
     const productRes = await query('SELECT id, business_id FROM products WHERE id = $1', [req.params.id]);
     const product = productRes.rows[0];
-    if (!product) return res.status(404).json({ success: false, error: 'Product not found' });
+    if (!product) return respond.notFound(req, res, 'Product');
     if (tenantBlocksBusinessId(req, product.business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
-    const { errors, out } = validateAddonBody(req.body || {});
-    if (errors.length) return res.status(400).json({ success: false, error: errors.join('; ') });
+    const { errors, out, fields } = validateAddonBody(req.body || {});
+    if (errors.length) return respond.invalid(req, res, errors.join('; '), fields);
 
     const result = await query(
       `INSERT INTO product_addons (product_id, business_id, name, price_ghs, sort_order)
        VALUES ($1,$2,$3,$4,$5) RETURNING *`,
       [product.id, product.business_id, out.name, out.price_ghs, out.sort_order ?? 0]
     );
-    res.status(201).json({ success: true, addon: result.rows[0] });
+    return respond.ok(req, res, { addon: result.rows[0] }, { status: 201 });
   } catch (err) {
-    logger.error('POST /products/:id/addons failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'POST /products/:id/addons', err);
   }
 });
 
@@ -417,13 +359,13 @@ router.patch('/addons/:addonId', requirePermission('products', 'write'), async (
   try {
     const existing = await query('SELECT * FROM product_addons WHERE id = $1', [req.params.addonId]);
     const addon = existing.rows[0];
-    if (!addon) return res.status(404).json({ success: false, error: 'Add-on not found' });
+    if (!addon) return respond.notFound(req, res, 'Add-on');
     if (tenantBlocksBusinessId(req, addon.business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
-    const { errors, out } = validateAddonBody(req.body || {}, { partial: true });
-    if (errors.length) return res.status(400).json({ success: false, error: errors.join('; ') });
-    if (!Object.keys(out).length) return res.status(400).json({ success: false, error: 'No fields to update' });
+    const { errors, out, fields } = validateAddonBody(req.body || {}, { partial: true });
+    if (errors.length) return respond.invalid(req, res, errors.join('; '), fields);
+    if (!Object.keys(out).length) return respond.invalid(req, res, 'No fields to update');
 
     const sets = [];
     const params = [req.params.addonId];
@@ -432,10 +374,9 @@ router.patch('/addons/:addonId', requirePermission('products', 'write'), async (
       sets.push(`${col} = $${params.length}`);
     }
     const result = await query(`UPDATE product_addons SET ${sets.join(', ')} WHERE id = $1 RETURNING *`, params);
-    res.json({ success: true, addon: result.rows[0] });
+    return respond.ok(req, res, { addon: result.rows[0] });
   } catch (err) {
-    logger.error('PATCH /products/addons/:addonId failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'PATCH /products/addons/:addonId', err);
   }
 });
 
@@ -444,15 +385,14 @@ router.delete('/addons/:addonId', requirePermission('products', 'write'), async 
   try {
     const existing = await query('SELECT * FROM product_addons WHERE id = $1', [req.params.addonId]);
     const addon = existing.rows[0];
-    if (!addon) return res.status(404).json({ success: false, error: 'Add-on not found' });
+    if (!addon) return respond.notFound(req, res, 'Add-on');
     if (tenantBlocksBusinessId(req, addon.business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     await query('DELETE FROM product_addons WHERE id = $1', [req.params.addonId]);
-    res.json({ success: true });
+    return respond.ok(req, res, {});
   } catch (err) {
-    logger.error('DELETE /products/addons/:addonId failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'DELETE /products/addons/:addonId', err);
   }
 });
 
@@ -467,9 +407,11 @@ const CSV_COLUMNS = [
 router.get('/export', async (req, res) => {
   try {
     const businessId = req.query.business_id || req.auth?.businessId;
-    if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!businessId) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
     if (tenantBlocksBusinessId(req, businessId)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const result = await query(
       `SELECT * FROM products WHERE business_id = $1 ORDER BY sort_order ASC, category ASC, name ASC`,
@@ -481,8 +423,7 @@ router.get('/export', async (req, res) => {
     res.setHeader('Content-Disposition', `attachment; filename="products-${new Date().toISOString().slice(0, 10)}.csv"`);
     res.send(csv);
   } catch (err) {
-    logger.error('GET /products/export failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /products/export', err);
   }
 });
 
@@ -495,22 +436,24 @@ router.get('/export', async (req, res) => {
 router.post('/import', requirePermission('products', 'write'), async (req, res) => {
   try {
     const businessId = req.body?.business_id || req.auth?.businessId;
-    if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!businessId) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
     if (tenantBlocksBusinessId(req, businessId)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const csvText = req.body?.csv;
     if (!csvText || typeof csvText !== 'string') {
-      return res.status(400).json({ success: false, error: 'csv (string) is required' });
+      return respond.invalid(req, res, 'csv (string) is required', { csv: 'is invalid' });
     }
 
     const rows = parseCsv(csvText);
-    if (!rows.length) return res.status(400).json({ success: false, error: 'CSV has no rows' });
+    if (!rows.length) return respond.invalid(req, res, 'CSV has no rows');
 
     const header = rows[0].map(h => String(h || '').trim().toLowerCase());
     const dataRows = rows.slice(1);
     if (dataRows.length > 2000) {
-      return res.status(400).json({ success: false, error: 'Import is limited to 2000 rows per file' });
+      return respond.invalid(req, res, 'Import is limited to 2000 rows per file');
     }
 
     let created = 0;
@@ -544,7 +487,7 @@ router.post('/import', requirePermission('products', 'write'), async (req, res) 
       };
 
       const isUpdate = record.id && ownedIds.has(record.id);
-      const { errors, out } = validateProductBody(bodyForValidation, { partial: isUpdate });
+      const { errors, out, fields } = validateProductBody(bodyForValidation, { partial: isUpdate });
       if (errors.length) {
         skipped.push({ row: i + 2, name: record.name || '(no name)', errors });
         continue;
@@ -579,10 +522,11 @@ router.post('/import', requirePermission('products', 'write'), async (req, res) 
       }
     }
 
-    res.json({ success: true, created, updated, skipped_count: skipped.length, skipped });
+    return respond.ok(req, res,
+      { created, updated, skipped },
+      { meta: { skipped_count: skipped.length } });
   } catch (err) {
-    logger.error('POST /products/import failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'POST /products/import', err);
   }
 });
 
@@ -592,45 +536,39 @@ router.post('/import', requirePermission('products', 'write'), async (req, res) 
 // at the bundle's own price_ghs — components are display-only metadata, not
 // separately inventory-tracked (see migrate.js note on product_bundles).
 
-function validateBundleBody(body, { partial = false } = {}) {
-  const errors = [];
-  const out = {};
-  if (!partial || body.name !== undefined) {
-    const name = String(body.name || '').trim();
-    if (!name || name.length > 200) errors.push('name is required (max 200 chars)');
-    out.name = name;
+const BUNDLE_SCHEMA = {
+  name: msg(strExact({ required: true, max: 200 }), 'name is required (max 200 chars)'),
+  price_ghs: msg(num({ required: true, min: 0, round: 2 }), 'price_ghs must be a non-negative number'),
+  description: str({ max: 1000, nullable: true, trim: false }),
+  image_url: str({ max: 500, nullable: true, trim: false }),
+  active: bool(),
+  sort_order: msg(int(), 'sort_order must be an integer')
+};
+
+/**
+ * Bundle items are the one field a per-field schema cannot express: each
+ * entry needs a product_id, and a missing/zero/fractional quantity silently
+ * becomes 1 rather than failing — a merchant listing three products without
+ * quantities means one of each. Kept as a refine step so that coercion stays
+ * next to the rule that explains it.
+ */
+function refineBundle(value, source) {
+  if (source.items === undefined) return null;
+  if (!Array.isArray(source.items) || !source.items.length) {
+    return { items: 'items must be a non-empty array of { product_id, quantity? }' };
   }
-  if (!partial || body.price_ghs !== undefined) {
-    const price = Number(body.price_ghs);
-    if (!Number.isFinite(price) || price < 0) errors.push('price_ghs must be a non-negative number');
-    out.price_ghs = Math.round(price * 100) / 100;
+  if (source.items.some(it => !it || !it.product_id)) {
+    return { items: 'every item needs a product_id' };
   }
-  if (body.description !== undefined) {
-    out.description = body.description == null ? null : String(body.description).slice(0, 1000);
-  }
-  if (body.image_url !== undefined) {
-    out.image_url = body.image_url == null ? null : String(body.image_url).slice(0, 500);
-  }
-  if (body.active !== undefined) out.active = !!body.active;
-  if (body.sort_order !== undefined) {
-    const n = Number(body.sort_order);
-    if (!Number.isInteger(n)) errors.push('sort_order must be an integer');
-    out.sort_order = n;
-  }
-  if (body.items !== undefined) {
-    if (!Array.isArray(body.items) || !body.items.length) {
-      errors.push('items must be a non-empty array of { product_id, quantity? }');
-    } else if (body.items.some(it => !it || !it.product_id)) {
-      errors.push('every item needs a product_id');
-    } else {
-      out.items = body.items.map(it => ({
-        product_id: it.product_id,
-        quantity: Number.isInteger(Number(it.quantity)) && Number(it.quantity) > 0 ? Number(it.quantity) : 1
-      }));
-    }
-  }
-  return { errors, out };
+  value.items = source.items.map(it => ({
+    product_id: it.product_id,
+    quantity: Number.isInteger(Number(it.quantity)) && Number(it.quantity) > 0 ? Number(it.quantity) : 1
+  }));
+  return null;
 }
+
+const validateBundleBody = (body, opts = {}) =>
+  runSchema(BUNDLE_SCHEMA, body, { ...opts, refine: refineBundle });
 
 async function loadBundle(id) {
   const bundleRes = await query('SELECT * FROM product_bundles WHERE id = $1', [id]);
@@ -665,9 +603,11 @@ async function replaceBundleItems(bundleId, businessId, items) {
 router.get('/bundles', async (req, res) => {
   try {
     const businessId = req.query.business_id || req.auth?.businessId;
-    if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!businessId) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
     if (tenantBlocksBusinessId(req, businessId)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const bundlesRes = await query(
       'SELECT * FROM product_bundles WHERE business_id = $1 ORDER BY sort_order ASC, name ASC',
@@ -685,10 +625,9 @@ router.get('/bundles', async (req, res) => {
       byBundle.get(it.bundle_id).push(it);
     }
     const bundles = bundlesRes.rows.map(b => ({ ...b, items: byBundle.get(b.id) || [] }));
-    res.json({ success: true, bundles });
+    return respond.ok(req, res, { bundles });
   } catch (err) {
-    logger.error('GET /products/bundles failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /products/bundles', err);
   }
 });
 
@@ -696,13 +635,20 @@ router.get('/bundles', async (req, res) => {
 router.post('/bundles', requirePermission('products', 'write'), async (req, res) => {
   try {
     const businessId = req.body?.business_id || req.auth?.businessId;
-    if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
-    if (tenantBlocksBusinessId(req, businessId)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+    if (!businessId) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
     }
-    const { errors, out } = validateBundleBody(req.body || {});
-    if (!out.items) errors.push('items is required');
-    if (errors.length) return res.status(400).json({ success: false, error: errors.join('; ') });
+    if (tenantBlocksBusinessId(req, businessId)) {
+      return respond.forbidden(req, res);
+    }
+    const { errors, out, fields } = validateBundleBody(req.body || {});
+    // A bundle with no items is not a bundle. Only enforced on create —
+    // a PATCH that omits items leaves the existing ones alone.
+    if (!out.items) {
+      errors.push('items is required');
+      fields.items = fields.items || 'is required';
+    }
+    if (errors.length) return respond.invalid(req, res, errors.join('; '), fields);
 
     const inserted = await query(
       `INSERT INTO product_bundles (business_id, name, description, price_ghs, image_url, active, sort_order)
@@ -711,10 +657,13 @@ router.post('/bundles', requirePermission('products', 'write'), async (req, res)
     );
     const bundle = inserted.rows[0];
     await replaceBundleItems(bundle.id, businessId, out.items);
-    res.status(201).json({ success: true, bundle: await loadBundle(bundle.id) });
+    return respond.ok(req, res, { bundle: await loadBundle(bundle.id) }, { status: 201 });
   } catch (err) {
-    logger.error('POST /products/bundles failed: %s', err.message);
-    res.status(err.status || 500).json({ success: false, error: err.status ? err.message : 'Internal server error' });
+    if (err.status) {
+      logger.warn('POST /products/bundles rejected: %s', err.message);
+      return respond.fail(req, res, { code: respond.CODES.VALIDATION, message: err.message, status: err.status });
+    }
+    return respond.failInternal(req, res, logger, 'POST /products/bundles', err);
   }
 });
 
@@ -723,12 +672,12 @@ router.patch('/bundles/:id', requirePermission('products', 'write'), async (req,
   try {
     const existing = await query('SELECT * FROM product_bundles WHERE id = $1', [req.params.id]);
     const bundle = existing.rows[0];
-    if (!bundle) return res.status(404).json({ success: false, error: 'Bundle not found' });
+    if (!bundle) return respond.notFound(req, res, 'Bundle');
     if (tenantBlocksBusinessId(req, bundle.business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
-    const { errors, out } = validateBundleBody(req.body || {}, { partial: true });
-    if (errors.length) return res.status(400).json({ success: false, error: errors.join('; ') });
+    const { errors, out, fields } = validateBundleBody(req.body || {}, { partial: true });
+    if (errors.length) return respond.invalid(req, res, errors.join('; '), fields);
 
     const { items, ...columns } = out;
     if (Object.keys(columns).length) {
@@ -741,10 +690,13 @@ router.patch('/bundles/:id', requirePermission('products', 'write'), async (req,
       await query(`UPDATE product_bundles SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $1`, params);
     }
     if (items) await replaceBundleItems(bundle.id, bundle.business_id, items);
-    res.json({ success: true, bundle: await loadBundle(bundle.id) });
+    return respond.ok(req, res, { bundle: await loadBundle(bundle.id) });
   } catch (err) {
-    logger.error('PATCH /products/bundles/:id failed: %s', err.message);
-    res.status(err.status || 500).json({ success: false, error: err.status ? err.message : 'Internal server error' });
+    if (err.status) {
+      logger.warn('PATCH /products/bundles/:id rejected: %s', err.message);
+      return respond.fail(req, res, { code: respond.CODES.VALIDATION, message: err.message, status: err.status });
+    }
+    return respond.failInternal(req, res, logger, 'PATCH /products/bundles/:id', err);
   }
 });
 
@@ -753,15 +705,14 @@ router.delete('/bundles/:id', requirePermission('products', 'write'), async (req
   try {
     const existing = await query('SELECT * FROM product_bundles WHERE id = $1', [req.params.id]);
     const bundle = existing.rows[0];
-    if (!bundle) return res.status(404).json({ success: false, error: 'Bundle not found' });
+    if (!bundle) return respond.notFound(req, res, 'Bundle');
     if (tenantBlocksBusinessId(req, bundle.business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     await query('DELETE FROM product_bundles WHERE id = $1', [req.params.id]);
-    res.json({ success: true });
+    return respond.ok(req, res, {});
   } catch (err) {
-    logger.error('DELETE /products/bundles/:id failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'DELETE /products/bundles/:id', err);
   }
 });
 

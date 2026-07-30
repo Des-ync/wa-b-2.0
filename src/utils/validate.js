@@ -33,6 +33,27 @@
 
 const MISSING = Symbol('missing');
 
+/**
+ * Replace whatever reason a rule produces with `message`.
+ *
+ *   msg(num({ required: true, min: 0 }), 'must be a non-negative number')
+ *
+ * Exists so a route being migrated onto this layer keeps emitting the EXACT
+ * prose it emitted before. Those strings are rendered to merchants today —
+ * silently rewording them mid-migration would be a user-visible change
+ * smuggled in under a refactor. A combinator rather than a `message` option
+ * on every factory, because it composes with all of them for free.
+ */
+function msg(rule, message) {
+  return {
+    ...rule,
+    parse(raw) {
+      const r = rule.parse(raw);
+      return r.error ? { error: message } : r;
+    }
+  };
+}
+
 function str({ required = false, max, min = 0, lower = false, trim = true, nullable = false, default: dflt } = {}) {
   return {
     required,
@@ -210,7 +231,14 @@ function validate(body, schema, { partial = false, refine } = {}) {
 
     if (!present) {
       if (partial) continue;               // PATCH: absent means "leave alone"
-      if (rule.required) { fields[name] = 'is required'; continue; }
+      if (rule.required) {
+        // Through the rule rather than a hardcoded string, so a msg()
+        // override applies to a MISSING field as well as a malformed one.
+        // Anything else would give the same field two different voices
+        // depending on whether the client omitted it or sent it blank.
+        fields[name] = rule.parse(null).error || 'is required';
+        continue;
+      }
       if (rule.default !== undefined) { value[name] = rule.default; }
       continue;
     }
@@ -243,6 +271,6 @@ function summarize(fields) {
 }
 
 module.exports = {
-  validate, summarize,
+  validate, summarize, msg,
   str, strExact, num, int, bool, oneOf, pattern, arrayOf
 };

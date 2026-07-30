@@ -44,8 +44,8 @@ migration. A request header costs nothing and lets each client move when it is r
 |---|---|---|---|
 | `category.routes.js` | ✅ | `test/category.routes.test.js` (19) | First group; the worked example. |
 | `notification.routes.js` | ✅ | `test/notification.routes.test.js` (10) | `unread_count` moved to `meta`. |
-| `order.routes.js` | ☐ | `orderMarkPaid`, `orderStatsToday`, `orderDelivery`, `orderPaymentReminder`, `order.paidPathParity` | Largest and highest-traffic; migrate after a smaller group has proven the pattern under load. |
-| `product.routes.js` | ☐ | — | Its hand-rolled validators are what `validate.js` was generalized from; migrating it should delete them. |
+| `order.routes.js` | ✅ | `orderMarkPaid`, `orderStatsToday`, `orderDelivery`, `orderPaymentReminder`, `order.paidPathParity` | Largest and highest-traffic; migrate after a smaller group has proven the pattern under load. |
+| `product.routes.js` | ✅ | `test/product.routes.test.js` (31) | All four hand-rolled validators replaced by schemas. Tests written FIRST, against the old behaviour. |
 | `customer.routes.js` | ☐ | — | |
 | `business.routes.js` | ☐ | `businessSettings.routes.test.js` | |
 | `analytics.routes.js` | ☐ | `analytics.deliverySla.test.js` | Read-only; low risk. |
@@ -53,10 +53,10 @@ migration. A request header costs nothing and lets each client move when it is r
 | `broadcast.routes.js` | ☐ | — | |
 | `promo.routes.js` | ☐ | `promoEligibility.test.js` | |
 | `storefront.routes.js` | ☐ | `storefront.routes.test.js` | **Public** — the storefront HTML reads it directly. Check `public/storefront.html` before migrating. |
-| `inventory.routes.js` | ☐ | `inventory.routes.test.js` | |
+| `inventory.routes.js` | ✅ | `inventory.routes.test.js` | |
 | `accounting.routes.js` | ☐ | `accounting.routes.test.js` | |
-| `automations.routes.js` | ☐ | `automations.routes.test.js` | |
-| `auditlog.routes.js` | ☐ | `auditlog.routes.test.js` | |
+| `automations.routes.js` | ✅ | `automations.routes.test.js` | |
+| `auditlog.routes.js` | ✅ | `auditlog.routes.test.js` | |
 | `onboarding.routes.js` | ☐ | `onboarding.test.js` | Consumed by both dashboard and mobile checklist. |
 | `admin.routes.js` | ☐ | `admin.routes.critical.test.js` | Largest file (1,110 lines). |
 | `auth.routes.js` | ☐ | `auth.routes.test.js` | ⚠️ See the `link_required` warning below. |
@@ -68,7 +68,7 @@ migration. A request header costs nothing and lets each client move when it is r
 | `device.routes.js` | ☐ | — | |
 | `search.routes.js` | ☐ | — | |
 
-**2 of 25 migrated.**
+**7 of 25 migrated.**
 
 ---
 
@@ -88,6 +88,8 @@ migration. A request header costs nothing and lets each client move when it is r
 4. Write tests that assert **both** envelopes. The legacy assertions are the contract —
    they describe the behaviour before you touched it.
 5. `grep -c "res.status\|res.json" src/routes/<group>.js` should return 0.
+6. **Run the group's tests.** `node -e "require('./src/routes/x.js')"` is NOT enough — see
+   the hanging-route pitfall below.
 
 ### Pitfalls hit so far
 
@@ -103,6 +105,23 @@ migration. A request header costs nothing and lets each client move when it is r
   for exactly this reason. When migrating `auth.routes.js`, the v2 `error.code` must be
   `link_required` — not `validation_error` with the detail buried in a message — or
   Clerk-linked sign-in silently breaks.
+- **⚠️ A missed `require` makes routes HANG, not 500.** Adding `respond.*` calls without
+  the import means every request throws a ReferenceError inside its `try`, the `catch`
+  calls `respond.failInternal` and throws again, and Express never responds. The module
+  still loads cleanly, so `node -e "require(...)"` reports it fine. This happened while
+  migrating `inventory.routes.js`. Two tests in `test/response.test.js` now guard it
+  statically: one asserts every file using `respond.*` imports it, the other refuses a
+  half-migrated file. Always run the group's own tests.
+- **⚠️ An unbound local hangs a route the same way a missing import does.** The product
+  migration left `respond.invalid(req, res, msg, fields)` next to a destructure that still
+  read `const { errors, out }`. ReferenceError in the `try`, another from the `catch`,
+  request never completes — and the suite stayed green because nothing exercised that
+  branch. A third guard in `test/response.test.js` now scans for exactly that shape.
+  **A route group with no tests must get characterisation tests BEFORE it is migrated**,
+  as `product.routes.js` did.
+- **`msg()` preserves legacy error prose.** Merchants read these strings; a schema's
+  generated wording ("must be 0 or more") is not the same product as
+  "price_ghs must be a non-negative number". Wrap the rule.
 - **Public/gateway-facing routes are a third-party contract.** Webhook and payment
   responses are read by Paystack/Meta, and receipt/storefront responses by the static HTML
   in `public/`. Do not change those shapes to suit our own tidiness.

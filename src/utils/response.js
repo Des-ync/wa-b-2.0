@@ -84,21 +84,29 @@ function ok(req, res, payload = {}, { meta, status = 200 } = {}) {
  * Failure. `fields` is a { fieldName: reason } map for validation errors and
  * is omitted entirely in legacy mode, which never had it.
  *
+ * `extra` is a compatibility escape hatch, not a feature to reach for. A few
+ * pre-existing errors carry structured data beside the message — the
+ * mark-paid amount mismatch returns `expected` and `received` at the top
+ * level — and the legacy envelope has to keep emitting them exactly there.
+ * In v2 they land under `error.details` instead. Prefer `fields` for anything
+ * new.
+ *
  * The legacy `error` string is the message — not the code — because that is
  * what existing clients render directly to the user (see the mobile client's
  * `json['message'] ?? json['error']`). Sending a code there would put
  * "validation_error" in front of a merchant.
  */
-function fail(req, res, { code = CODES.INTERNAL, message, fields, status } = {}) {
+function fail(req, res, { code = CODES.INTERNAL, message, fields, status, extra } = {}) {
   const httpStatus = status || STATUS_FOR_CODE[code] || 400;
   const text = message || 'Something went wrong';
 
   if (wantsV2(req)) {
     const error = { code, message: text };
     if (fields && Object.keys(fields).length) error.fields = fields;
+    if (extra && Object.keys(extra).length) error.details = extra;
     return res.status(httpStatus).json({ success: false, error });
   }
-  return res.status(httpStatus).json({ success: false, error: text });
+  return res.status(httpStatus).json({ success: false, error: text, ...(extra || {}) });
 }
 
 /**

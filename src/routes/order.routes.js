@@ -7,6 +7,7 @@ const { normalizeGhanaPhone, detectNetwork, isWithinBusinessHours } = require('.
 const { requireAuth, requirePermission } = require('../middleware/auth');
 const { tenantBlocksBusinessId } = require('../middleware/tenantAccess');
 const { csvCell } = require('../utils/csv');
+const respond = require('../utils/response');
 
 const router = express.Router();
 
@@ -21,15 +22,16 @@ router.use(requireAuth('any'));
 router.get('/', async (req, res) => {
   try {
     const { business_id, status, limit } = req.query;
-    if (!business_id) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!business_id) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
     if (tenantBlocksBusinessId(req, business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const orders = await orderService.listOrdersForBusiness(business_id, { status, limit });
-    res.json({ success: true, orders });
+    return respond.ok(req, res, { orders });
   } catch (err) {
-    logger.error('GET /orders failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /orders', err);
   }
 });
 
@@ -40,9 +42,11 @@ router.get('/', async (req, res) => {
 router.get('/stats/today', async (req, res) => {
   try {
     const { business_id } = req.query;
-    if (!business_id) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!business_id) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
     if (tenantBlocksBusinessId(req, business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const r = await query(
       `WITH today AS (
@@ -99,10 +103,9 @@ router.get('/stats/today', async (req, res) => {
     s.payment_success_rate = s.payment_attempts > 0
       ? Math.round((s.paid_count / s.payment_attempts) * 100)
       : null;
-    res.json({ success: true, stats: s });
+    return respond.ok(req, res, { stats: s });
   } catch (err) {
-    logger.error('GET /orders/stats/today failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /orders/stats/today', err);
   }
 });
 
@@ -112,9 +115,11 @@ router.get('/stats/today', async (req, res) => {
 router.get('/export', async (req, res) => {
   try {
     const { business_id, status } = req.query;
-    if (!business_id) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!business_id) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
     if (tenantBlocksBusinessId(req, business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const params = [business_id];
     let sql =
@@ -149,8 +154,7 @@ router.get('/export', async (req, res) => {
       `attachment; filename="orders-${new Date().toISOString().slice(0, 10)}.csv"`);
     res.send(lines.join('\r\n'));
   } catch (err) {
-    logger.error('GET /orders/export failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /orders/export', err);
   }
 });
 
@@ -171,18 +175,20 @@ router.post('/', requirePermission('orders', 'write'), async (req, res) => {
       notes
     } = req.body || {};
 
-    if (!business_id) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!business_id) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
     if (tenantBlocksBusinessId(req, business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const wa = normalizeGhanaPhone(customer_whatsapp);
-    if (!wa) return res.status(400).json({ success: false, error: 'Invalid customer_whatsapp' });
+    if (!wa) return respond.invalid(req, res, 'Invalid customer_whatsapp');
     if (!Array.isArray(items) || !items.length) {
-      return res.status(400).json({ success: false, error: 'items must be a non-empty array' });
+      return respond.invalid(req, res, 'items must be a non-empty array', { items: 'is invalid' });
     }
     const fee = Number(delivery_fee);
     if (!Number.isFinite(fee) || fee < 0) {
-      return res.status(400).json({ success: false, error: 'delivery_fee must be a non-negative number' });
+      return respond.invalid(req, res, 'delivery_fee must be a non-negative number', { delivery_fee: 'is invalid' });
     }
 
     const customer = await orderService.getOrCreateCustomer({
@@ -216,29 +222,29 @@ router.post('/', requirePermission('orders', 'write'), async (req, res) => {
     for (const item of wanted) {
       const p = byId.get(String(item.product_id));
       if (!p) {
-        return res.status(400).json({ success: false, error: `Product not found: ${item.product_id}` });
+        return respond.invalid(req, res, `Product not found: ${item.product_id}`);
       }
       // Don't let customers order items that aren't actually purchasable right
       // now — hidden from the menu, out of stock, or outside their daily
       // availability window. Otherwise the merchant just has to cancel later.
       if (p.hidden) {
-        return res.status(400).json({ success: false, error: `Product not available: ${p.name}` });
+        return respond.invalid(req, res, `Product not available: ${p.name}`);
       }
       if (p.in_stock === false) {
-        return res.status(400).json({ success: false, error: `Out of stock: ${p.name}` });
+        return respond.invalid(req, res, `Out of stock: ${p.name}`);
       }
       if (!isWithinBusinessHours(p.available_from, p.available_to)) {
-        return res.status(400).json({ success: false, error: `${p.name} is not available at this time` });
+        return respond.invalid(req, res, `${p.name} is not available at this time`);
       }
       const variant = item.variant_id ? variantById.get(String(item.variant_id)) : null;
       if (item.variant_id && (!variant || variant.product_id !== p.id)) {
-        return res.status(400).json({ success: false, error: `Variant not found: ${item.variant_id}` });
+        return respond.invalid(req, res, `Variant not found: ${item.variant_id}`);
       }
       const addons = (Array.isArray(item.addon_ids) ? item.addon_ids : [])
         .map(id => addonById.get(String(id)))
         .filter(a => a && a.product_id === p.id);
       if (Array.isArray(item.addon_ids) && addons.length !== item.addon_ids.length) {
-        return res.status(400).json({ success: false, error: `One or more add-ons not found for product ${p.id}` });
+        return respond.invalid(req, res, `One or more add-ons not found for product ${p.id}`);
       }
 
       const addonsTotal = addons.reduce((sum, a) => sum + Number(a.price_ghs), 0);
@@ -270,10 +276,9 @@ router.post('/', requirePermission('orders', 'write'), async (req, res) => {
 
     notification.notifyOrderReceived({ order, business: { id: business_id }, customer });
 
-    res.status(201).json({ success: true, order, customer });
+    return respond.ok(req, res, { order, customer }, { status: 201 });
   } catch (err) {
-    logger.error('POST /orders failed: %s', err.message, { stack: err.stack });
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'POST /orders', err);
   }
 });
 
@@ -289,17 +294,16 @@ router.patch('/:id/status', requirePermission('orders', 'write'), async (req, re
   try {
     const { status, reason } = req.body || {};
     if (!PATCHABLE_STATUSES.includes(status)) {
-      return res.status(400).json({
-        success: false,
-        error: status === 'paid'
+      return respond.invalid(req, res,
+        status === 'paid'
           ? "Use POST /:id/mark-paid to record a payment — it's the only path that updates payment_status, stock, and loyalty together."
-          : `status must be one of: ${PATCHABLE_STATUSES.join(', ')}`
-      });
+          : `status must be one of: ${PATCHABLE_STATUSES.join(', ')}`,
+        { status: status === 'paid' ? 'cannot be set here' : 'is not a valid status' });
     }
     const existing = await orderService.getOrderById(req.params.id);
-    if (!existing) return res.status(404).json({ success: false, error: 'Order not found' });
+    if (!existing) return respond.notFound(req, res, 'Order');
     if (tenantBlocksBusinessId(req, existing.business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const order = await orderService.updateOrderStatus(req.params.id, status, { reason });
 
@@ -310,10 +314,9 @@ router.patch('/:id/status', requirePermission('orders', 'write'), async (req, re
         .catch(err => logger.warn('order status notify failed: %s', err.message));
     }
 
-    res.json({ success: true, order });
+    return respond.ok(req, res, { order });
   } catch (err) {
-    logger.error('PATCH /orders/:id/status failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'PATCH /orders/:id/status', err);
   }
 });
 
@@ -332,9 +335,9 @@ router.patch('/:id/status', requirePermission('orders', 'write'), async (req, re
 router.post('/:id/mark-paid', requirePermission('orders', 'write'), async (req, res) => {
   try {
     const existing = await orderService.getOrderById(req.params.id);
-    if (!existing) return res.status(404).json({ success: false, error: 'Order not found' });
+    if (!existing) return respond.notFound(req, res, 'Order');
     if (tenantBlocksBusinessId(req, existing.business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
 
     const method = ['cash', 'momo', 'card'].includes(req.body?.method) ? req.body.method : 'cash';
@@ -342,7 +345,7 @@ router.post('/:id/mark-paid', requirePermission('orders', 'write'), async (req, 
     if (req.body?.amount_ghs !== undefined) {
       amount = Number(req.body.amount_ghs);
       if (!Number.isFinite(amount) || amount <= 0) {
-        return res.status(400).json({ success: false, error: 'amount_ghs must be a positive number' });
+        return respond.invalid(req, res, 'amount_ghs must be a positive number', { amount_ghs: 'is invalid' });
       }
     }
 
@@ -352,19 +355,20 @@ router.post('/:id/mark-paid', requirePermission('orders', 'write'), async (req, 
       amount,
       changedBy: 'merchant'
     });
-    if (!result) return res.status(404).json({ success: false, error: 'Order not found' });
+    if (!result) return respond.notFound(req, res, 'Order');
     if (result.refunded) {
-      return res.status(409).json({ success: false, error: 'Order was already refunded' });
+      return respond.fail(req, res, { code: respond.CODES.CONFLICT, message: 'Order was already refunded' });
     }
     if (result.alreadyPaid) {
-      return res.json({ success: true, order: result.order, alreadyPaid: true });
+      return respond.ok(req, res, { order: result.order }, { meta: { alreadyPaid: true } });
     }
     if (result.mismatch) {
-      return res.status(400).json({
-        success: false,
-        error: `Amount does not match the order total (expected GH₵${result.expected}, got GH₵${result.received})`,
-        expected: result.expected,
-        received: result.received
+      return respond.fail(req, res, {
+        code: respond.CODES.VALIDATION,
+        message: `Amount does not match the order total (expected GH₵${result.expected}, got GH₵${result.received})`,
+        fields: { amount_ghs: 'does not match the order total' },
+        // Kept flat in legacy exactly where they were; see respond.fail.
+        extra: { expected: result.expected, received: result.received }
       });
     }
 
@@ -378,10 +382,9 @@ router.post('/:id/mark-paid', requirePermission('orders', 'write'), async (req, 
     notification.notifyOrderPaid({ order, business: bizRes.rows[0], customer: customerRes.rows[0] })
       .catch(err => logger.warn('mark-paid notify failed for order %s: %s', order.id, err.message));
 
-    res.json({ success: true, order, lowStock: result.lowStock || [] });
+    return respond.ok(req, res, { order }, { meta: { lowStock: result.lowStock || [] } });
   } catch (err) {
-    logger.error('POST /orders/:id/mark-paid failed: %s', err.message, { stack: err.stack });
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'POST /orders/:id/mark-paid', err);
   }
 });
 
@@ -396,22 +399,22 @@ router.post('/:id/mark-paid', requirePermission('orders', 'write'), async (req, 
 router.post('/:id/payment-reminder', requirePermission('orders', 'write'), async (req, res) => {
   try {
     const existing = await orderService.getOrderById(req.params.id);
-    if (!existing) return res.status(404).json({ success: false, error: 'Order not found' });
+    if (!existing) return respond.notFound(req, res, 'Order');
     if (tenantBlocksBusinessId(req, existing.business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     if (existing.payment_status === 'paid') {
-      return res.status(409).json({ success: false, error: 'Order is already paid' });
+      return respond.fail(req, res, { code: respond.CODES.CONFLICT, message: 'Order is already paid' });
     }
     if (existing.payment_status === 'refunded') {
-      return res.status(409).json({ success: false, error: 'Order was refunded' });
+      return respond.fail(req, res, { code: respond.CODES.CONFLICT, message: 'Order was refunded' });
     }
 
     const lastSentAt = await orderService.getLastPaymentReminderAt(existing.id);
     if (lastSentAt && Date.now() - new Date(lastSentAt).getTime() < 10 * 60 * 1000) {
-      return res.status(429).json({
-        success: false,
-        error: 'A reminder was already sent for this order in the last 10 minutes'
+      return respond.fail(req, res, {
+        code: respond.CODES.RATE_LIMITED,
+        message: 'A reminder was already sent for this order in the last 10 minutes'
       });
     }
 
@@ -424,19 +427,18 @@ router.post('/:id/payment-reminder', requirePermission('orders', 'write'), async
     const business = bizRes.rows[0];
     const customer = customerRes.rows[0];
     if (!customer) {
-      return res.status(400).json({ success: false, error: 'Order has no customer to remind' });
+      return respond.invalid(req, res, 'Order has no customer to remind');
     }
 
     const sent = await notification.notifyPaymentReminder({ order: existing, business, customer });
     if (!sent?.success) {
-      return res.status(502).json({ success: false, error: sent?.error || 'Failed to send reminder' });
+      return respond.fail(req, res, { code: respond.CODES.UPSTREAM, message: sent?.error || 'Failed to send reminder' });
     }
 
     await orderService.recordPaymentReminderSent(existing.id);
-    res.json({ success: true });
+    return respond.ok(req, res, {});
   } catch (err) {
-    logger.error('POST /orders/:id/payment-reminder failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'POST /orders/:id/payment-reminder', err);
   }
 });
 
@@ -447,9 +449,9 @@ router.post('/:id/payment-reminder', requirePermission('orders', 'write'), async
 router.get('/:id', async (req, res) => {
   try {
     const order = await orderService.getOrderById(req.params.id);
-    if (!order) return res.status(404).json({ success: false, error: 'Order not found' });
+    if (!order) return respond.notFound(req, res, 'Order');
     if (tenantBlocksBusinessId(req, order.business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const [history, refunds, attempts, customerRes] = await Promise.all([
       orderService.getOrderHistory(order.id),
@@ -461,8 +463,7 @@ router.get('/:id', async (req, res) => {
       ),
       query('SELECT id, display_name, whatsapp_number, channel FROM customers WHERE id = $1', [order.customer_id])
     ]);
-    res.json({
-      success: true,
+    return respond.ok(req, res, {
       order,
       history,
       refunds,
@@ -470,8 +471,7 @@ router.get('/:id', async (req, res) => {
       customer: customerRes.rows[0] || null
     });
   } catch (err) {
-    logger.error('GET /orders/:id failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /orders/:id', err);
   }
 });
 
@@ -479,17 +479,16 @@ router.get('/:id', async (req, res) => {
 router.patch('/:id/notes', requirePermission('orders', 'write'), async (req, res) => {
   try {
     const existing = await orderService.getOrderById(req.params.id);
-    if (!existing) return res.status(404).json({ success: false, error: 'Order not found' });
+    if (!existing) return respond.notFound(req, res, 'Order');
     if (tenantBlocksBusinessId(req, existing.business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const note = String(req.body?.note || '').trim();
-    if (!note) return res.status(400).json({ success: false, error: 'note is required' });
+    if (!note) return respond.invalid(req, res, 'note is required', { note: 'is invalid' });
     const order = await orderService.addOrderNote(req.params.id, note);
-    res.json({ success: true, order });
+    return respond.ok(req, res, { order });
   } catch (err) {
-    logger.error('PATCH /orders/:id/notes failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'PATCH /orders/:id/notes', err);
   }
 });
 
@@ -497,9 +496,9 @@ router.patch('/:id/notes', requirePermission('orders', 'write'), async (req, res
 router.patch('/:id/delivery', requirePermission('orders', 'write'), async (req, res) => {
   try {
     const existing = await orderService.getOrderById(req.params.id);
-    if (!existing) return res.status(404).json({ success: false, error: 'Order not found' });
+    if (!existing) return respond.notFound(req, res, 'Order');
     if (tenantBlocksBusinessId(req, existing.business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const body = req.body || {};
     let order = existing;
@@ -515,10 +514,9 @@ router.patch('/:id/delivery', requirePermission('orders', 'write'), async (req, 
     }
     if (body.delivery_status !== undefined) {
       if (!orderService.VALID_DELIVERY_STATUSES.includes(body.delivery_status)) {
-        return res.status(400).json({
-          success: false,
-          error: `delivery_status must be one of: ${orderService.VALID_DELIVERY_STATUSES.join(', ')}`
-        });
+        return respond.invalid(req, res,
+          `delivery_status must be one of: ${orderService.VALID_DELIVERY_STATUSES.join(', ')}`,
+          { delivery_status: 'is not a valid delivery status' });
       }
       order = await orderService.updateDeliveryStatus(req.params.id, body.delivery_status, { proofUrl: body.delivery_proof_url });
       // Only notify the customer when marked delivered WITH a proof photo —
@@ -534,10 +532,9 @@ router.patch('/:id/delivery', requirePermission('orders', 'write'), async (req, 
           .catch(err => logger.warn('delivery completed notify failed: %s', err.message));
       }
     }
-    res.json({ success: true, order });
+    return respond.ok(req, res, { order });
   } catch (err) {
-    logger.error('PATCH /orders/:id/delivery failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'PATCH /orders/:id/delivery', err);
   }
 });
 
@@ -545,22 +542,21 @@ router.patch('/:id/delivery', requirePermission('orders', 'write'), async (req, 
 router.patch('/:id/estimates', requirePermission('orders', 'write'), async (req, res) => {
   try {
     const existing = await orderService.getOrderById(req.params.id);
-    if (!existing) return res.status(404).json({ success: false, error: 'Order not found' });
+    if (!existing) return respond.notFound(req, res, 'Order');
     if (tenantBlocksBusinessId(req, existing.business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const body = req.body || {};
     if (body.estimated_ready_at === undefined && body.estimated_delivery_at === undefined) {
-      return res.status(400).json({ success: false, error: 'estimated_ready_at or estimated_delivery_at is required' });
+      return respond.invalid(req, res, 'estimated_ready_at or estimated_delivery_at is required', { estimated_ready_at: 'is invalid' });
     }
     const order = await orderService.setEstimates(req.params.id, {
       readyAt: body.estimated_ready_at,
       deliveryAt: body.estimated_delivery_at
     });
-    res.json({ success: true, order });
+    return respond.ok(req, res, { order });
   } catch (err) {
-    logger.error('PATCH /orders/:id/estimates failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'PATCH /orders/:id/estimates', err);
   }
 });
 
@@ -568,13 +564,13 @@ router.patch('/:id/estimates', requirePermission('orders', 'write'), async (req,
 router.post('/:id/refund', requirePermission('financial'), async (req, res) => {
   try {
     const existing = await orderService.getOrderById(req.params.id);
-    if (!existing) return res.status(404).json({ success: false, error: 'Order not found' });
+    if (!existing) return respond.notFound(req, res, 'Order');
     if (tenantBlocksBusinessId(req, existing.business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const amount = Number(req.body?.amount_ghs);
     if (!Number.isFinite(amount) || amount <= 0) {
-      return res.status(400).json({ success: false, error: 'amount_ghs must be a positive number' });
+      return respond.invalid(req, res, 'amount_ghs must be a positive number', { amount_ghs: 'is invalid' });
     }
     const refund = await orderService.createRefund({
       orderId: req.params.id,
@@ -582,10 +578,10 @@ router.post('/:id/refund', requirePermission('financial'), async (req, res) => {
       amountGhs: amount,
       reason: req.body?.reason
     });
-    res.status(201).json({ success: true, refund });
+    return respond.ok(req, res, { refund }, { status: 201 });
   } catch (err) {
     logger.error('POST /orders/:id/refund failed: %s', err.message);
-    res.status(400).json({ success: false, error: err.message || 'Refund failed' });
+    return respond.invalid(req, res, err.message || 'Refund failed');
   }
 });
 

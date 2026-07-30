@@ -121,6 +121,32 @@ test('each code maps to its conventional HTTP status', () => {
   }
 });
 
+test('extra keys stay flat in legacy and move under details in v2', () => {
+  // The mark-paid amount mismatch has always returned `expected` and
+  // `received` beside the message. Legacy callers must keep finding them
+  // exactly where they were.
+  const legacy = res();
+  respond.fail(reqWith(), legacy, {
+    code: respond.CODES.VALIDATION, message: 'Amount does not match',
+    extra: { expected: 45, received: 40 }
+  });
+  assert.deepEqual(legacy.body,
+    { success: false, error: 'Amount does not match', expected: 45, received: 40 });
+
+  const modern = res();
+  respond.fail(reqWith(2), modern, {
+    code: respond.CODES.VALIDATION, message: 'Amount does not match',
+    fields: { amount_ghs: 'does not match the order total' },
+    extra: { expected: 45, received: 40 }
+  });
+  assert.deepEqual(modern.body.error, {
+    code: 'validation_error',
+    message: 'Amount does not match',
+    fields: { amount_ghs: 'does not match the order total' },
+    details: { expected: 45, received: 40 }
+  });
+});
+
 test('an explicit status beats the code default', () => {
   const r = res();
   respond.fail(reqWith(), r, { code: respond.CODES.VALIDATION, message: 'x', status: 422 });
@@ -151,4 +177,97 @@ test('failInternal logs the real error but never returns it', () => {
   assert.ok(!JSON.stringify(r.body).includes('connection string'),
     'an internal message must never reach the client');
   assert.match(logged[0].join(' '), /GET \/orders/);
+});
+
+/**
+ * Static guard against the failure this suite's author actually shipped
+ * while migrating inventory.routes.js.
+ *
+ * A scripted migration added `respond.ok(...)` throughout the file but the
+ * `require` line never matched, so `respond` was undefined. Every request
+ * threw a ReferenceError inside its `try`, the `catch` called
+ * `respond.failInternal` and threw AGAIN, and Express never sent a response —
+ * so the route did not 500, it HUNG. `node -e "require(...)"` reported the
+ * module as fine, because nothing dereferences `respond` until a request
+ * arrives.
+ *
+ * A hanging route is far worse than a broken one: it holds a connection, and
+ * on a merchant's 3G phone it looks like the network died.
+ */
+test('every route file that calls respond.* actually imports it', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const dir = path.join(__dirname, '..', 'src', 'routes');
+
+  const offenders = [];
+  for (const file of fs.readdirSync(dir).filter(f => f.endsWith('.js'))) {
+    const src = fs.readFileSync(path.join(dir, file), 'utf8');
+    const uses = /\brespond\.\w+\(/.test(src);
+    const imports = /require\(['"]\.\.\/utils\/response['"]\)/.test(src);
+    if (uses && !imports) offenders.push(file);
+  }
+
+  assert.deepEqual(offenders, [],
+    'these route files reference respond.* without requiring it — every request to them will hang');
+});
+
+test('no migrated route file still mixes in raw res.json/res.status', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const dir = path.join(__dirname, '..', 'src', 'routes');
+
+  const mixed = [];
+  for (const file of fs.readdirSync(dir).filter(f => f.endsWith('.js'))) {
+    const src = fs.readFileSync(path.join(dir, file), 'utf8');
+    if (!/require\(['"]\.\.\/utils\/response['"]\)/.test(src)) continue; // not migrated yet
+    if (/\bres\.(json|status)\(/.test(src)) mixed.push(file);
+  }
+
+  // A half-migrated file is the state most likely to hide an untested path,
+  // so a group is either fully on the helper or not started.
+  assert.deepEqual(mixed, [],
+    'these files are partially migrated — finish them or revert them, do not leave them mixed');
+});
+
+/**
+ * The import guard above catches a missing `require`. It does NOT catch the
+ * other way a migrated route hangs: referencing a local that was never
+ * declared. During the product.routes migration a `fields` variable was used
+ * in `respond.invalid(req, res, msg, fields)` while the destructure two lines
+ * up still read `const { errors, out }` — a ReferenceError inside the try, a
+ * second one from the catch, and a request that never completes. The whole
+ * suite stayed green because nothing exercised that branch.
+ *
+ * Node cannot see an undeclared local at parse time (it is a runtime error),
+ * so this checks the specific shape that bit us: a validator destructure that
+ * omits a name the same function later passes to respond.*.
+ */
+test('no route destructures a validator result then uses a name it did not bind', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const dir = path.join(__dirname, '..', 'src', 'routes');
+
+  const offenders = [];
+  for (const file of fs.readdirSync(dir).filter(f => f.endsWith('.js'))) {
+    const src = fs.readFileSync(path.join(dir, file), 'utf8');
+    const lines = src.split('\n');
+
+    lines.forEach((line, i) => {
+      const m = line.match(/const \{([^}]+)\} = validate\w*\(/);
+      if (!m) return;
+      const bound = m[1].split(',').map(x => x.trim().split(':')[0].trim());
+      // Look ahead within the same handler for a respond.* call using a name
+      // this destructure did not bind.
+      for (let j = i + 1; j < Math.min(i + 25, lines.length); j++) {
+        if (/^\s*(router\.|})/.test(lines[j]) && j > i + 1) break;
+        const use = lines[j].match(/respond\.\w+\([^)]*?,\s*(\w+)\s*\)/);
+        if (use && !bound.includes(use[1]) && !/^['"`]/.test(use[1])) {
+          offenders.push(`${file}:${j + 1} uses "${use[1]}", bound: [${bound}]`);
+        }
+      }
+    });
+  }
+
+  assert.deepEqual(offenders, [],
+    'these lines reference an unbound name — the request will hang, not 500');
 });
