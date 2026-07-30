@@ -1,0 +1,29 @@
+name: Payment reconciliation report (read-only)
+
+# Manual trigger only — never on push. Answers decisions-needed.md #8: how
+# many orders were marked paid through the pre-fix PATCH /status path and are
+# therefore sitting outside GMV, analytics and the accounting endpoints.
+#
+# DELIBERATELY READ-ONLY. There is no input to pass --apply, and adding one
+# would be the wrong shape: correcting the books is a separate, explicit
+# decision to be taken once the size of the damage is known, not a checkbox
+# on a report. To apply, SSH in and run it by hand:
+#
+#   cd /opt/wa-b-2.0 && node src/jobs/reconcile.paidStatus.js --apply
+on:
+  workflow_dispatch: {}
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run the dry-run report on the app VM
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.ORACLE_APP_HOST }}
+          username: ${{ secrets.ORACLE_APP_USER }}
+          key: ${{ secrets.ORACLE_APP_SSH_KEY }}
+          script: |
+            set -e
+            cd /opt/wa-b-2.0
+            node src/jobs/reconcile.paidStatus.js
