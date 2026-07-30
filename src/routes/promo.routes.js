@@ -4,6 +4,7 @@ const { query } = require('../config/database');
 const { requireAuth, requirePermission } = require('../middleware/auth');
 const { tenantBlocksBusinessId } = require('../middleware/tenantAccess');
 const { SEGMENTS } = require('../utils/audience');
+const respond = require('../utils/response');
 const { recordAudit } = require('../utils/auditLog');
 
 const router = express.Router();
@@ -18,18 +19,19 @@ const PROMO_COLUMNS =
 router.get('/', async (req, res) => {
   try {
     const { business_id } = req.query;
-    if (!business_id) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!business_id) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
     if (tenantBlocksBusinessId(req, business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const r = await query(
       `SELECT ${PROMO_COLUMNS} FROM promos WHERE business_id = $1 ORDER BY created_at DESC`,
       [business_id]
     );
-    res.json({ success: true, promos: r.rows });
+    return respond.ok(req, res, { promos: r.rows });
   } catch (err) {
-    logger.error('GET /promos failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /promos', err);
   }
 });
 
@@ -47,24 +49,26 @@ router.post('/', requirePermission('promos'), async (req, res) => {
     const maxUses = req.body?.max_uses != null && req.body.max_uses !== ''
       ? parseInt(req.body.max_uses, 10) : null;
 
-    if (!business_id) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!business_id) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
     if (tenantBlocksBusinessId(req, business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     if (!code || !/^[A-Z0-9_-]{2,32}$/.test(code)) {
-      return res.status(400).json({ success: false, error: 'code must be 2-32 chars: letters, numbers, - or _' });
+      return respond.invalid(req, res, 'code must be 2-32 chars: letters, numbers, - or _', { code: 'is invalid' });
     }
     if (!['percent', 'fixed'].includes(type)) {
-      return res.status(400).json({ success: false, error: "type must be 'percent' or 'fixed'" });
+      return respond.invalid(req, res, "type must be 'percent' or 'fixed'", { type: 'is invalid' });
     }
     if (!(value > 0) || !Number.isFinite(value)) {
-      return res.status(400).json({ success: false, error: 'value must be a positive number' });
+      return respond.invalid(req, res, 'value must be a positive number', { value: 'is invalid' });
     }
     if (type === 'percent' && value > 100) {
-      return res.status(400).json({ success: false, error: 'percent value cannot exceed 100' });
+      return respond.invalid(req, res, 'percent value cannot exceed 100', { percent: 'is invalid' });
     }
     if (maxUses !== null && !(maxUses > 0)) {
-      return res.status(400).json({ success: false, error: 'max_uses must be a positive integer' });
+      return respond.invalid(req, res, 'max_uses must be a positive integer', { max_uses: 'is invalid' });
     }
     // Validate the date here rather than letting an unparseable string reach
     // Postgres and surface as a generic 500.
@@ -72,7 +76,7 @@ router.post('/', requirePermission('promos'), async (req, res) => {
     if (expires_at != null && expires_at !== '') {
       const d = new Date(expires_at);
       if (Number.isNaN(d.getTime())) {
-        return res.status(400).json({ success: false, error: 'expires_at must be a valid date' });
+        return respond.invalid(req, res, 'expires_at must be a valid date', { expires_at: 'is invalid' });
       }
       expiresAt = d.toISOString();
     }
@@ -81,19 +85,19 @@ router.post('/', requirePermission('promos'), async (req, res) => {
     if (req.body?.min_order_ghs != null && req.body.min_order_ghs !== '') {
       minOrderGhs = Number(req.body.min_order_ghs);
       if (!Number.isFinite(minOrderGhs) || minOrderGhs < 0) {
-        return res.status(400).json({ success: false, error: 'min_order_ghs must be a non-negative number' });
+        return respond.invalid(req, res, 'min_order_ghs must be a non-negative number', { min_order_ghs: 'is invalid' });
       }
     }
     const firstOrderOnly = !!req.body?.first_order_only;
     const customerTag = req.body?.customer_tag ? String(req.body.customer_tag).trim().toLowerCase().slice(0, 40) : null;
     const customerSegment = req.body?.customer_segment || null;
     if (customerSegment && !SEGMENTS[customerSegment]) {
-      return res.status(400).json({ success: false, error: `customer_segment must be one of ${Object.keys(SEGMENTS).join(', ')}` });
+      return respond.invalid(req, res, `customer_segment must be one of ${Object.keys(SEGMENTS).join(', ')}`, { customer_segment: 'is invalid' });
     }
     let productId = req.body?.product_id || null;
     if (productId) {
       const p = await query('SELECT id FROM products WHERE id = $1 AND business_id = $2', [productId, business_id]);
-      if (!p.rowCount) return res.status(400).json({ success: false, error: 'product_id does not belong to this business' });
+      if (!p.rowCount) return respond.invalid(req, res, 'product_id does not belong to this business', { product_id: 'is invalid' });
     }
     const category = req.body?.category ? String(req.body.category).trim().toLowerCase().slice(0, 60) : null;
 
@@ -111,13 +115,12 @@ router.post('/', requirePermission('promos'), async (req, res) => {
       actorId: req.auth?.clerkUserId || req.auth?.keyId,
       businessId: business_id, action: 'promo.create', detail: { code, type, value }
     });
-    res.status(201).json({ success: true, promo: r.rows[0] });
+    return respond.ok(req, res, { promo: r.rows[0] }, { status: 201 });
   } catch (err) {
     if (err.code === '23505') {
-      return res.status(409).json({ success: false, error: 'A promo with this code already exists' });
+      return respond.fail(req, res, { code: respond.CODES.CONFLICT, message: 'A promo with this code already exists' });
     }
-    logger.error('POST /promos failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'POST /promos', err);
   }
 });
 
@@ -125,23 +128,24 @@ router.post('/', requirePermission('promos'), async (req, res) => {
 router.patch('/:id', requirePermission('promos'), async (req, res) => {
   try {
     const { business_id } = req.body || {};
-    if (!business_id) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!business_id) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
     if (tenantBlocksBusinessId(req, business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     if (typeof req.body?.active !== 'boolean') {
-      return res.status(400).json({ success: false, error: 'active (boolean) is required' });
+      return respond.invalid(req, res, 'active (boolean) is required', { active: 'is invalid' });
     }
     const r = await query(
       `UPDATE promos SET active = $3 WHERE id = $1 AND business_id = $2
        RETURNING ${PROMO_COLUMNS}`,
       [req.params.id, business_id, req.body.active]
     );
-    if (!r.rowCount) return res.status(404).json({ success: false, error: 'Promo not found' });
-    res.json({ success: true, promo: r.rows[0] });
+    if (!r.rowCount) return respond.notFound(req, res, 'Promo');
+    return respond.ok(req, res, { promo: r.rows[0] });
   } catch (err) {
-    logger.error('PATCH /promos/:id failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'PATCH /promos/:id', err);
   }
 });
 
@@ -153,13 +157,15 @@ router.patch('/:id', requirePermission('promos'), async (req, res) => {
 router.get('/:id/performance', async (req, res) => {
   try {
     const { business_id } = req.query;
-    if (!business_id) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!business_id) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
     if (tenantBlocksBusinessId(req, business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const promoRes = await query(`SELECT ${PROMO_COLUMNS} FROM promos WHERE id = $1 AND business_id = $2`, [req.params.id, business_id]);
     const promo = promoRes.rows[0];
-    if (!promo) return res.status(404).json({ success: false, error: 'Promo not found' });
+    if (!promo) return respond.notFound(req, res, 'Promo');
 
     const statsRes = await query(
       `SELECT
@@ -172,8 +178,7 @@ router.get('/:id/performance', async (req, res) => {
       [business_id, promo.code]
     );
     const stats = statsRes.rows[0];
-    res.json({
-      success: true,
+    return respond.ok(req, res, {
       performance: {
         promo,
         orders_count: stats.orders_count,
@@ -184,8 +189,7 @@ router.get('/:id/performance', async (req, res) => {
       }
     });
   } catch (err) {
-    logger.error('GET /promos/:id/performance failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /promos/:id/performance', err);
   }
 });
 

@@ -4,6 +4,7 @@ const { query } = require('../config/database');
 const { requireAuth, requirePermission, issueKey, revokeKey, rotateKey, VALID_ROLES } = require('../middleware/auth');
 const { tenantBlocksBusinessId } = require('../middleware/tenantAccess');
 const { recordAudit } = require('../utils/auditLog');
+const respond = require('../utils/response');
 
 const router = express.Router();
 
@@ -18,18 +19,19 @@ const KEY_COLUMNS = 'id, business_id, name, scope, role, expires_at, last_used_a
 router.get('/', requirePermission('staff', 'read'), async (req, res) => {
   try {
     const businessId = req.query.business_id || req.auth?.businessId;
-    if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!businessId) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
     if (tenantBlocksBusinessId(req, businessId)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const r = await query(
       `SELECT ${KEY_COLUMNS} FROM api_keys WHERE business_id = $1 ORDER BY created_at DESC`,
       [businessId]
     );
-    res.json({ success: true, keys: r.rows });
+    return respond.ok(req, res, { keys: r.rows });
   } catch (err) {
-    logger.error('GET /keys failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /keys', err);
   }
 });
 
@@ -41,21 +43,23 @@ router.get('/', requirePermission('staff', 'read'), async (req, res) => {
 router.post('/', requirePermission('staff'), async (req, res) => {
   try {
     const businessId = req.body?.business_id || req.auth?.businessId;
-    if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!businessId) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
     if (tenantBlocksBusinessId(req, businessId)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const name = String(req.body?.name || '').trim().slice(0, 120);
-    if (!name) return res.status(400).json({ success: false, error: 'name is required' });
+    if (!name) return respond.invalid(req, res, 'name is required', { name: 'is invalid' });
     const role = req.body?.role || 'manager';
     if (!VALID_ROLES.includes(role)) {
-      return res.status(400).json({ success: false, error: `role must be one of ${VALID_ROLES.join(', ')}` });
+      return respond.invalid(req, res, `role must be one of ${VALID_ROLES.join(', ')}`, { role: 'is invalid' });
     }
     let expiresAt = null;
     if (req.body?.expires_at) {
       expiresAt = new Date(req.body.expires_at);
       if (Number.isNaN(expiresAt.getTime()) || expiresAt <= new Date()) {
-        return res.status(400).json({ success: false, error: 'expires_at must be a valid future date' });
+        return respond.invalid(req, res, 'expires_at must be a valid future date', { expires_at: 'is invalid' });
       }
     }
 
@@ -64,10 +68,13 @@ router.post('/', requirePermission('staff'), async (req, res) => {
       actorType: 'merchant', actorId: req.auth?.clerkUserId || req.auth?.keyId, businessId,
       action: 'api_key.issue', detail: { key_id: key.id, name, role }
     });
-    res.status(201).json({ success: true, key });
+    return respond.ok(req, res, { key }, { status: 201 });
   } catch (err) {
     logger.error('POST /keys failed: %s', err.message);
-    res.status(500).json({ success: false, error: err.message || 'Internal server error' });
+    return respond.fail(req, res, {
+      code: respond.CODES.INTERNAL,
+      message: err.message || 'Internal server error'
+    });
   }
 });
 
@@ -76,20 +83,19 @@ router.post('/:id/revoke', requirePermission('staff'), async (req, res) => {
   try {
     const existing = await query('SELECT * FROM api_keys WHERE id = $1', [req.params.id]);
     const key = existing.rows[0];
-    if (!key) return res.status(404).json({ success: false, error: 'Key not found' });
+    if (!key) return respond.notFound(req, res, 'Key');
     if (tenantBlocksBusinessId(req, key.business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const ok = await revokeKey(req.params.id);
-    if (!ok) return res.status(409).json({ success: false, error: 'Key already revoked' });
+    if (!ok) return respond.fail(req, res, { code: respond.CODES.CONFLICT, message: 'Key already revoked' });
     recordAudit({
       actorType: 'merchant', actorId: req.auth?.clerkUserId || req.auth?.keyId, businessId: key.business_id,
       action: 'api_key.revoke', detail: { key_id: key.id, name: key.name }
     });
-    res.json({ success: true });
+    return respond.ok(req, res, {});
   } catch (err) {
-    logger.error('POST /keys/:id/revoke failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'POST /keys/:id/revoke', err);
   }
 });
 
@@ -101,19 +107,22 @@ router.post('/:id/rotate', requirePermission('staff'), async (req, res) => {
   try {
     const existing = await query('SELECT * FROM api_keys WHERE id = $1', [req.params.id]);
     const key = existing.rows[0];
-    if (!key) return res.status(404).json({ success: false, error: 'Key not found' });
+    if (!key) return respond.notFound(req, res, 'Key');
     if (tenantBlocksBusinessId(req, key.business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const fresh = await rotateKey(req.params.id);
     recordAudit({
       actorType: 'merchant', actorId: req.auth?.clerkUserId || req.auth?.keyId, businessId: key.business_id,
       action: 'api_key.rotate', detail: { old_key_id: key.id, new_key_id: fresh.id, name: key.name }
     });
-    res.json({ success: true, key: fresh });
+    return respond.ok(req, res, { key: fresh });
   } catch (err) {
     logger.error('POST /keys/:id/rotate failed: %s', err.message);
-    res.status(500).json({ success: false, error: err.message || 'Internal server error' });
+    return respond.fail(req, res, {
+      code: respond.CODES.INTERNAL,
+      message: err.message || 'Internal server error'
+    });
   }
 });
 

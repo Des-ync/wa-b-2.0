@@ -3,6 +3,7 @@ const logger = require('../utils/logger');
 const { query } = require('../config/database');
 const { requireAuth } = require('../middleware/auth');
 const { tenantBlocksBusinessId } = require('../middleware/tenantAccess');
+const respond = require('../utils/response');
 
 const router = express.Router();
 
@@ -16,9 +17,11 @@ router.use(requireAuth('any'));
 router.get('/', async (req, res) => {
   try {
     const { business_id } = req.query;
-    if (!business_id) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!business_id) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
     if (tenantBlocksBusinessId(req, business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const days = [7, 30].includes(parseInt(req.query.days, 10)) ? parseInt(req.query.days, 10) : 7;
 
@@ -136,9 +139,7 @@ router.get('/', async (req, res) => {
       recovered_revenue_ghs: acc.recovered_revenue_ghs + Number(r.recovered_revenue_ghs)
     }), { nudged_count: 0, recovered_count: 0, recovered_revenue_ghs: 0 });
 
-    res.json({
-      success: true,
-      analytics: {
+    return respond.ok(req, res, {      analytics: {
         days,
         revenue_trend: revenue.rows,
         top_products: topProducts.rows,
@@ -170,8 +171,7 @@ router.get('/', async (req, res) => {
       }
     });
   } catch (err) {
-    logger.error('GET /analytics failed: %s', err.message, { stack: err.stack });
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /analytics', err);
   }
 });
 
@@ -187,9 +187,11 @@ router.get('/', async (req, res) => {
 router.get('/delivery-sla', async (req, res) => {
   try {
     const { business_id } = req.query;
-    if (!business_id) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!business_id) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
     if (tenantBlocksBusinessId(req, business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const days = [7, 30, 90].includes(parseInt(req.query.days, 10)) ? parseInt(req.query.days, 10) : 30;
 
@@ -241,9 +243,7 @@ router.get('/delivery-sla', async (req, res) => {
       late_rate_pct: b.with_eta > 0 ? Math.round((b.late / b.with_eta) * 100) : null
     })).sort((a, b) => b.deliveries - a.deliveries);
 
-    res.json({
-      success: true,
-      delivery_sla: {
+    return respond.ok(req, res, {      delivery_sla: {
         completed_deliveries: rows.length,
         avg_minutes_to_deliver: avgMinutes !== null ? Math.round(avgMinutes) : null,
         late_count: lateCount,
@@ -258,8 +258,7 @@ router.get('/delivery-sla', async (req, res) => {
       }
     });
   } catch (err) {
-    logger.error('GET /analytics/delivery-sla failed: %s', err.message, { stack: err.stack });
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /analytics/delivery-sla', err);
   }
 });
 
@@ -277,9 +276,11 @@ router.get('/delivery-sla', async (req, res) => {
 router.get('/profit', async (req, res) => {
   try {
     const { business_id } = req.query;
-    if (!business_id) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!business_id) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
     if (tenantBlocksBusinessId(req, business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const days = [7, 30, 90].includes(parseInt(req.query.days, 10)) ? parseInt(req.query.days, 10) : 30;
 
@@ -356,9 +357,7 @@ router.get('/profit', async (req, res) => {
       margin_ghs: r.cost_ghs != null ? Number((Number(r.revenue_with_known_cost_ghs) - Number(r.cost_ghs)).toFixed(2)) : null
     }));
 
-    res.json({
-      success: true,
-      profit: {
+    return respond.ok(req, res, {      profit: {
         days,
         by_product: products,
         by_day: byDayOut,
@@ -369,8 +368,7 @@ router.get('/profit', async (req, res) => {
       }
     });
   } catch (err) {
-    logger.error('GET /analytics/profit failed: %s', err.message, { stack: err.stack });
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /analytics/profit', err);
   }
 });
 
@@ -386,9 +384,11 @@ router.get('/profit', async (req, res) => {
 router.get('/cohorts', async (req, res) => {
   try {
     const { business_id } = req.query;
-    if (!business_id) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!business_id) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
     if (tenantBlocksBusinessId(req, business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const days = [7, 30].includes(parseInt(req.query.days, 10)) ? parseInt(req.query.days, 10) : 30;
 
@@ -454,9 +454,7 @@ router.get('/cohorts', async (req, res) => {
       };
     }
 
-    res.json({
-      success: true,
-      cohorts: {
+    return respond.ok(req, res, {      cohorts: {
         days,
         new_customers: nv.new || { customers: 0, orders: 0, revenue_ghs: 0 },
         returning_customers: nv.returning || { customers: 0, orders: 0, revenue_ghs: 0 },
@@ -465,8 +463,7 @@ router.get('/cohorts', async (req, res) => {
       }
     });
   } catch (err) {
-    logger.error('GET /analytics/cohorts failed: %s', err.message, { stack: err.stack });
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /analytics/cohorts', err);
   }
 });
 
@@ -480,9 +477,11 @@ router.get('/cohorts', async (req, res) => {
 router.get('/channels', async (req, res) => {
   try {
     const { business_id } = req.query;
-    if (!business_id) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!business_id) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
     if (tenantBlocksBusinessId(req, business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const days = [7, 30, 90].includes(parseInt(req.query.days, 10)) ? parseInt(req.query.days, 10) : 30;
 
@@ -505,10 +504,9 @@ router.get('/channels', async (req, res) => {
       revenue_ghs: Number(Number(r.revenue_ghs).toFixed(2)),
       unique_customers: r.unique_customers
     }));
-    res.json({ success: true, days, channels });
+    return respond.ok(req, res, { channels }, { meta: { days } });
   } catch (err) {
-    logger.error('GET /analytics/channels failed: %s', err.message, { stack: err.stack });
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /analytics/channels', err);
   }
 });
 

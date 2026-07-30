@@ -4,6 +4,7 @@ const subService = require('../services/subscription.service');
 const { normalizeGhanaPhone, sanitizeBusiness } = require('../utils/helpers');
 const { requireAuth, requirePermission } = require('../middleware/auth');
 const { tenantBlocksBusinessId } = require('../middleware/tenantAccess');
+const respond = require('../utils/response');
 
 const router = express.Router();
 
@@ -11,10 +12,9 @@ const router = express.Router();
 router.get('/plans', async (_req, res) => {
   try {
     const plans = await subService.listPlans();
-    res.json({ success: true, plans });
+    return respond.ok(req, res, { plans });
   } catch (err) {
-    logger.error('GET /plans failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /plans', err);
   }
 });
 
@@ -27,11 +27,11 @@ router.post('/', requireAuth('admin'), async (req, res) => {
   try {
     const { name, owner_name, whatsapp_number, industry, plan_name } = req.body || {};
     const wa = normalizeGhanaPhone(whatsapp_number);
-    if (!wa) return res.status(400).json({ success: false, error: 'Invalid Ghana whatsapp_number' });
-    if (!plan_name) return res.status(400).json({ success: false, error: 'plan_name required' });
+    if (!wa) return respond.invalid(req, res, 'Invalid Ghana whatsapp_number');
+    if (!plan_name) return respond.invalid(req, res, 'plan_name required', { plan_name: 'is invalid' });
 
     const plan = await subService.getPlanByName(plan_name);
-    if (!plan) return res.status(404).json({ success: false, error: 'Plan not found' });
+    if (!plan) return respond.notFound(req, res, 'Plan');
 
     const business = await subService.ensureBusiness({
       name, ownerName: owner_name, whatsappNumber: wa, industry
@@ -41,19 +41,20 @@ router.post('/', requireAuth('admin'), async (req, res) => {
 
     const safeBusiness = sanitizeBusiness(business);
     if (!result.success) {
-      return res.status(502).json({ success: false, error: result.error, business: safeBusiness });
+      return respond.fail(req, res, {
+        code: respond.CODES.UPSTREAM,
+        message: result.error,
+        extra: { business: safeBusiness }
+      });
     }
 
-    res.status(201).json({
-      success: true,
-      business: safeBusiness,
+    return respond.ok(req, res, {      business: safeBusiness,
       reference: result.reference,
       subscription_id: result.subscriptionId,
       payment_status: result.status
-    });
+    }, { status: 201 });
   } catch (err) {
-    logger.error('POST /subscriptions failed: %s', err.message, { stack: err.stack });
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'POST /subscriptions', err);
   }
 });
 
@@ -61,15 +62,14 @@ router.post('/', requireAuth('admin'), async (req, res) => {
 router.get('/:businessId', requireAuth('any'), async (req, res) => {
   try {
     if (tenantBlocksBusinessId(req, req.params.businessId)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const business = await subService.getBusinessById(req.params.businessId);
-    if (!business) return res.status(404).json({ success: false, error: 'Business not found' });
+    if (!business) return respond.notFound(req, res, 'Business');
     const sub = await subService.getActiveSubscription(business.id);
-    res.json({ success: true, business: sanitizeBusiness(business), subscription: sub });
+    return respond.ok(req, res, { business: sanitizeBusiness(business), subscription: sub });
   } catch (err) {
-    logger.error('GET /subscriptions/:id failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /subscriptions/:id', err);
   }
 });
 
@@ -82,22 +82,23 @@ router.get('/:businessId', requireAuth('any'), async (req, res) => {
 router.post('/:businessId/renew', requireAuth('any'), requirePermission('billing', 'write'), async (req, res) => {
   try {
     if (tenantBlocksBusinessId(req, req.params.businessId)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const business = await subService.getBusinessById(req.params.businessId);
-    if (!business) return res.status(404).json({ success: false, error: 'Business not found' });
+    if (!business) return respond.notFound(req, res, 'Business');
 
     const sub = await subService.getActiveSubscription(business.id);
-    if (!sub) return res.status(409).json({ success: false, error: 'No subscription on file' });
+    if (!sub) return respond.fail(req, res, { code: respond.CODES.CONFLICT, message: 'No subscription on file' });
     const plan = await subService.getPlanById(sub.plan_id);
-    if (!plan) return res.status(404).json({ success: false, error: 'Plan not found' });
+    if (!plan) return respond.notFound(req, res, 'Plan');
 
     const result = await subService.initiateRenewal({ business, plan });
-    if (!result.success) return res.status(502).json({ success: false, error: result.error });
-    res.json({ success: true, reference: result.reference, status: result.status });
+    if (!result.success) {
+      return respond.fail(req, res, { code: respond.CODES.UPSTREAM, message: result.error });
+    }
+    return respond.ok(req, res, { reference: result.reference, status: result.status });
   } catch (err) {
-    logger.error('POST renew failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'POST renew', err);
   }
 });
 
@@ -109,20 +110,17 @@ router.post('/:businessId/renew', requireAuth('any'), requirePermission('billing
 router.post('/:businessId/cancel', requireAuth('any'), requirePermission('billing', 'write'), async (req, res) => {
   try {
     if (tenantBlocksBusinessId(req, req.params.businessId)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const business = await subService.getBusinessById(req.params.businessId);
-    if (!business) return res.status(404).json({ success: false, error: 'Business not found' });
+    if (!business) return respond.notFound(req, res, 'Business');
     const result = await subService.cancelSubscription(business.id);
-    res.json({
-      success: true,
-      mode: result.mode,                  // 'period_end' | 'immediate'
+    return respond.ok(req, res, {      mode: result.mode,                  // 'period_end' | 'immediate'
       ends_at: result.endsAt,
       subscriptions: result.subscriptions
     });
   } catch (err) {
-    logger.error('POST cancel failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'POST cancel', err);
   }
 });
 

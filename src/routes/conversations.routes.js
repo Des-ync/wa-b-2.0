@@ -5,6 +5,7 @@ const { requireAuth, requirePermission } = require('../middleware/auth');
 const { tenantBlocksBusinessId } = require('../middleware/tenantAccess');
 const { getAdapter, destOf } = require('../services/channel.adapter');
 const { summarizeConversation } = require('../utils/conversationSummary');
+const respond = require('../utils/response');
 
 const router = express.Router();
 
@@ -18,9 +19,11 @@ router.use(requireAuth('any'));
 router.get('/', async (req, res) => {
   try {
     const { business_id } = req.query;
-    if (!business_id) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!business_id) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
     if (tenantBlocksBusinessId(req, business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
     const r = await query(
@@ -38,10 +41,9 @@ router.get('/', async (req, res) => {
         LIMIT $2`,
       [business_id, limit]
     );
-    res.json({ success: true, conversations: r.rows });
+    return respond.ok(req, res, { conversations: r.rows });
   } catch (err) {
-    logger.error('GET /conversations failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /conversations', err);
   }
 });
 
@@ -57,9 +59,9 @@ async function loadCustomer(customerId) {
 router.get('/:customerId/messages', async (req, res) => {
   try {
     const customer = await loadCustomer(req.params.customerId);
-    if (!customer) return res.status(404).json({ success: false, error: 'Customer not found' });
+    if (!customer) return respond.notFound(req, res, 'Customer');
     if (tenantBlocksBusinessId(req, customer.business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 500);
     const r = await query(
@@ -70,10 +72,9 @@ router.get('/:customerId/messages', async (req, res) => {
         LIMIT $2`,
       [customer.id, limit]
     );
-    res.json({ success: true, customer, messages: r.rows.reverse() });
+    return respond.ok(req, res, { customer, messages: r.rows.reverse() });
   } catch (err) {
-    logger.error('GET /conversations/:id/messages failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /conversations/:id/messages', err);
   }
 });
 
@@ -87,25 +88,24 @@ router.get('/:customerId/messages', async (req, res) => {
 router.post('/:customerId/reply', requirePermission('conversations', 'write'), async (req, res) => {
   try {
     const customer = await loadCustomer(req.params.customerId);
-    if (!customer) return res.status(404).json({ success: false, error: 'Customer not found' });
+    if (!customer) return respond.notFound(req, res, 'Customer');
     if (tenantBlocksBusinessId(req, customer.business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const text = String(req.body?.text || '').trim();
-    if (!text) return res.status(400).json({ success: false, error: 'text is required' });
-    if (text.length > 4096) return res.status(400).json({ success: false, error: 'text is too long' });
+    if (!text) return respond.invalid(req, res, 'text is required', { text: 'is invalid' });
+    if (text.length > 4096) return respond.invalid(req, res, 'text is too long', { text: 'is invalid' });
 
     const result = await getAdapter(customer.channel).sendText(destOf(customer), text, {
       businessId: customer.business_id, customerId: customer.id
     });
     if (!result.success) {
-      return res.status(502).json({ success: false, error: result.error || 'Send failed' });
+      return respond.fail(req, res, { code: respond.CODES.UPSTREAM, message: result.error || 'Send failed' });
     }
     await query('UPDATE customers SET bot_paused = TRUE WHERE id = $1', [customer.id]);
-    res.json({ success: true });
+    return respond.ok(req, res, {});
   } catch (err) {
-    logger.error('POST /conversations/:id/reply failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'POST /conversations/:id/reply', err);
   }
 });
 
@@ -117,9 +117,9 @@ router.post('/:customerId/reply', requirePermission('conversations', 'write'), a
 router.get('/:customerId/summary', async (req, res) => {
   try {
     const customer = await loadCustomer(req.params.customerId);
-    if (!customer) return res.status(404).json({ success: false, error: 'Customer not found' });
+    if (!customer) return respond.notFound(req, res, 'Customer');
     if (tenantBlocksBusinessId(req, customer.business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const [messagesRes, stateRes, orderRes] = await Promise.all([
       query(
@@ -141,10 +141,9 @@ router.get('/:customerId/summary', async (req, res) => {
       cart,
       lastOrder: orderRes.rows[0] || null
     });
-    res.json({ success: true, summary });
+    return respond.ok(req, res, { summary });
   } catch (err) {
-    logger.error('GET /conversations/:id/summary failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /conversations/:id/summary', err);
   }
 });
 
@@ -152,15 +151,14 @@ router.get('/:customerId/summary', async (req, res) => {
 router.post('/:customerId/pause', requirePermission('conversations', 'write'), async (req, res) => {
   try {
     const customer = await loadCustomer(req.params.customerId);
-    if (!customer) return res.status(404).json({ success: false, error: 'Customer not found' });
+    if (!customer) return respond.notFound(req, res, 'Customer');
     if (tenantBlocksBusinessId(req, customer.business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     await query('UPDATE customers SET bot_paused = TRUE WHERE id = $1', [customer.id]);
-    res.json({ success: true });
+    return respond.ok(req, res, {});
   } catch (err) {
-    logger.error('POST /conversations/:id/pause failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'POST /conversations/:id/pause', err);
   }
 });
 
@@ -168,15 +166,14 @@ router.post('/:customerId/pause', requirePermission('conversations', 'write'), a
 router.post('/:customerId/resume', requirePermission('conversations', 'write'), async (req, res) => {
   try {
     const customer = await loadCustomer(req.params.customerId);
-    if (!customer) return res.status(404).json({ success: false, error: 'Customer not found' });
+    if (!customer) return respond.notFound(req, res, 'Customer');
     if (tenantBlocksBusinessId(req, customer.business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     await query('UPDATE customers SET bot_paused = FALSE WHERE id = $1', [customer.id]);
-    res.json({ success: true });
+    return respond.ok(req, res, {});
   } catch (err) {
-    logger.error('POST /conversations/:id/resume failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'POST /conversations/:id/resume', err);
   }
 });
 

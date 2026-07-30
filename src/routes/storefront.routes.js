@@ -6,6 +6,7 @@ const { isWithinBusinessHours, normalizeGhanaPhone } = require('../utils/helpers
 const orderService = require('../services/order.service');
 const { pickFrequentlyBoughtSuggestion } = require('../utils/upsell');
 const { recordAudit } = require('../utils/auditLog');
+const respond = require('../utils/response');
 
 const router = express.Router();
 
@@ -46,7 +47,7 @@ async function findPublicBusiness(slug) {
 router.get('/:slug', async (req, res) => {
   try {
     const business = await findPublicBusiness(req.params.slug);
-    if (!business) return res.status(404).json({ success: false, error: 'Shop not found' });
+    if (!business) return respond.notFound(req, res, 'Shop');
 
     const [productsRes, categoriesRes, bundlesRes] = await Promise.all([
       query(
@@ -76,9 +77,7 @@ router.get('/:slug', async (req, res) => {
       )
     ]);
 
-    res.json({
-      success: true,
-      shop: {
+    return respond.ok(req, res, {      shop: {
         name: business.name,
         industry: business.industry,
         welcome_message: business.welcome_message,
@@ -94,8 +93,7 @@ router.get('/:slug', async (req, res) => {
       bundles: bundlesRes.rows
     });
   } catch (err) {
-    logger.error('GET /storefront/:slug failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /storefront/:slug', err);
   }
 });
 
@@ -108,12 +106,12 @@ router.get('/:slug', async (req, res) => {
 router.get('/:slug/upsell', async (req, res) => {
   try {
     const business = await findPublicBusiness(req.params.slug);
-    if (!business) return res.status(404).json({ success: false, error: 'Shop not found' });
+    if (!business) return respond.notFound(req, res, 'Shop');
     const productRes = await query(
       'SELECT name FROM products WHERE id = $1 AND business_id = $2',
       [req.query.product_id, business.id]
     );
-    if (!productRes.rows[0]) return res.json({ success: true, suggestion: null });
+    if (!productRes.rows[0]) return respond.ok(req, res, { suggestion: null });
 
     const [coOccurrence, visibleRes] = await Promise.all([
       orderService.getFrequentlyBoughtWith(business.id, [productRes.rows[0].name], { limit: 5 }),
@@ -124,10 +122,9 @@ router.get('/:slug/upsell', async (req, res) => {
       )
     ]);
     const suggestion = pickFrequentlyBoughtSuggestion(coOccurrence, visibleRes.rows, [productRes.rows[0].name]);
-    res.json({ success: true, suggestion });
+    return respond.ok(req, res, { suggestion });
   } catch (err) {
-    logger.error('GET /storefront/:slug/upsell failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /storefront/:slug/upsell', err);
   }
 });
 
@@ -150,20 +147,20 @@ const CHECKOUT_ITEM_LIMIT = 40;
 router.post('/:slug/checkout', async (req, res) => {
   try {
     const business = await findPublicBusiness(req.params.slug);
-    if (!business) return res.status(404).json({ success: false, error: 'Shop not found' });
+    if (!business) return respond.notFound(req, res, 'Shop');
 
     const phone = normalizeGhanaPhone(req.body?.customer_phone);
-    if (!phone) return res.status(400).json({ success: false, error: 'A valid Ghana phone number is required' });
+    if (!phone) return respond.invalid(req, res, 'A valid Ghana phone number is required');
     const name = String(req.body?.customer_name || '').trim().slice(0, 200);
-    if (!name) return res.status(400).json({ success: false, error: 'customer_name is required' });
+    if (!name) return respond.invalid(req, res, 'customer_name is required', { customer_name: 'is invalid' });
 
     const items = Array.isArray(req.body?.items) ? req.body.items : [];
     const bundles = Array.isArray(req.body?.bundles) ? req.body.bundles : [];
     if (!items.length && !bundles.length) {
-      return res.status(400).json({ success: false, error: 'Cart is empty' });
+      return respond.invalid(req, res, 'Cart is empty');
     }
     if (items.length + bundles.length > CHECKOUT_ITEM_LIMIT) {
-      return res.status(400).json({ success: false, error: `Cart is limited to ${CHECKOUT_ITEM_LIMIT} lines` });
+      return respond.invalid(req, res, `Cart is limited to ${CHECKOUT_ITEM_LIMIT} lines`);
     }
 
     const cart = [];
@@ -177,8 +174,13 @@ router.post('/:slug/checkout', async (req, res) => {
       const byId = new Map(productsRes.rows.map(p => [p.id, p]));
       for (const it of items) {
         const p = byId.get(it?.product_id);
-        if (!p) return res.status(400).json({ success: false, error: `Unknown product in cart: ${it?.product_id}` });
-        if (!p.in_stock) return res.status(409).json({ success: false, error: `${p.name} is out of stock` });
+        if (!p) return respond.invalid(req, res, `Unknown product in cart: ${it?.product_id}`);
+        if (!p.in_stock) {
+          return respond.fail(req, res, {
+            code: respond.CODES.CONFLICT,
+            message: `${p.name} is out of stock`
+          });
+        }
         const qty = Number.isInteger(Number(it.quantity)) && Number(it.quantity) > 0 ? Number(it.quantity) : 1;
         cart.push({ product_id: p.id, name: p.name, price_ghs: Number(p.price_ghs), quantity: qty });
       }
@@ -192,7 +194,7 @@ router.post('/:slug/checkout', async (req, res) => {
       const byId = new Map(bundlesRes.rows.map(b => [b.id, b]));
       for (const b of bundles) {
         const bundle = byId.get(b?.bundle_id);
-        if (!bundle) return res.status(400).json({ success: false, error: `Unknown bundle in cart: ${b?.bundle_id}` });
+        if (!bundle) return respond.invalid(req, res, `Unknown bundle in cart: ${b?.bundle_id}`);
         const qty = Number.isInteger(Number(b.quantity)) && Number(b.quantity) > 0 ? Number(b.quantity) : 1;
         cart.push({ bundle_id: bundle.id, name: bundle.name, price_ghs: Number(bundle.price_ghs), quantity: qty });
       }
@@ -226,14 +228,11 @@ router.post('/:slug/checkout', async (req, res) => {
     const message = `Hi ${business.name}, I'd like to complete order #${order.order_number}`;
     const whatsappLink = digits ? `https://wa.me/${digits}?text=${encodeURIComponent(message)}` : null;
 
-    res.status(201).json({
-      success: true,
-      order: { order_number: order.order_number, total_ghs: order.total_ghs },
+    return respond.ok(req, res, {      order: { order_number: order.order_number, total_ghs: order.total_ghs },
       whatsapp_link: whatsappLink
-    });
+    }, { status: 201 });
   } catch (err) {
-    logger.error('POST /storefront/:slug/checkout failed: %s', err.message, { stack: err.stack });
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'POST /storefront/:slug/checkout', err);
   }
 });
 
@@ -245,10 +244,10 @@ router.post('/:slug/checkout', async (req, res) => {
 router.get('/:slug/qr', async (req, res) => {
   try {
     const slug = String(req.params.slug || '').toLowerCase();
-    if (!SLUG_RE.test(slug)) return res.status(404).json({ success: false, error: 'Shop not found' });
+    if (!SLUG_RE.test(slug)) return respond.notFound(req, res, 'Shop');
 
     const bizRes = await query('SELECT id FROM businesses WHERE slug = $1', [slug]);
-    if (!bizRes.rows[0]) return res.status(404).json({ success: false, error: 'Shop not found' });
+    if (!bizRes.rows[0]) return respond.notFound(req, res, 'Shop');
 
     const base = (process.env.PUBLIC_BASE_URL || '').replace(/\/$/, '');
     const url = base
@@ -260,8 +259,7 @@ router.get('/:slug/qr', async (req, res) => {
     res.set('Cache-Control', 'public, max-age=3600');
     res.send(png);
   } catch (err) {
-    logger.error('GET /storefront/:slug/qr failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /storefront/:slug/qr', err);
   }
 });
 

@@ -11,6 +11,7 @@ const { getLatencyStats } = require('../middleware/latency');
 const { getMetricsSnapshot } = require('../utils/metrics');
 const { recordAudit } = require('../utils/auditLog');
 const { toCsv } = require('../utils/csv');
+const respond = require('../utils/response');
 
 const router = express.Router();
 
@@ -47,10 +48,9 @@ router.get('/stats', async (_req, res) => {
         (SELECT COUNT(*)::int FROM message_log
             WHERE created_at >= NOW() - INTERVAL '24 hours')                  AS messages_last_24h
     `);
-    res.json({ success: true, stats: result.rows[0] });
+    return respond.ok(req, res, { stats: result.rows[0] });
   } catch (err) {
-    logger.error('GET /admin/stats failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /admin/stats', err);
   }
 });
 
@@ -74,10 +74,9 @@ router.get('/businesses', async (req, res) => {
         LIMIT $1`,
       [limit]
     );
-    res.json({ success: true, businesses: result.rows });
+    return respond.ok(req, res, { businesses: result.rows });
   } catch (err) {
-    logger.error('GET /admin/businesses failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /admin/businesses', err);
   }
 });
 
@@ -109,10 +108,9 @@ router.get('/businesses/incomplete-setup', async (_req, res) => {
         missing_steps: r.checklist.steps.filter(s => !s.complete).map(s => s.key),
         percent: r.checklist.percent
       }));
-    res.json({ success: true, businesses: incomplete });
+    return respond.ok(req, res, { businesses: incomplete });
   } catch (err) {
-    logger.error('GET /admin/businesses/incomplete-setup failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /admin/businesses/incomplete-setup', err);
   }
 });
 
@@ -130,10 +128,9 @@ router.get('/billing', async (req, res) => {
         LIMIT $1`,
       [limit]
     );
-    res.json({ success: true, transactions: result.rows });
+    return respond.ok(req, res, { transactions: result.rows });
   } catch (err) {
-    logger.error('GET /admin/billing failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /admin/billing', err);
   }
 });
 
@@ -174,10 +171,9 @@ router.get('/messages', async (req, res) => {
         LIMIT $${params.length}`,
       params
     );
-    res.json({ success: true, messages: result.rows });
+    return respond.ok(req, res, { messages: result.rows });
   } catch (err) {
-    logger.error('GET /admin/messages failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /admin/messages', err);
   }
 });
 
@@ -190,10 +186,9 @@ router.get('/plans', async (_req, res) => {
       `SELECT id, name, display_name, price_ghs, billing_cycle
          FROM plans WHERE is_active = TRUE ORDER BY price_ghs`
     );
-    res.json({ success: true, plans: result.rows });
+    return respond.ok(req, res, { plans: result.rows });
   } catch (err) {
-    logger.error('GET /admin/plans failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /admin/plans', err);
   }
 });
 
@@ -209,18 +204,19 @@ router.post('/businesses', async (req, res) => {
     const trialDays = Math.min(Math.max(parseInt(req.body?.trial_days, 10) || 14, 1), 90);
 
     if (!name || !String(name).trim()) {
-      return res.status(400).json({ success: false, error: 'Business name is required' });
+      return respond.invalid(req, res, 'Business name is required');
     }
     const phone = normalizeGhanaPhone(whatsapp_number);
     if (!phone) {
-      return res.status(400).json({ success: false, error: 'A valid WhatsApp number is required' });
+      return respond.invalid(req, res, 'A valid WhatsApp number is required');
     }
 
     const existing = await query('SELECT id, name FROM businesses WHERE whatsapp_number = $1', [phone]);
     if (existing.rows[0]) {
-      return res.status(409).json({
-        success: false,
-        error: `That number already belongs to "${existing.rows[0].name}"`
+      return respond.fail(req, res, {
+        code: respond.CODES.CONFLICT,
+        message: `That number already belongs to "${existing.rows[0].name}"`,
+        fields: { whatsapp_number: 'is already registered' }
       });
     }
 
@@ -247,10 +243,9 @@ router.post('/businesses', async (req, res) => {
       ).catch(err => logger.warn('admin onboarding welcome SMS failed: %s', err.message));
     }
 
-    res.status(201).json({ success: true, business });
+    return respond.ok(req, res, { business }, { status: 201 });
   } catch (err) {
-    logger.error('POST /admin/businesses failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'POST /admin/businesses', err);
   }
 });
 
@@ -272,7 +267,7 @@ router.get('/businesses/:id', async (req, res) => {
       [req.params.id]
     );
     const business = bizRes.rows[0];
-    if (!business) return res.status(404).json({ success: false, error: 'Business not found' });
+    if (!business) return respond.notFound(req, res, 'Business');
     delete business.wa_access_token;
     delete business.ig_page_access_token;
     delete business.messenger_page_access_token;
@@ -300,15 +295,12 @@ router.get('/businesses/:id', async (req, res) => {
       )
     ]);
 
-    res.json({
-      success: true,
-      business,
+    return respond.ok(req, res, {      business,
       counters: counters.rows[0],
       recent_messages: messages.rows
     });
   } catch (err) {
-    logger.error('GET /admin/businesses/:id failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /admin/businesses/:id', err);
   }
 });
 
@@ -338,46 +330,44 @@ router.patch('/businesses/:id', async (req, res) => {
       if (!(field in (req.body || {}))) continue;
       let value = req.body[field];
       if (field === 'status' && !BUSINESS_STATUSES.includes(value)) {
-        return res.status(400).json({ success: false, error: `status must be one of ${BUSINESS_STATUSES.join(', ')}` });
+        return respond.invalid(req, res, `status must be one of ${BUSINESS_STATUSES.join(', ')}`, { status: 'is invalid' });
       }
       if (field === 'whatsapp_number' || field === 'payout_momo_number') {
         value = value ? normalizeGhanaPhone(value) : null;
         if (req.body[field] && !value) {
-          return res.status(400).json({ success: false, error: `Invalid ${field}` });
+          return respond.invalid(req, res, `Invalid ${field}`);
         }
       }
       if (field === 'payout_momo_network' && value) {
         value = String(value).trim().toLowerCase();
         if (!MOMO_NETWORKS.includes(value)) {
-          return res.status(400).json({ success: false, error: `payout_momo_network must be one of ${MOMO_NETWORKS.join(', ')}` });
+          return respond.invalid(req, res, `payout_momo_network must be one of ${MOMO_NETWORKS.join(', ')}`, { payout_momo_network: 'is invalid' });
         }
       }
       if (field === 'delivery_fee_ghs') {
         value = Number(value);
         if (!Number.isFinite(value) || value < 0) {
-          return res.status(400).json({ success: false, error: 'Invalid delivery fee' });
+          return respond.invalid(req, res, 'Invalid delivery fee');
         }
       }
       if (field === 'vat_rate_pct') {
         value = Number(value);
         if (!Number.isFinite(value) || value < 0 || value > 100) {
-          return res.status(400).json({ success: false, error: 'vat_rate_pct must be a number between 0 and 100' });
+          return respond.invalid(req, res, 'vat_rate_pct must be a number between 0 and 100', { vat_rate_pct: 'is invalid' });
         }
       }
       if (field === 'slug' && value) {
         value = String(value).trim().toLowerCase();
         if (!/^[a-z0-9](?:[a-z0-9-]{1,58}[a-z0-9])?$/.test(value)) {
-          return res.status(400).json({
-            success: false,
-            error: 'slug must be 3-60 lowercase letters/numbers/hyphens, no leading/trailing hyphen'
-          });
+          return respond.invalid(req, res,
+            'slug must be 3-60 lowercase letters/numbers/hyphens, no leading/trailing hyphen',
+            { slug: 'is not a valid storefront handle' });
         }
       }
       if (field === 'closed_at' && value) {
-        return res.status(400).json({
-          success: false,
-          error: 'closed_at can only be cleared (reopen) here — pass null. To close an account, use POST /api/business/close.'
-        });
+        return respond.invalid(req, res,
+          'closed_at can only be cleared (reopen) here — pass null. To close an account, use POST /api/business/close.',
+          { closed_at: 'can only be cleared here' });
       }
       for (const col of ['logo_url', 'banner_url']) {
         if (field === col) value = value == null ? null : String(value).trim().slice(0, 500) || null;
@@ -386,7 +376,7 @@ router.patch('/businesses/:id', async (req, res) => {
       sets.push(`${field} = $${params.length}`);
     }
     if (!sets.length) {
-      return res.status(400).json({ success: false, error: 'No editable fields in request' });
+      return respond.invalid(req, res, 'No editable fields in request');
     }
     params.push(req.params.id);
     const result = await query(
@@ -395,7 +385,7 @@ router.patch('/businesses/:id', async (req, res) => {
       params
     );
     const business = result.rows[0];
-    if (!business) return res.status(404).json({ success: false, error: 'Business not found' });
+    if (!business) return respond.notFound(req, res, 'Business');
     delete business.wa_access_token;
     delete business.ig_page_access_token;
     delete business.messenger_page_access_token;
@@ -405,13 +395,12 @@ router.patch('/businesses/:id', async (req, res) => {
       actorType: 'admin', actorId: req.auth?.keyId, businessId: business.id,
       action: 'business.update', detail: { fields: changedFields }
     });
-    res.json({ success: true, business });
+    return respond.ok(req, res, { business });
   } catch (err) {
     if (err.code === '23505' && /slug/.test(err.constraint || '')) {
-      return res.status(409).json({ success: false, error: 'That storefront handle is already taken' });
+      return respond.fail(req, res, { code: respond.CODES.CONFLICT, message: 'That storefront handle is already taken' });
     }
-    logger.error('PATCH /admin/businesses/:id failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'PATCH /admin/businesses/:id', err);
   }
 });
 
@@ -422,20 +411,19 @@ router.patch('/businesses/:id', async (req, res) => {
 router.post('/businesses/:id/message', async (req, res) => {
   try {
     const body = String(req.body?.body || '').trim();
-    if (!body) return res.status(400).json({ success: false, error: 'Message body is required' });
+    if (!body) return respond.invalid(req, res, 'Message body is required');
 
     const bizRes = await query('SELECT id, whatsapp_number FROM businesses WHERE id = $1', [req.params.id]);
     const business = bizRes.rows[0];
-    if (!business) return res.status(404).json({ success: false, error: 'Business not found' });
+    if (!business) return respond.notFound(req, res, 'Business');
 
     const sent = await wa.sendText(business.whatsapp_number, body, { businessId: business.id });
     if (!sent.success) {
-      return res.status(502).json({ success: false, error: sent.error || 'WhatsApp send failed' });
+      return respond.fail(req, res, { code: respond.CODES.UPSTREAM, message: sent.error || 'WhatsApp send failed' });
     }
-    res.json({ success: true });
+    return respond.ok(req, res, {});
   } catch (err) {
-    logger.error('POST /admin/businesses/:id/message failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'POST /admin/businesses/:id/message', err);
   }
 });
 
@@ -446,7 +434,7 @@ router.post('/businesses/:id/message', async (req, res) => {
 router.post('/businesses/:id/api-key', async (req, res) => {
   try {
     const bizRes = await query('SELECT id, name FROM businesses WHERE id = $1', [req.params.id]);
-    if (!bizRes.rows[0]) return res.status(404).json({ success: false, error: 'Business not found' });
+    if (!bizRes.rows[0]) return respond.notFound(req, res, 'Business');
 
     const key = await issueKey({
       name: String(req.body?.name || `${bizRes.rows[0].name} (admin-issued)`).slice(0, 120),
@@ -457,10 +445,9 @@ router.post('/businesses/:id/api-key', async (req, res) => {
       actorType: 'admin', actorId: req.auth?.keyId, businessId: req.params.id,
       action: 'api_key.issue', detail: { key_id: key.id, name: key.name }
     });
-    res.status(201).json({ success: true, key });
+    return respond.ok(req, res, { key }, { status: 201 });
   } catch (err) {
-    logger.error('POST /admin/businesses/:id/api-key failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'POST /admin/businesses/:id/api-key', err);
   }
 });
 
@@ -562,10 +549,9 @@ router.get('/issues', async (_req, res) => {
       }))
     ].sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0)).slice(0, 150);
 
-    res.json({ success: true, issues });
+    return respond.ok(req, res, { issues });
   } catch (err) {
-    logger.error('GET /admin/issues failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /admin/issues', err);
   }
 });
 
@@ -590,9 +576,7 @@ router.get('/health', async (_req, res) => {
     );
     const dbLatencyMs = Date.now() - t0;
     const mem = process.memoryUsage();
-    res.json({
-      success: true,
-      health: {
+    return respond.ok(req, res, {      health: {
         ...queue.rows[0],
         db_latency_ms: dbLatencyMs,
         uptime_seconds: Math.round(process.uptime()),
@@ -607,8 +591,7 @@ router.get('/health', async (_req, res) => {
       }
     });
   } catch (err) {
-    logger.error('GET /admin/health failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /admin/health', err);
   }
 });
 
@@ -653,9 +636,7 @@ router.get('/ops', async (_req, res) => {
       error_rate_pct: r.total > 0 ? Math.round((r.failed / r.total) * 100) : 0
     }));
 
-    res.json({
-      success: true,
-      ops: {
+    return respond.ok(req, res, {      ops: {
         latency: getLatencyStats({ withinMinutes: 60 }),
         provider_error_rates: providerErrorRates,
         stuck_payments: stuckOrders.rows,
@@ -665,8 +646,7 @@ router.get('/ops', async (_req, res) => {
       }
     });
   } catch (err) {
-    logger.error('GET /admin/ops failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /admin/ops', err);
   }
 });
 
@@ -698,10 +678,9 @@ router.get('/audit-log', async (req, res) => {
       ]);
       return csvResponse(res, `audit-log-${new Date().toISOString().slice(0, 10)}.csv`, columns, rows);
     }
-    res.json({ success: true, audit_log: result.rows });
+    return respond.ok(req, res, { audit_log: result.rows });
   } catch (err) {
-    logger.error('GET /admin/audit-log failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /admin/audit-log', err);
   }
 });
 
@@ -726,10 +705,9 @@ router.get('/webhooks', async (req, res) => {
         ORDER BY received_at DESC LIMIT $${params.length}`,
       params
     );
-    res.json({ success: true, webhooks: result.rows });
+    return respond.ok(req, res, { webhooks: result.rows });
   } catch (err) {
-    logger.error('GET /admin/webhooks failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /admin/webhooks', err);
   }
 });
 
@@ -744,11 +722,10 @@ router.get('/webhooks/:id', async (req, res) => {
   try {
     const result = await query('SELECT * FROM webhook_events WHERE id = $1', [req.params.id]);
     const event = result.rows[0];
-    if (!event) return res.status(404).json({ success: false, error: 'Webhook event not found' });
-    res.json({ success: true, webhook: event });
+    if (!event) return respond.notFound(req, res, 'Webhook event');
+    return respond.ok(req, res, { webhook: event });
   } catch (err) {
-    logger.error('GET /admin/webhooks/:id failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /admin/webhooks/:id', err);
   }
 });
 
@@ -766,10 +743,9 @@ router.post('/webhooks/retry-failed', async (_req, res) => {
         RETURNING id`
     );
     logger.info('admin: requeued %d failed webhooks', result.rowCount);
-    res.json({ success: true, requeued: result.rowCount });
+    return respond.ok(req, res, { requeued: result.rowCount });
   } catch (err) {
-    logger.error('POST /admin/webhooks/retry-failed failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'POST /admin/webhooks/retry-failed', err);
   }
 });
 
@@ -784,12 +760,11 @@ router.post('/webhooks/:id/retry', async (req, res) => {
       [req.params.id]
     );
     if (!result.rowCount) {
-      return res.status(404).json({ success: false, error: 'No failed webhook with that id' });
+      return respond.fail(req, res, { code: respond.CODES.NOT_FOUND, message: 'No failed webhook with that id' });
     }
-    res.json({ success: true });
+    return respond.ok(req, res, {});
   } catch (err) {
-    logger.error('POST /admin/webhooks/:id/retry failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'POST /admin/webhooks/:id/retry', err);
   }
 });
 
@@ -809,7 +784,7 @@ router.post('/webhooks/:id/retry', async (req, res) => {
 router.post('/businesses/:id/impersonate', async (req, res) => {
   try {
     const bizRes = await query('SELECT id, name FROM businesses WHERE id = $1', [req.params.id]);
-    if (!bizRes.rows[0]) return res.status(404).json({ success: false, error: 'Business not found' });
+    if (!bizRes.rows[0]) return respond.notFound(req, res, 'Business');
 
     const ttl = Math.min(Math.max(parseInt(req.body?.ttl_minutes, 10) || 30, 5), 120);
     const session = await issueImpersonationToken({
@@ -823,10 +798,10 @@ router.post('/businesses/:id/impersonate', async (req, res) => {
       action: 'admin.impersonate_start',
       detail: { session_id: session.id, reason: req.body?.reason, ttl_minutes: ttl }
     });
-    res.status(201).json({ success: true, session });
+    return respond.ok(req, res, { session }, { status: 201 });
   } catch (err) {
     logger.error('POST /admin/businesses/:id/impersonate failed: %s', err.message);
-    res.status(400).json({ success: false, error: err.message || 'Internal server error' });
+    return respond.invalid(req, res, err.message || 'Internal server error');
   }
 });
 
@@ -834,15 +809,16 @@ router.post('/businesses/:id/impersonate', async (req, res) => {
 router.post('/impersonation/:id/revoke', async (req, res) => {
   try {
     const ok = await revokeImpersonationToken(req.params.id);
-    if (!ok) return res.status(404).json({ success: false, error: 'Session not found or already revoked' });
+    if (!ok) {
+      return respond.fail(req, res, { code: respond.CODES.NOT_FOUND, message: 'Session not found or already revoked' });
+    }
     recordAudit({
       actorType: 'admin', actorId: req.auth?.keyId, businessId: null,
       action: 'admin.impersonate_end', detail: { session_id: req.params.id }
     });
-    res.json({ success: true });
+    return respond.ok(req, res, {});
   } catch (err) {
-    logger.error('POST /admin/impersonation/:id/revoke failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'POST /admin/impersonation/:id/revoke', err);
   }
 });
 
@@ -855,10 +831,9 @@ router.get('/businesses/:id/impersonation-history', async (req, res) => {
         ORDER BY created_at DESC LIMIT 50`,
       [req.params.id]
     );
-    res.json({ success: true, sessions: result.rows });
+    return respond.ok(req, res, { sessions: result.rows });
   } catch (err) {
-    logger.error('GET /admin/businesses/:id/impersonation-history failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /admin/businesses/:id/impersonation-history', err);
   }
 });
 
@@ -884,7 +859,7 @@ router.get('/businesses/:id/health-score', async (req, res) => {
       [req.params.id]
     );
     const business = bizRes.rows[0];
-    if (!business) return res.status(404).json({ success: false, error: 'Business not found' });
+    if (!business) return respond.notFound(req, res, 'Business');
 
     const [msgRes, failedRes, subRes, quotaRes] = await Promise.all([
       query(
@@ -953,10 +928,9 @@ router.get('/businesses/:id/health-score', async (req, res) => {
     };
     const score = Object.values(factors).reduce((sum, f) => sum + f.points, 0);
 
-    res.json({ success: true, health_score: score, factors });
+    return respond.ok(req, res, { factors }, { meta: { health_score: score } });
   } catch (err) {
-    logger.error('GET /admin/businesses/:id/health-score failed: %s', err.message, { stack: err.stack });
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /admin/businesses/:id/health-score', err);
   }
 });
 
@@ -976,7 +950,7 @@ router.get('/businesses/:id/health-score', async (req, res) => {
 router.get('/businesses/:id/usage', async (req, res) => {
   try {
     const bizRes = await query('SELECT id, name FROM businesses WHERE id = $1', [req.params.id]);
-    if (!bizRes.rows[0]) return res.status(404).json({ success: false, error: 'Business not found' });
+    if (!bizRes.rows[0]) return respond.notFound(req, res, 'Business');
     const businessId = req.params.id;
 
     const [msgRes, broadcastRes, planRes] = await Promise.all([
@@ -1005,9 +979,7 @@ router.get('/businesses/:id/usage', async (req, res) => {
 
     const plan = planRes.rows[0] || null;
     const sent = msgRes.rows[0].sent_this_month;
-    res.json({
-      success: true,
-      usage: {
+    return respond.ok(req, res, {      usage: {
         plan_name: plan?.display_name || null,
         messages_sent_this_month: sent,
         messages_received_this_month: msgRes.rows[0].received_this_month,
@@ -1019,8 +991,7 @@ router.get('/businesses/:id/usage', async (req, res) => {
       }
     });
   } catch (err) {
-    logger.error('GET /admin/businesses/:id/usage failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /admin/businesses/:id/usage', err);
   }
 });
 
@@ -1100,10 +1071,9 @@ router.get('/risk-flags', async (_req, res) => {
       }))
     ].sort((a, b) => new Date(b.at) - new Date(a.at));
 
-    res.json({ success: true, flags });
+    return respond.ok(req, res, { flags });
   } catch (err) {
-    logger.error('GET /admin/risk-flags failed: %s', err.message, { stack: err.stack });
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /admin/risk-flags', err);
   }
 });
 

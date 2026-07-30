@@ -3,6 +3,7 @@ const logger = require('../utils/logger');
 const { query } = require('../config/database');
 const { requireAuth } = require('../middleware/auth');
 const { tenantBlocksBusinessId } = require('../middleware/tenantAccess');
+const respond = require('../utils/response');
 
 const router = express.Router();
 
@@ -15,12 +16,16 @@ router.use(requireAuth('any'));
 router.get('/', async (req, res) => {
   try {
     const { business_id, q } = req.query;
-    if (!business_id) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!business_id) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
     if (tenantBlocksBusinessId(req, business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const term = String(q || '').trim();
-    if (term.length < 2) return res.json({ success: true, orders: [], customers: [], products: [] });
+    if (term.length < 2) {
+      return respond.ok(req, res, { orders: [], customers: [], products: [] });
+    }
     // Escape ILIKE metacharacters so search text can't wildcard-match.
     const like = '%' + term.replace(/[\\%_]/g, '\\$&') + '%';
 
@@ -48,10 +53,11 @@ router.get('/', async (req, res) => {
       )
     ]);
 
-    res.json({ success: true, orders: orders.rows, customers: customers.rows, products: products.rows });
+    return respond.ok(req, res, {
+      orders: orders.rows, customers: customers.rows, products: products.rows
+    });
   } catch (err) {
-    logger.error('GET /search failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /search', err);
   }
 });
 

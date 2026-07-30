@@ -5,6 +5,7 @@ const { requireAuth, requirePermission } = require('../middleware/auth');
 const { resolveBusinessId } = require('../middleware/tenantAccess');
 const wa = require('../services/whatsapp.service');
 const { recordAudit } = require('../utils/auditLog');
+const respond = require('../utils/response');
 
 const router = express.Router();
 
@@ -75,7 +76,9 @@ function computeOnboardingSteps(business, productCount, staffCount = 0) {
 router.get('/status', async (req, res) => {
   try {
     const businessId = resolveBusinessId(req);
-    if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!businessId) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
 
     const bizRes = await query(
       `SELECT name, owner_name, wa_phone_number_id, payout_momo_number,
@@ -84,7 +87,7 @@ router.get('/status', async (req, res) => {
       [businessId]
     );
     const business = bizRes.rows[0];
-    if (!business) return res.status(404).json({ success: false, error: 'Business not found' });
+    if (!business) return respond.notFound(req, res, 'Business');
 
     const [productCount, staffCount] = await Promise.all([
       query('SELECT COUNT(*)::int AS n FROM products WHERE business_id = $1', [businessId]),
@@ -95,9 +98,7 @@ router.get('/status', async (req, res) => {
       )
     ]);
     const checklist = computeOnboardingSteps(business, productCount.rows[0].n, staffCount.rows[0].n);
-    res.json({
-      success: true,
-      ...checklist,
+    return respond.ok(req, res, {      ...checklist,
       // Platform-wide signal, not per-tenant: Paystack is a single platform
       // account (see migrate.js payouts note) — a merchant should know if
       // real money is moving yet or the whole platform is still on Paystack
@@ -105,8 +106,7 @@ router.get('/status', async (req, res) => {
       platform_test_mode: /^(sk|pk)_test_/.test(process.env.PAYSTACK_SECRET_KEY || '')
     });
   } catch (err) {
-    logger.error('GET /onboarding/status failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /onboarding/status', err);
   }
 });
 
@@ -123,14 +123,16 @@ router.get('/status', async (req, res) => {
 router.get('/webhook-health', async (req, res) => {
   try {
     const businessId = resolveBusinessId(req);
-    if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!businessId) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
 
     const bizRes = await query(
       'SELECT wa_phone_number_id, created_at FROM businesses WHERE id = $1',
       [businessId]
     );
     const business = bizRes.rows[0];
-    if (!business) return res.status(404).json({ success: false, error: 'Business not found' });
+    if (!business) return respond.notFound(req, res, 'Business');
 
     const msgRes = await query(
       `SELECT
@@ -151,9 +153,7 @@ router.get('/webhook-health', async (req, res) => {
       else whatsappStatus = ageHours < 2 ? 'unknown' : 'no_inbound_received';
     }
 
-    res.json({
-      success: true,
-      whatsapp: {
+    return respond.ok(req, res, {      whatsapp: {
         status: whatsappStatus,
         connected: !!business.wa_phone_number_id,
         inbound_message_count: m.inbound_count,
@@ -170,8 +170,7 @@ router.get('/webhook-health', async (req, res) => {
       }
     });
   } catch (err) {
-    logger.error('GET /onboarding/webhook-health failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /onboarding/webhook-health', err);
   }
 });
 
@@ -183,26 +182,27 @@ router.get('/webhook-health', async (req, res) => {
 router.post('/test-message', async (req, res) => {
   try {
     const businessId = resolveBusinessId(req);
-    if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!businessId) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
 
     const bizRes = await query('SELECT id, name, whatsapp_number FROM businesses WHERE id = $1', [businessId]);
     const business = bizRes.rows[0];
-    if (!business) return res.status(404).json({ success: false, error: 'Business not found' });
+    if (!business) return respond.notFound(req, res, 'Business');
 
     const body = `✅ Test message: your WhatsApp connection for ${business.name} is working. This confirms customers can reach your shop here.`;
     const sent = await wa.sendText(business.whatsapp_number, body, { businessId: business.id });
     if (!sent.success) {
-      return res.status(502).json({ success: false, error: sent.error || 'WhatsApp send failed' });
+      return respond.fail(req, res, { code: respond.CODES.UPSTREAM, message: sent.error || 'WhatsApp send failed' });
     }
 
     await query(
       'UPDATE businesses SET onboarding_test_message_sent_at = NOW(), updated_at = NOW() WHERE id = $1',
       [businessId]
     );
-    res.json({ success: true });
+    return respond.ok(req, res, {});
   } catch (err) {
-    logger.error('POST /onboarding/test-message failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'POST /onboarding/test-message', err);
   }
 });
 
@@ -309,17 +309,19 @@ const SAMPLE_CATALOGS = {
 router.post('/sample-catalog', requirePermission('products', 'write'), async (req, res) => {
   try {
     const businessId = resolveBusinessId(req);
-    if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!businessId) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
 
     const bizRes = await query('SELECT id, industry FROM businesses WHERE id = $1', [businessId]);
     const business = bizRes.rows[0];
-    if (!business) return res.status(404).json({ success: false, error: 'Business not found' });
+    if (!business) return respond.notFound(req, res, 'Business');
 
     const existingRes = await query('SELECT COUNT(*)::int AS n FROM products WHERE business_id = $1', [businessId]);
     if (existingRes.rows[0].n > 0 && !req.body?.force) {
-      return res.status(409).json({
-        success: false,
-        error: 'This shop already has products. Pass { "force": true } to add sample products anyway.'
+      return respond.fail(req, res, {
+        code: respond.CODES.CONFLICT,
+        message: 'This shop already has products. Pass { "force": true } to add sample products anyway.'
       });
     }
 
@@ -359,15 +361,12 @@ router.post('/sample-catalog', requirePermission('products', 'write'), async (re
       detail: { product_count: insertedProducts.length, industry: business.industry }
     });
 
-    res.status(201).json({
-      success: true,
-      products_added: insertedProducts.length,
+    return respond.ok(req, res, {      products_added: insertedProducts.length,
       categories_added: catalog.categories.length,
       promo_added: !!promo
-    });
+    }, { status: 201 });
   } catch (err) {
-    logger.error('POST /onboarding/sample-catalog failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'POST /onboarding/sample-catalog', err);
   }
 });
 

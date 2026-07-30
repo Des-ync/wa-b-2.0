@@ -271,3 +271,36 @@ test('no route destructures a validator result then uses a name it did not bind'
   assert.deepEqual(offenders, [],
     'these lines reference an unbound name — the request will hang, not 500');
 });
+
+/**
+ * respond.fail takes { code, message } — an `error` key is silently ignored,
+ * which turns an intended 400/409 into a 500 with the message dropped. A
+ * scripted conversion produced exactly that twice while migrating accounting
+ * and onboarding: the object literal from the old `res.status(400).json({
+ * success: false, error: '...' })` was carried over verbatim.
+ *
+ * Nothing about it looks wrong at a glance, and only one of the two had a
+ * test covering that branch.
+ */
+test('no route passes an `error` key to respond.fail', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const dir = path.join(__dirname, '..', 'src', 'routes');
+
+  const offenders = [];
+  for (const file of fs.readdirSync(dir).filter(f => f.endsWith('.js'))) {
+    const src = fs.readFileSync(path.join(dir, file), 'utf8');
+    // Look at each respond.fail( call's first ~4 lines for a bare `error:`.
+    const re = /respond\.fail\(req, res, \{([\s\S]{0,240}?)\}\s*\)/g;
+    let m;
+    while ((m = re.exec(src)) !== null) {
+      if (/(^|[\s{,])error\s*:/.test(m[1])) {
+        const line = src.slice(0, m.index).split('\n').length;
+        offenders.push(`${file}:${line}`);
+      }
+    }
+  }
+
+  assert.deepEqual(offenders, [],
+    'respond.fail ignores `error` — use { code, message }, or the status silently becomes 500');
+});

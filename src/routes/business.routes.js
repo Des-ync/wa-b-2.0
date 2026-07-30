@@ -6,6 +6,7 @@ const { resolveBusinessId } = require('../middleware/tenantAccess');
 const { normalizeGhanaPhone } = require('../utils/helpers');
 const { recordAudit } = require('../utils/auditLog');
 const { INDUSTRIES } = require('./onboarding.routes');
+const respond = require('../utils/response');
 
 const router = express.Router();
 
@@ -30,13 +31,14 @@ const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{1,58}[a-z0-9])?$/;
 router.get('/settings', async (req, res) => {
   try {
     const businessId = resolveBusinessId(req);
-    if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!businessId) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
     const r = await query(`SELECT ${SETTINGS_COLUMNS} FROM businesses WHERE id = $1`, [businessId]);
-    if (!r.rows[0]) return res.status(404).json({ success: false, error: 'Business not found' });
-    res.json({ success: true, settings: r.rows[0] });
+    if (!r.rows[0]) return respond.notFound(req, res, 'Business');
+    return respond.ok(req, res, { settings: r.rows[0] });
   } catch (err) {
-    logger.error('GET /business/settings failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /business/settings', err);
   }
 });
 
@@ -49,7 +51,9 @@ router.get('/settings', async (req, res) => {
 router.patch('/settings', requirePermission('settings'), async (req, res) => {
   try {
     const businessId = resolveBusinessId(req);
-    if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!businessId) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
     const body = req.body || {};
     const sets = [];
     const params = [businessId];
@@ -68,31 +72,30 @@ router.patch('/settings', requirePermission('settings'), async (req, res) => {
         set('support_phone', null);
       } else {
         const normalized = normalizeGhanaPhone(raw);
-        if (!normalized) return res.status(400).json({ success: false, error: 'support_phone is not a valid Ghana number' });
+        if (!normalized) return respond.invalid(req, res, 'support_phone is not a valid Ghana number', { support_phone: 'is invalid' });
         set('support_phone', normalized);
       }
     }
     if ('delivery_fee_ghs' in body) {
       const fee = Number(body.delivery_fee_ghs);
       if (!Number.isFinite(fee) || fee < 0 || fee > 10000) {
-        return res.status(400).json({ success: false, error: 'delivery_fee_ghs must be a non-negative number' });
+        return respond.invalid(req, res, 'delivery_fee_ghs must be a non-negative number', { delivery_fee_ghs: 'is invalid' });
       }
       set('delivery_fee_ghs', fee.toFixed(2));
     }
     if ('delivery_zones' in body) {
       const zones = body.delivery_zones == null ? [] : body.delivery_zones;
       if (!Array.isArray(zones) || zones.length > 9) {
-        return res.status(400).json({ success: false, error: 'delivery_zones must be an array of at most 9 zones' });
+        return respond.invalid(req, res, 'delivery_zones must be an array of at most 9 zones', { delivery_zones: 'is invalid' });
       }
       const clean = [];
       for (const z of zones) {
         const name = String(z?.name || '').trim();
         const fee = Number(z?.fee_ghs);
         if (!name || name.length > 40 || !Number.isFinite(fee) || fee < 0 || fee > 10000) {
-          return res.status(400).json({
-            success: false,
-            error: 'Each zone needs a name (≤40 chars) and a non-negative fee_ghs'
-          });
+          return respond.invalid(req, res,
+            'Each zone needs a name (≤40 chars) and a non-negative fee_ghs',
+            { delivery_zones: 'contains an invalid zone' });
         }
         clean.push({ name, fee_ghs: Number(fee.toFixed(2)) });
       }
@@ -101,31 +104,31 @@ router.patch('/settings', requirePermission('settings'), async (req, res) => {
     if ('bot_language' in body) {
       const v = String(body.bot_language || 'en').trim();
       if (!['en', 'tw'].includes(v)) {
-        return res.status(400).json({ success: false, error: "bot_language must be 'en' or 'tw'" });
+        return respond.invalid(req, res, "bot_language must be 'en' or 'tw'");
       }
       set('bot_language', v);
     }
     if ('name' in body) {
       const v = String(body.name || '').trim();
-      if (!v || v.length > 200) return res.status(400).json({ success: false, error: 'name is required (max 200 chars)' });
+      if (!v || v.length > 200) return respond.invalid(req, res, 'name is required (max 200 chars)', { name: 'is invalid' });
       set('name', v);
     }
     if ('owner_name' in body) {
       const v = String(body.owner_name || '').trim();
-      if (v.length > 200) return res.status(400).json({ success: false, error: 'owner_name too long (max 200 chars)' });
+      if (v.length > 200) return respond.invalid(req, res, 'owner_name too long (max 200 chars)', { owner_name: 'is invalid' });
       set('owner_name', v || null);
     }
     if ('industry' in body) {
       const v = String(body.industry || '').trim().toLowerCase();
       if (!INDUSTRIES.includes(v)) {
-        return res.status(400).json({ success: false, error: `industry must be one of: ${INDUSTRIES.join(', ')}` });
+        return respond.invalid(req, res, `industry must be one of: ${INDUSTRIES.join(', ')}`, { industry: 'is invalid' });
       }
       set('industry', v);
     }
     if ('vat_rate_pct' in body) {
       const n = Number(body.vat_rate_pct);
       if (!Number.isFinite(n) || n < 0 || n > 100) {
-        return res.status(400).json({ success: false, error: 'vat_rate_pct must be a number between 0 and 100' });
+        return respond.invalid(req, res, 'vat_rate_pct must be a number between 0 and 100', { vat_rate_pct: 'is invalid' });
       }
       set('vat_rate_pct', n);
     }
@@ -142,10 +145,9 @@ router.patch('/settings', requirePermission('settings'), async (req, res) => {
     if ('slug' in body) {
       const v = String(body.slug || '').trim().toLowerCase();
       if (!v || !SLUG_RE.test(v)) {
-        return res.status(400).json({
-          success: false,
-          error: 'slug must be 3-60 lowercase letters/numbers/hyphens, no leading/trailing hyphen'
-        });
+        return respond.invalid(req, res,
+          'slug must be 3-60 lowercase letters/numbers/hyphens, no leading/trailing hyphen',
+          { slug: 'is not a valid storefront handle' });
       }
       set('slug', v);
     }
@@ -155,7 +157,7 @@ router.patch('/settings', requirePermission('settings'), async (req, res) => {
         set('payout_momo_number', null);
       } else {
         const normalized = normalizeGhanaPhone(raw);
-        if (!normalized) return res.status(400).json({ success: false, error: 'payout_momo_number is not a valid Ghana number' });
+        if (!normalized) return respond.invalid(req, res, 'payout_momo_number is not a valid Ghana number', { payout_momo_number: 'is invalid' });
         set('payout_momo_number', normalized);
       }
     }
@@ -164,7 +166,7 @@ router.patch('/settings', requirePermission('settings'), async (req, res) => {
       if (!v) {
         set('payout_momo_network', null);
       } else if (!MOMO_NETWORKS.includes(v)) {
-        return res.status(400).json({ success: false, error: `payout_momo_network must be one of ${MOMO_NETWORKS.join(', ')}` });
+        return respond.invalid(req, res, `payout_momo_network must be one of ${MOMO_NETWORKS.join(', ')}`, { payout_momo_network: 'is invalid' });
       } else {
         set('payout_momo_network', v);
       }
@@ -173,7 +175,7 @@ router.patch('/settings', requirePermission('settings'), async (req, res) => {
       if (col in body) {
         const v = String(body[col] || '').trim();
         if (v && !TIME_RE.test(v)) {
-          return res.status(400).json({ success: false, error: `${col} must be HH:MM (24h)` });
+          return respond.invalid(req, res, `${col} must be HH:MM (24h)`);
         }
         set(col, v || null);
       }
@@ -184,14 +186,14 @@ router.patch('/settings', requirePermission('settings'), async (req, res) => {
     if ('cart_nudge_delay_minutes' in body) {
       const n = Number(body.cart_nudge_delay_minutes);
       if (!Number.isInteger(n) || n < 5 || n > 1440) {
-        return res.status(400).json({ success: false, error: 'cart_nudge_delay_minutes must be an integer between 5 and 1440' });
+        return respond.invalid(req, res, 'cart_nudge_delay_minutes must be an integer between 5 and 1440', { cart_nudge_delay_minutes: 'is invalid' });
       }
       set('cart_nudge_delay_minutes', n);
     }
     if ('cart_nudge_max_per_cart' in body) {
       const n = Number(body.cart_nudge_max_per_cart);
       if (!Number.isInteger(n) || n < 1 || n > 5) {
-        return res.status(400).json({ success: false, error: 'cart_nudge_max_per_cart must be an integer between 1 and 5' });
+        return respond.invalid(req, res, 'cart_nudge_max_per_cart must be an integer between 1 and 5', { cart_nudge_max_per_cart: 'is invalid' });
       }
       set('cart_nudge_max_per_cart', n);
     }
@@ -222,7 +224,7 @@ router.patch('/settings', requirePermission('settings'), async (req, res) => {
       if (col in body) {
         const n = Number(body[col]);
         if (!Number.isFinite(n) || n < min || n > max) {
-          return res.status(400).json({ success: false, error: `${col} must be a number between ${min} and ${max}` });
+          return respond.invalid(req, res, `${col} must be a number between ${min} and ${max}`);
         }
         set(col, n);
       }
@@ -230,55 +232,58 @@ router.patch('/settings', requirePermission('settings'), async (req, res) => {
     if ('loyalty_stamps_target' in body) {
       const n = Number(body.loyalty_stamps_target);
       if (!Number.isInteger(n) || n < 0 || n > 100) {
-        return res.status(400).json({ success: false, error: 'loyalty_stamps_target must be an integer between 0 and 100 (0 disables it)' });
+        return respond.invalid(req, res, 'loyalty_stamps_target must be an integer between 0 and 100 (0 disables it)', { loyalty_stamps_target: 'is invalid' });
       }
       set('loyalty_stamps_target', n);
     }
     if ('loyalty_birthday_discount_type' in body) {
       const v = String(body.loyalty_birthday_discount_type || '');
       if (!['percent', 'fixed'].includes(v)) {
-        return res.status(400).json({ success: false, error: "loyalty_birthday_discount_type must be 'percent' or 'fixed'" });
+        return respond.invalid(req, res, "loyalty_birthday_discount_type must be 'percent' or 'fixed'");
       }
       set('loyalty_birthday_discount_type', v);
     }
     if ('loyalty_vip_tiers' in body) {
       const tiers = body.loyalty_vip_tiers;
       if (!Array.isArray(tiers) || tiers.length > 10) {
-        return res.status(400).json({ success: false, error: 'loyalty_vip_tiers must be an array of at most 10 tiers' });
+        return respond.invalid(req, res, 'loyalty_vip_tiers must be an array of at most 10 tiers', { loyalty_vip_tiers: 'is invalid' });
       }
       const clean = [];
       for (const tier of tiers) {
         const name = String(tier?.name || '').trim().slice(0, 40);
         const minSpend = Number(tier?.min_spend_ghs);
         if (!name || !Number.isFinite(minSpend) || minSpend < 0) {
-          return res.status(400).json({ success: false, error: 'Each VIP tier needs a name and a non-negative min_spend_ghs' });
+          return respond.invalid(req, res, 'Each VIP tier needs a name and a non-negative min_spend_ghs');
         }
         clean.push({ name, min_spend_ghs: minSpend });
       }
       set('loyalty_vip_tiers', JSON.stringify(clean));
     }
 
-    if (!sets.length) return res.status(400).json({ success: false, error: 'No recognized settings in body' });
+    if (!sets.length) return respond.invalid(req, res, 'No recognized settings in body');
 
     const r = await query(
       `UPDATE businesses SET ${sets.join(', ')}, updated_at = NOW()
         WHERE id = $1 RETURNING ${SETTINGS_COLUMNS}`,
       params
     );
-    if (!r.rows[0]) return res.status(404).json({ success: false, error: 'Business not found' });
+    if (!r.rows[0]) return respond.notFound(req, res, 'Business');
     recordAudit({
       actorType: req.auth?.scope === 'admin' ? 'admin' : 'merchant',
       actorId: req.auth?.clerkUserId || req.auth?.keyId,
       businessId, action: 'settings.update',
       detail: { fields: sets.map(s => s.split(' ')[0]) }
     });
-    res.json({ success: true, settings: r.rows[0] });
+    return respond.ok(req, res, { settings: r.rows[0] });
   } catch (err) {
     if (err.code === '23505' && /slug/.test(err.constraint || '')) {
-      return res.status(409).json({ success: false, error: 'That storefront handle is already taken' });
+      return respond.fail(req, res, {
+        code: respond.CODES.CONFLICT,
+        message: 'That storefront handle is already taken',
+        fields: { slug: 'is already taken' }
+      });
     }
-    logger.error('PATCH /business/settings failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'PATCH /business/settings', err);
   }
 });
 
@@ -300,7 +305,9 @@ router.patch('/settings', requirePermission('settings'), async (req, res) => {
 router.get('/export', requirePermission('settings'), async (req, res) => {
   try {
     const businessId = resolveBusinessId(req);
-    if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!businessId) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
 
     const [businessRes, productsRes, customersRes, ordersRes, messagesRes] = await Promise.all([
       query(
@@ -325,7 +332,7 @@ router.get('/export', requirePermission('settings'), async (req, res) => {
       )
     ]);
     const business = businessRes.rows[0];
-    if (!business) return res.status(404).json({ success: false, error: 'Business not found' });
+    if (!business) return respond.notFound(req, res, 'Business');
 
     recordAudit({
       actorType: req.auth?.scope === 'admin' ? 'admin' : 'merchant',
@@ -349,8 +356,7 @@ router.get('/export', requirePermission('settings'), async (req, res) => {
     res.setHeader('Content-Disposition', `attachment; filename="wa-b-export-${businessId}-${new Date().toISOString().slice(0, 10)}.json"`);
     res.send(JSON.stringify(bundle, null, 2));
   } catch (err) {
-    logger.error('GET /business/export failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /business/export', err);
   }
 });
 
@@ -372,13 +378,14 @@ router.get('/export', requirePermission('settings'), async (req, res) => {
 router.post('/close', requirePermission('settings'), async (req, res) => {
   try {
     const businessId = resolveBusinessId(req);
-    if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!businessId) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
     if (req.body?.confirm !== true) {
-      return res.status(400).json({
-        success: false,
-        error: 'Pass { "confirm": true } to close the account. This does not delete your data — ' +
-               'orders, customers and messages are retained; your storefront and bot stop being reachable.'
-      });
+      return respond.invalid(req, res,
+        'Pass { "confirm": true } to close the account. This does not delete your data — ' +
+        'orders, customers and messages are retained; your storefront and bot stop being reachable.',
+        { confirm: 'must be true' });
     }
     const reason = req.body?.reason ? String(req.body.reason).trim().slice(0, 500) : null;
     const result = await query(
@@ -387,17 +394,19 @@ router.post('/close', requirePermission('settings'), async (req, res) => {
       [businessId, reason]
     );
     if (!result.rows[0]) {
-      return res.status(409).json({ success: false, error: 'This account is already closed.' });
+      return respond.fail(req, res, {
+        code: respond.CODES.CONFLICT,
+        message: 'This account is already closed.'
+      });
     }
     recordAudit({
       actorType: req.auth?.scope === 'admin' ? 'admin' : 'merchant',
       actorId: req.auth?.clerkUserId || req.auth?.keyId, businessId,
       action: 'business.closed', detail: { reason }
     });
-    res.json({ success: true, closed_at: result.rows[0].closed_at });
+    return respond.ok(req, res, { closed_at: result.rows[0].closed_at });
   } catch (err) {
-    logger.error('POST /business/close failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'POST /business/close', err);
   }
 });
 

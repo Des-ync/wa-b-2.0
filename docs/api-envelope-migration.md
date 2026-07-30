@@ -46,29 +46,37 @@ migration. A request header costs nothing and lets each client move when it is r
 | `notification.routes.js` | ✅ | `test/notification.routes.test.js` (10) | `unread_count` moved to `meta`. |
 | `order.routes.js` | ✅ | `orderMarkPaid`, `orderStatsToday`, `orderDelivery`, `orderPaymentReminder`, `order.paidPathParity` | Largest and highest-traffic; migrate after a smaller group has proven the pattern under load. |
 | `product.routes.js` | ✅ | `test/product.routes.test.js` (31) | All four hand-rolled validators replaced by schemas. Tests written FIRST, against the old behaviour. |
-| `customer.routes.js` | ☐ | — | |
-| `business.routes.js` | ☐ | `businessSettings.routes.test.js` | |
-| `analytics.routes.js` | ☐ | `analytics.deliverySla.test.js` | Read-only; low risk. |
-| `conversations.routes.js` | ☐ | `conversationSummary.test.js` | |
-| `broadcast.routes.js` | ☐ | — | |
-| `promo.routes.js` | ☐ | `promoEligibility.test.js` | |
-| `storefront.routes.js` | ☐ | `storefront.routes.test.js` | **Public** — the storefront HTML reads it directly. Check `public/storefront.html` before migrating. |
+| `customer.routes.js` | ✅ | `test/customer.routes.test.js` (19) | |
+| `business.routes.js` | ✅ | `businessSettings.routes.test.js` (17) | |
+| `analytics.routes.js` | ✅ | `analytics.deliverySla.test.js` | Read-only; low risk. |
+| `conversations.routes.js` | ✅ | `conversationSummary.test.js` | |
+| `broadcast.routes.js` | ✅ | `test/broadcast.routes.test.js` (9) | |
+| `promo.routes.js` | ✅ | `test/promo.routes.test.js` (15) | |
+| `storefront.routes.js` | ✅ | `storefront.routes.test.js` | **Public** — the storefront HTML reads it directly. Check `public/storefront.html` before migrating. |
 | `inventory.routes.js` | ✅ | `inventory.routes.test.js` | |
-| `accounting.routes.js` | ☐ | `accounting.routes.test.js` | |
+| `accounting.routes.js` | ✅ | `accounting.routes.test.js` | |
 | `automations.routes.js` | ✅ | `automations.routes.test.js` | |
 | `auditlog.routes.js` | ✅ | `auditlog.routes.test.js` | |
-| `onboarding.routes.js` | ☐ | `onboarding.test.js` | Consumed by both dashboard and mobile checklist. |
-| `admin.routes.js` | ☐ | `admin.routes.critical.test.js` | Largest file (1,110 lines). |
+| `onboarding.routes.js` | ✅ | `onboarding.test.js` | Consumed by both dashboard and mobile checklist. |
+| `admin.routes.js` | ✅ | `admin.routes.critical.test.js` | Largest file (1,110 lines). |
 | `auth.routes.js` | ☐ | `auth.routes.test.js` | ⚠️ See the `link_required` warning below. |
 | `receipt.routes.js` | ☐ | `receipt.routes.test.js` | **Public** — `public/receipt.html` reads it directly. |
 | `webhook.routes.js` | ☐ | — | ⚠️ Gateways read these responses; the shape is a third-party contract, not ours. **Probably should never migrate.** |
 | `payment.routes.js` | ☐ | — | Same caution as webhooks for any gateway-facing route. |
-| `subscription.routes.js` | ☐ | `billingPermissions.routes.test.js` | |
-| `apikey.routes.js` | ☐ | `apikey.routes.test.js` | |
-| `device.routes.js` | ☐ | — | |
-| `search.routes.js` | ☐ | — | |
+| `subscription.routes.js` | ✅ | `billingPermissions.routes.test.js` | |
+| `apikey.routes.js` | ✅ | `apikey.routes.test.js` | |
+| `device.routes.js` | ✅ | — | |
+| `search.routes.js` | ✅ | — | |
 
-**7 of 25 migrated.**
+**21 of 26 migrated.** The five remaining are deliberate:
+
+| Not migrated | Why |
+|---|---|
+| `auth.routes.js` | Uses the legacy `error` string as a machine-readable code (`link_required`), which `login.dart` branches on. Migrating it needs that mapped to `error.code` verbatim — see the warning below. |
+| `webhook.routes.js` | Paystack and Meta read these responses. The shape is their contract, not ours. |
+| `payment.routes.js` | Same — gateway-facing. |
+| `receipt.routes.js` | `public/receipt.html` reads it directly. |
+| `contact.routes.js` | Added by another branch after this migration started. |
 
 ---
 
@@ -119,9 +127,17 @@ migration. A request header costs nothing and lets each client move when it is r
   branch. A third guard in `test/response.test.js` now scans for exactly that shape.
   **A route group with no tests must get characterisation tests BEFORE it is migrated**,
   as `product.routes.js` did.
+- **⚠️ `apikey.routes.js` returns `err.message` on a 500.** Preserved verbatim by the
+  migration, because changing it is a security fix rather than a refactor — but it is one:
+  a database error there would put driver internals in front of a caller. Worth a separate
+  look.
 - **`msg()` preserves legacy error prose.** Merchants read these strings; a schema's
   generated wording ("must be 0 or more") is not the same product as
   "price_ghs must be a non-negative number". Wrap the rule.
+- **⚠️ `respond.fail` ignores an `error` key.** It takes `{ code, message }`. Carrying the
+  old `{ success: false, error: '...' }` literal across turns an intended 400/409 into a
+  500 with the message dropped, and it looks fine at a glance. A fourth guard in
+  `test/response.test.js` now scans for it.
 - **Public/gateway-facing routes are a third-party contract.** Webhook and payment
   responses are read by Paystack/Meta, and receipt/storefront responses by the static HTML
   in `public/`. Do not change those shapes to suit our own tidiness.

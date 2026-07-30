@@ -8,6 +8,7 @@ const { pdfResponse } = require('../utils/pdf');
 const { recordAudit } = require('../utils/auditLog');
 const paystack = require('../services/paystack.service');
 const { generateReference } = require('../utils/helpers');
+const respond = require('../utils/response');
 
 const router = express.Router();
 
@@ -45,9 +46,11 @@ function csvResponse(res, filename, header, rows) {
 router.get('/daily-sales', requirePermission('financial', 'read'), async (req, res) => {
   try {
     const businessId = resolveBusinessId(req);
-    if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!businessId) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
     if (tenantBlocksBusinessId(req, businessId)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const date = DATE_RE.test(req.query.date || '') ? req.query.date : null;
 
@@ -109,10 +112,9 @@ router.get('/daily-sales', requirePermission('financial', 'read'), async (req, r
         rows
       });
     }
-    res.json({ success: true, date: date || null, report });
+    return respond.ok(req, res, { report }, { meta: { date: date || null } });
   } catch (err) {
-    logger.error('GET /accounting/daily-sales failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /accounting/daily-sales', err);
   }
 });
 
@@ -130,16 +132,18 @@ router.get('/daily-sales', requirePermission('financial', 'read'), async (req, r
 router.get('/vat-export', requirePermission('financial', 'read'), async (req, res) => {
   try {
     const businessId = resolveBusinessId(req);
-    if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!businessId) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
     if (tenantBlocksBusinessId(req, businessId)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     if (!MONTH_RE.test(req.query.month || '')) {
-      return res.status(400).json({ success: false, error: 'month is required as YYYY-MM' });
+      return respond.invalid(req, res, 'month is required as YYYY-MM', { month: 'is invalid' });
     }
     const bizRes = await query('SELECT vat_rate_pct FROM businesses WHERE id = $1', [businessId]);
     const business = bizRes.rows[0];
-    if (!business) return res.status(404).json({ success: false, error: 'Business not found' });
+    if (!business) return respond.notFound(req, res, 'Business');
     const rate = Number(business.vat_rate_pct) || 0;
 
     const result = await query(
@@ -178,8 +182,7 @@ router.get('/vat-export', requirePermission('financial', 'read'), async (req, re
     }
     csvResponse(res, `vat-export-${req.query.month}.csv`, columns, rows);
   } catch (err) {
-    logger.error('GET /accounting/vat-export failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /accounting/vat-export', err);
   }
 });
 
@@ -201,9 +204,11 @@ router.get('/vat-export', requirePermission('financial', 'read'), async (req, re
 router.get('/reconciliation', requirePermission('financial', 'read'), async (req, res) => {
   try {
     const businessId = resolveBusinessId(req);
-    if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!businessId) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
     if (tenantBlocksBusinessId(req, businessId)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const from = DATE_RE.test(req.query.from || '') ? req.query.from : null;
     const to = DATE_RE.test(req.query.to || '') ? req.query.to : null;
@@ -241,16 +246,13 @@ router.get('/reconciliation', requirePermission('financial', 'read'), async (req
       }
       return csvResponse(res, `payout-reconciliation-${label}.csv`, columns, rows);
     }
-    res.json({
-      success: true,
-      total_paid_orders: result.rows.length,
+    return respond.ok(req, res, {      total_paid_orders: result.rows.length,
       unmatched_count: unmatched.length,
       unmatched,
       orders: result.rows
     });
   } catch (err) {
-    logger.error('GET /accounting/reconciliation failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /accounting/reconciliation', err);
   }
 });
 
@@ -262,18 +264,19 @@ router.get('/reconciliation', requirePermission('financial', 'read'), async (req
 router.get('/payouts', requirePermission('financial', 'read'), async (req, res) => {
   try {
     const businessId = resolveBusinessId(req);
-    if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!businessId) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
     if (tenantBlocksBusinessId(req, businessId)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const result = await query(
       `SELECT * FROM payouts WHERE business_id = $1 ORDER BY created_at DESC LIMIT 200`,
       [businessId]
     );
-    res.json({ success: true, payouts: result.rows });
+    return respond.ok(req, res, { payouts: result.rows });
   } catch (err) {
-    logger.error('GET /accounting/payouts failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /accounting/payouts', err);
   }
 });
 
@@ -285,9 +288,11 @@ router.get('/payouts', requirePermission('financial', 'read'), async (req, res) 
 router.get('/payout-balance', requirePermission('financial', 'read'), async (req, res) => {
   try {
     const businessId = resolveBusinessId(req);
-    if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!businessId) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
     if (tenantBlocksBusinessId(req, businessId)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const collectedRes = await query(
       `SELECT COALESCE(SUM(total_ghs), 0) AS collected FROM orders WHERE business_id = $1 AND payment_status = 'paid'`,
@@ -299,15 +304,12 @@ router.get('/payout-balance', requirePermission('financial', 'read'), async (req
     );
     const collected = Number(collectedRes.rows[0].collected);
     const paidOut = Number(paidOutRes.rows[0].paid_out);
-    res.json({
-      success: true,
-      collected_ghs: collected.toFixed(2),
+    return respond.ok(req, res, {      collected_ghs: collected.toFixed(2),
       paid_out_ghs: paidOut.toFixed(2),
       balance_ghs: (collected - paidOut).toFixed(2)
     });
   } catch (err) {
-    logger.error('GET /accounting/payout-balance failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /accounting/payout-balance', err);
   }
 });
 
@@ -319,19 +321,21 @@ router.get('/payout-balance', requirePermission('financial', 'read'), async (req
 router.post('/payouts', requirePermission('financial', 'write'), async (req, res) => {
   try {
     const businessId = resolveBusinessId(req);
-    if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!businessId) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
     if (tenantBlocksBusinessId(req, businessId)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const amount = Number(req.body?.amount_ghs);
     if (!Number.isFinite(amount) || amount <= 0) {
-      return res.status(400).json({ success: false, error: 'amount_ghs must be a positive number' });
+      return respond.invalid(req, res, 'amount_ghs must be a positive number', { amount_ghs: 'is invalid' });
     }
     let network = null;
     if (req.body?.momo_network) {
       network = String(req.body.momo_network).trim().toLowerCase();
       if (!MOMO_NETWORKS.includes(network)) {
-        return res.status(400).json({ success: false, error: `momo_network must be one of ${MOMO_NETWORKS.join(', ')}` });
+        return respond.invalid(req, res, `momo_network must be one of ${MOMO_NETWORKS.join(', ')}`, { momo_network: 'is invalid' });
       }
     }
     const result = await query(
@@ -352,10 +356,9 @@ router.post('/payouts', requirePermission('financial', 'write'), async (req, res
       businessId, action: 'accounting.payout_recorded',
       detail: { amount_ghs: amount }
     });
-    res.status(201).json({ success: true, payout: result.rows[0] });
+    return respond.ok(req, res, { payout: result.rows[0] }, { status: 201 });
   } catch (err) {
-    logger.error('POST /accounting/payouts failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'POST /accounting/payouts', err);
   }
 });
 
@@ -379,14 +382,16 @@ router.post('/payouts', requirePermission('financial', 'write'), async (req, res
 router.post('/payouts/auto', requirePermission('financial', 'write'), async (req, res) => {
   try {
     const businessId = resolveBusinessId(req);
-    if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!businessId) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
     if (tenantBlocksBusinessId(req, businessId)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
 
     const amount = Number(req.body?.amount_ghs);
     if (!Number.isFinite(amount) || amount <= 0) {
-      return res.status(400).json({ success: false, error: 'amount_ghs must be a positive number' });
+      return respond.invalid(req, res, 'amount_ghs must be a positive number', { amount_ghs: 'is invalid' });
     }
 
     const bizRes = await query(
@@ -394,12 +399,11 @@ router.post('/payouts/auto', requirePermission('financial', 'write'), async (req
       [businessId]
     );
     const business = bizRes.rows[0];
-    if (!business) return res.status(404).json({ success: false, error: 'Business not found' });
+    if (!business) return respond.notFound(req, res, 'Business');
     if (!business.payout_momo_number || !MOMO_NETWORKS.includes(business.payout_momo_network)) {
-      return res.status(400).json({
-        success: false,
-        error: 'Automated payout requires a payout MoMo number and network on file'
-      });
+      return respond.invalid(req, res,
+        'Automated payout requires a payout MoMo number and network on file',
+        { payout_momo_number: 'is not configured' });
     }
 
     const recipient = await paystack.createTransferRecipient({
@@ -409,7 +413,7 @@ router.post('/payouts/auto', requirePermission('financial', 'write'), async (req
     });
     if (!recipient.success) {
       logger.error('Transfer recipient creation failed for business %s: %s', businessId, recipient.error);
-      return res.status(502).json({ success: false, error: recipient.error || 'Could not register payout recipient' });
+      return respond.fail(req, res, { code: respond.CODES.UPSTREAM, message: recipient.error || 'Could not register payout recipient' });
     }
 
     const reference = generateReference('PAYOUT');
@@ -442,12 +446,12 @@ router.post('/payouts/auto', requirePermission('financial', 'write'), async (req
     if (result.requiresOtp) {
       logger.error('Automated payout for business %s requires OTP finalization (disable OTP for Transfers in Paystack Dashboard)', businessId);
       await query(`UPDATE payouts SET status = 'failed' WHERE id = $1`, [payoutId]);
-      return res.status(409).json({ success: false, error: result.error });
+      return respond.fail(req, res, { code: respond.CODES.CONFLICT, message: result.error });
     }
     if (!result.success) {
       logger.error('Automated payout failed for business %s: %s', businessId, result.error);
       await query(`UPDATE payouts SET status = 'failed' WHERE id = $1`, [payoutId]);
-      return res.status(502).json({ success: false, error: result.error || 'Payout request failed' });
+      return respond.fail(req, res, { code: respond.CODES.UPSTREAM, message: result.error || 'Payout request failed' });
     }
 
     const inserted = await query(
@@ -462,10 +466,9 @@ router.post('/payouts/auto', requirePermission('financial', 'write'), async (req
       detail: { amount_ghs: amount, reference }
     });
 
-    res.status(202).json({ success: true, payout: inserted.rows[0] });
+    return respond.ok(req, res, { payout: inserted.rows[0] }, { status: 202 });
   } catch (err) {
-    logger.error('POST /accounting/payouts/auto failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'POST /accounting/payouts/auto', err);
   }
 });
 
@@ -477,9 +480,11 @@ router.post('/payouts/auto', requirePermission('financial', 'write'), async (req
 router.get('/expenses', requirePermission('financial', 'read'), async (req, res) => {
   try {
     const businessId = resolveBusinessId(req);
-    if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!businessId) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
     if (tenantBlocksBusinessId(req, businessId)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const from = DATE_RE.test(req.query.from || '') ? req.query.from : null;
     const to = DATE_RE.test(req.query.to || '') ? req.query.to : null;
@@ -491,10 +496,9 @@ router.get('/expenses', requirePermission('financial', 'read'), async (req, res)
         ORDER BY expense_date DESC, created_at DESC`,
       [businessId, from, to]
     );
-    res.json({ success: true, expenses: result.rows });
+    return respond.ok(req, res, { expenses: result.rows });
   } catch (err) {
-    logger.error('GET /accounting/expenses failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /accounting/expenses', err);
   }
 });
 
@@ -502,17 +506,19 @@ router.get('/expenses', requirePermission('financial', 'read'), async (req, res)
 router.post('/expenses', requirePermission('financial', 'write'), async (req, res) => {
   try {
     const businessId = resolveBusinessId(req);
-    if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!businessId) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
     if (tenantBlocksBusinessId(req, businessId)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const amount = Number(req.body?.amount_ghs);
     if (!Number.isFinite(amount) || amount <= 0) {
-      return res.status(400).json({ success: false, error: 'amount_ghs must be a positive number' });
+      return respond.invalid(req, res, 'amount_ghs must be a positive number', { amount_ghs: 'is invalid' });
     }
     let expenseDate = req.body?.expense_date;
     if (expenseDate && !DATE_RE.test(expenseDate)) {
-      return res.status(400).json({ success: false, error: 'expense_date must be YYYY-MM-DD' });
+      return respond.invalid(req, res, 'expense_date must be YYYY-MM-DD', { expense_date: 'is invalid' });
     }
     const result = await query(
       `INSERT INTO expenses (business_id, category, amount_ghs, description, expense_date, created_by)
@@ -526,10 +532,9 @@ router.post('/expenses', requirePermission('financial', 'write'), async (req, re
         req.auth?.clerkUserId || req.auth?.keyId || null
       ]
     );
-    res.status(201).json({ success: true, expense: result.rows[0] });
+    return respond.ok(req, res, { expense: result.rows[0] }, { status: 201 });
   } catch (err) {
-    logger.error('POST /accounting/expenses failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'POST /accounting/expenses', err);
   }
 });
 
@@ -538,15 +543,14 @@ router.delete('/expenses/:id', requirePermission('financial', 'write'), async (r
   try {
     const existing = await query('SELECT business_id FROM expenses WHERE id = $1', [req.params.id]);
     const expense = existing.rows[0];
-    if (!expense) return res.status(404).json({ success: false, error: 'Expense not found' });
+    if (!expense) return respond.notFound(req, res, 'Expense');
     if (tenantBlocksBusinessId(req, expense.business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     await query('DELETE FROM expenses WHERE id = $1', [req.params.id]);
-    res.json({ success: true });
+    return respond.ok(req, res, {});
   } catch (err) {
-    logger.error('DELETE /accounting/expenses/:id failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'DELETE /accounting/expenses/:id', err);
   }
 });
 
@@ -558,9 +562,11 @@ router.delete('/expenses/:id', requirePermission('financial', 'write'), async (r
 router.get('/profit-loss', requirePermission('financial', 'read'), async (req, res) => {
   try {
     const businessId = resolveBusinessId(req);
-    if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!businessId) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
     if (tenantBlocksBusinessId(req, businessId)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const from = DATE_RE.test(req.query.from || '') ? req.query.from : null;
     const to = DATE_RE.test(req.query.to || '') ? req.query.to : null;
@@ -584,16 +590,13 @@ router.get('/profit-loss', requirePermission('financial', 'read'), async (req, r
     );
     const totalExpenses = expenseRes.rows.reduce((sum, r) => sum + Number(r.expenses), 0);
     const revenue = Number(revenueRes.rows[0].revenue);
-    res.json({
-      success: true,
-      revenue_ghs: revenue.toFixed(2),
+    return respond.ok(req, res, {      revenue_ghs: revenue.toFixed(2),
       expenses_ghs: totalExpenses.toFixed(2),
       expenses_by_category: expenseRes.rows,
       net_ghs: (revenue - totalExpenses).toFixed(2)
     });
   } catch (err) {
-    logger.error('GET /accounting/profit-loss failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /accounting/profit-loss', err);
   }
 });
 
@@ -613,9 +616,11 @@ router.get('/profit-loss', requirePermission('financial', 'read'), async (req, r
 router.get('/inventory-valuation', requirePermission('financial', 'read'), async (req, res) => {
   try {
     const businessId = resolveBusinessId(req);
-    if (!businessId) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!businessId) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
     if (tenantBlocksBusinessId(req, businessId)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const result = await query(
       `SELECT name, category, stock_qty, cost_price_ghs, price_ghs
@@ -656,16 +661,13 @@ router.get('/inventory-valuation', requirePermission('financial', 'read'), async
       }
       return csvResponse(res, `inventory-valuation-${new Date().toISOString().slice(0, 10)}.csv`, columns, rows);
     }
-    res.json({
-      success: true,
-      total_value_ghs: Number(totalValueGhs.toFixed(2)),
+    return respond.ok(req, res, {      total_value_ghs: Number(totalValueGhs.toFixed(2)),
       untracked_count: untrackedCount,
       uncosted_count: uncostedCount,
       items
     });
   } catch (err) {
-    logger.error('GET /accounting/inventory-valuation failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /accounting/inventory-valuation', err);
   }
 });
 

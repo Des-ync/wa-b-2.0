@@ -6,6 +6,7 @@ const { tenantBlocksBusinessId } = require('../middleware/tenantAccess');
 const { buildAudienceClauses, SEGMENTS } = require('../utils/audience');
 const { computeVipTier, computePointsRedemptionValue, generateRewardCode } = require('../utils/loyalty');
 const { getAdapter, destOf } = require('../services/channel.adapter');
+const respond = require('../utils/response');
 
 const router = express.Router();
 
@@ -19,9 +20,11 @@ router.use(requireAuth('any'));
 router.get('/', async (req, res) => {
   try {
     const { business_id, sort } = req.query;
-    if (!business_id) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!business_id) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
     if (tenantBlocksBusinessId(req, business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
     const orderBy = sort === 'recent'
@@ -41,10 +44,9 @@ router.get('/', async (req, res) => {
         LIMIT $${params.length}`,
       params
     );
-    res.json({ success: true, customers: r.rows });
+    return respond.ok(req, res, { customers: r.rows });
   } catch (err) {
-    logger.error('GET /customers failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /customers', err);
   }
 });
 
@@ -55,9 +57,11 @@ router.get('/', async (req, res) => {
 router.get('/segments/summary', async (req, res) => {
   try {
     const { business_id } = req.query;
-    if (!business_id) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!business_id) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
     if (tenantBlocksBusinessId(req, business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const segmentEntries = Object.entries(SEGMENTS);
     const segmentCounts = await Promise.all(segmentEntries.map(([key, def]) =>
@@ -73,10 +77,9 @@ router.get('/segments/summary', async (req, res) => {
         LIMIT 20`,
       [business_id]
     );
-    res.json({ success: true, segments: segmentCounts, tags: tagsRes.rows });
+    return respond.ok(req, res, { segments: segmentCounts, tags: tagsRes.rows });
   } catch (err) {
-    logger.error('GET /customers/segments/summary failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /customers/segments/summary', err);
   }
 });
 
@@ -89,9 +92,9 @@ router.get('/:id/profile', async (req, res) => {
   try {
     const custRes = await query('SELECT * FROM customers WHERE id = $1', [req.params.id]);
     const customer = custRes.rows[0];
-    if (!customer) return res.status(404).json({ success: false, error: 'Customer not found' });
+    if (!customer) return respond.notFound(req, res, 'Customer');
     if (tenantBlocksBusinessId(req, customer.business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
 
     const [recentOrders, paymentMethods, recentMessages] = await Promise.all([
@@ -124,20 +127,21 @@ router.get('/:id/profile', async (req, res) => {
     const tenureDays = Math.max(1, Math.round((Date.now() - new Date(customer.created_at).getTime()) / 86400000));
     const orderFrequencyPerMonth = Number(((customer.total_orders / tenureDays) * 30).toFixed(2));
 
-    res.json({
-      success: true,
+    return respond.ok(req, res, {
       customer,
-      lifetime_spend_ghs: Number(customer.total_spent_ghs),
-      total_orders: customer.total_orders,
-      order_frequency_per_month: orderFrequencyPerMonth,
-      preferred_payment_method: paymentMethods.rows[0]?.payment_method || null,
       last_products_ordered: lastProducts.slice(0, 10),
       recent_orders: recentOrders.rows,
       conversation_history: recentMessages.rows
+    }, {
+      meta: {
+        lifetime_spend_ghs: Number(customer.total_spent_ghs),
+        total_orders: customer.total_orders,
+        order_frequency_per_month: orderFrequencyPerMonth,
+        preferred_payment_method: paymentMethods.rows[0]?.payment_method || null
+      }
     });
   } catch (err) {
-    logger.error('GET /customers/:id/profile failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /customers/:id/profile', err);
   }
 });
 
@@ -146,18 +150,17 @@ router.patch('/:id/tags', requirePermission('customers', 'write'), async (req, r
   try {
     const existing = await query('SELECT * FROM customers WHERE id = $1', [req.params.id]);
     const customer = existing.rows[0];
-    if (!customer) return res.status(404).json({ success: false, error: 'Customer not found' });
+    if (!customer) return respond.notFound(req, res, 'Customer');
     if (tenantBlocksBusinessId(req, customer.business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const raw = req.body?.tags;
-    if (!Array.isArray(raw)) return res.status(400).json({ success: false, error: 'tags must be an array of strings' });
+    if (!Array.isArray(raw)) return respond.invalid(req, res, 'tags must be an array of strings', { tags: 'is invalid' });
     const tags = [...new Set(raw.map(t => String(t || '').trim().toLowerCase().slice(0, 40)).filter(Boolean))].slice(0, 20);
     const result = await query('UPDATE customers SET tags = $2 WHERE id = $1 RETURNING *', [req.params.id, tags]);
-    res.json({ success: true, customer: result.rows[0] });
+    return respond.ok(req, res, { customer: result.rows[0] });
   } catch (err) {
-    logger.error('PATCH /customers/:id/tags failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'PATCH /customers/:id/tags', err);
   }
 });
 
@@ -173,13 +176,13 @@ router.patch('/:id/address-note', requirePermission('customers', 'write'), async
   try {
     const existing = await query('SELECT * FROM customers WHERE id = $1', [req.params.id]);
     const customer = existing.rows[0];
-    if (!customer) return res.status(404).json({ success: false, error: 'Customer not found' });
+    if (!customer) return respond.notFound(req, res, 'Customer');
     if (tenantBlocksBusinessId(req, customer.business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const raw = req.body?.address_note;
     if (raw != null && typeof raw !== 'string') {
-      return res.status(400).json({ success: false, error: 'address_note must be a string or null' });
+      return respond.invalid(req, res, 'address_note must be a string or null', { address_note: 'is invalid' });
     }
     // Capped: this is pasted verbatim into the rider's WhatsApp message, and
     // an unbounded note would blow past the text-message limit.
@@ -188,10 +191,9 @@ router.patch('/:id/address-note', requirePermission('customers', 'write'), async
       'UPDATE customers SET address_note = $2 WHERE id = $1 RETURNING *',
       [req.params.id, note]
     );
-    res.json({ success: true, customer: result.rows[0] });
+    return respond.ok(req, res, { customer: result.rows[0] });
   } catch (err) {
-    logger.error('PATCH /customers/:id/address-note failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'PATCH /customers/:id/address-note', err);
   }
 });
 
@@ -203,9 +205,9 @@ router.get('/:id/loyalty', async (req, res) => {
   try {
     const custRes = await query('SELECT * FROM customers WHERE id = $1', [req.params.id]);
     const customer = custRes.rows[0];
-    if (!customer) return res.status(404).json({ success: false, error: 'Customer not found' });
+    if (!customer) return respond.notFound(req, res, 'Customer');
     if (tenantBlocksBusinessId(req, customer.business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const bizRes = await query(
       `SELECT loyalty_stamps_target, loyalty_points_redemption_rate_ghs, loyalty_vip_tiers
@@ -217,8 +219,7 @@ router.get('/:id/loyalty', async (req, res) => {
       'SELECT * FROM customer_rewards WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 20',
       [customer.id]
     );
-    res.json({
-      success: true,
+    return respond.ok(req, res, {
       loyalty: {
         points: customer.loyalty_points,
         points_value_ghs: computePointsRedemptionValue(customer.loyalty_points, biz?.loyalty_points_redemption_rate_ghs || 0),
@@ -231,8 +232,7 @@ router.get('/:id/loyalty', async (req, res) => {
       }
     });
   } catch (err) {
-    logger.error('GET /customers/:id/loyalty failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /customers/:id/loyalty', err);
   }
 });
 
@@ -246,22 +246,22 @@ router.post('/:id/loyalty/redeem-points', requirePermission('financial'), async 
   try {
     const custRes = await query('SELECT * FROM customers WHERE id = $1', [req.params.id]);
     const customer = custRes.rows[0];
-    if (!customer) return res.status(404).json({ success: false, error: 'Customer not found' });
+    if (!customer) return respond.notFound(req, res, 'Customer');
     if (tenantBlocksBusinessId(req, customer.business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const points = parseInt(req.body?.points, 10);
     if (!Number.isInteger(points) || points <= 0) {
-      return res.status(400).json({ success: false, error: 'points must be a positive integer' });
+      return respond.invalid(req, res, 'points must be a positive integer', { points: 'is invalid' });
     }
     if (points > customer.loyalty_points) {
-      return res.status(400).json({ success: false, error: `Customer only has ${customer.loyalty_points} points` });
+      return respond.invalid(req, res, `Customer only has ${customer.loyalty_points} points`);
     }
     const bizRes = await query('SELECT name, loyalty_points_redemption_rate_ghs FROM businesses WHERE id = $1', [customer.business_id]);
     const biz = bizRes.rows[0];
     const valueGhs = computePointsRedemptionValue(points, biz.loyalty_points_redemption_rate_ghs);
     if (valueGhs <= 0) {
-      return res.status(400).json({ success: false, error: 'Redemption rate is not configured for this business' });
+      return respond.invalid(req, res, 'Redemption rate is not configured for this business');
     }
 
     const code = generateRewardCode('POINTS');
@@ -280,10 +280,9 @@ router.post('/:id/loyalty/redeem-points', requirePermission('financial'), async 
       { businessId: customer.business_id, customerId: customer.id }
     ).catch(err => logger.warn('points redemption notify failed: %s', err.message));
 
-    res.status(201).json({ success: true, reward: inserted.rows[0] });
+    return respond.ok(req, res, { reward: inserted.rows[0] }, { status: 201 });
   } catch (err) {
-    logger.error('POST /customers/:id/loyalty/redeem-points failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'POST /customers/:id/loyalty/redeem-points', err);
   }
 });
 
@@ -292,19 +291,18 @@ router.patch('/:id/birthday', requirePermission('customers', 'write'), async (re
   try {
     const existing = await query('SELECT * FROM customers WHERE id = $1', [req.params.id]);
     const customer = existing.rows[0];
-    if (!customer) return res.status(404).json({ success: false, error: 'Customer not found' });
+    if (!customer) return respond.notFound(req, res, 'Customer');
     if (tenantBlocksBusinessId(req, customer.business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const raw = req.body?.date_of_birth;
     if (raw != null && !/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
-      return res.status(400).json({ success: false, error: 'date_of_birth must be YYYY-MM-DD or null' });
+      return respond.invalid(req, res, 'date_of_birth must be YYYY-MM-DD or null', { date_of_birth: 'is invalid' });
     }
     const result = await query('UPDATE customers SET date_of_birth = $2 WHERE id = $1 RETURNING *', [req.params.id, raw || null]);
-    res.json({ success: true, customer: result.rows[0] });
+    return respond.ok(req, res, { customer: result.rows[0] });
   } catch (err) {
-    logger.error('PATCH /customers/:id/birthday failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'PATCH /customers/:id/birthday', err);
   }
 });
 

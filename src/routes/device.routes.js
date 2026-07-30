@@ -2,6 +2,7 @@ const express = require('express');
 const logger = require('../utils/logger');
 const { requireAuth } = require('../middleware/auth');
 const push = require('../services/push.service');
+const respond = require('../utils/response');
 
 const router = express.Router();
 
@@ -16,10 +17,10 @@ router.post('/register', requireAuth('any'), async (req, res) => {
     const fcmToken = String(req.body?.fcm_token || '').trim();
     const platform = String(req.body?.platform || '').trim();
     if (!fcmToken || fcmToken.length > 4096) {
-      return res.status(400).json({ success: false, error: 'fcm_token required' });
+      return respond.invalid(req, res, 'fcm_token required', { fcm_token: 'is invalid' });
     }
     if (!['ios', 'android'].includes(platform)) {
-      return res.status(400).json({ success: false, error: "platform must be 'ios' or 'android'" });
+      return respond.invalid(req, res, "platform must be 'ios' or 'android'", { platform: 'is invalid' });
     }
     await push.registerDevice({
       businessId: req.auth.scope === 'admin' ? null : req.auth.businessId,
@@ -28,10 +29,9 @@ router.post('/register', requireAuth('any'), async (req, res) => {
       platform,
       deviceName: String(req.body?.device_name || '').slice(0, 80) || null
     });
-    res.json({ success: true });
+    return respond.ok(req, res, {});
   } catch (err) {
-    logger.error('POST /devices/register failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'POST /devices/register', err);
   }
 });
 
@@ -48,10 +48,9 @@ router.get('/', requireAuth('any'), async (req, res) => {
     const r = isAdmin
       ? await push.listDevices({ scope: 'admin' })
       : await push.listDevices({ businessId: req.auth.businessId });
-    res.json({ success: true, devices: r });
+    return respond.ok(req, res, { devices: r });
   } catch (err) {
-    logger.error('GET /devices failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /devices', err);
   }
 });
 
@@ -62,15 +61,14 @@ router.get('/', requireAuth('any'), async (req, res) => {
 router.post('/unregister', requireAuth('any'), async (req, res) => {
   try {
     const fcmToken = String(req.body?.fcm_token || '').trim();
-    if (!fcmToken) return res.status(400).json({ success: false, error: 'fcm_token required' });
+    if (!fcmToken) return respond.invalid(req, res, 'fcm_token required', { fcm_token: 'is invalid' });
     const removed = await push.unregisterDevice(fcmToken, {
       scope: req.auth.scope,
       businessId: req.auth.businessId
     });
-    res.json({ success: true, removed });
+    return respond.ok(req, res, { removed });
   } catch (err) {
-    logger.error('POST /devices/unregister failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'POST /devices/unregister', err);
   }
 });
 

@@ -4,6 +4,7 @@ const { query, transaction } = require('../config/database');
 const { requireAuth, requirePermission } = require('../middleware/auth');
 const { tenantBlocksBusinessId } = require('../middleware/tenantAccess');
 const { buildAudienceClauses, describeAudience } = require('../utils/audience');
+const respond = require('../utils/response');
 
 const router = express.Router();
 
@@ -17,9 +18,11 @@ router.use(requireAuth('any'));
 router.get('/', async (req, res) => {
   try {
     const { business_id } = req.query;
-    if (!business_id) return res.status(400).json({ success: false, error: 'business_id required' });
+    if (!business_id) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
     if (tenantBlocksBusinessId(req, business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+      return respond.forbidden(req, res);
     }
     const r = await query(
       `SELECT id, body, status, target_count, sent_count, failed_count, audience_desc, created_at, completed_at
@@ -29,10 +32,9 @@ router.get('/', async (req, res) => {
         LIMIT 50`,
       [business_id]
     );
-    res.json({ success: true, broadcasts: r.rows });
+    return respond.ok(req, res, { broadcasts: r.rows });
   } catch (err) {
-    logger.error('GET /broadcasts failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'GET /broadcasts', err);
   }
 });
 
@@ -50,12 +52,14 @@ router.post('/', requirePermission('broadcasts', 'write'), async (req, res) => {
   try {
     const { business_id, audience } = req.body || {};
     const body = String(req.body?.body || '').trim();
-    if (!business_id) return res.status(400).json({ success: false, error: 'business_id required' });
-    if (tenantBlocksBusinessId(req, business_id)) {
-      return res.status(403).json({ success: false, error: 'Key does not match business' });
+    if (!business_id) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
     }
-    if (!body) return res.status(400).json({ success: false, error: 'body is required' });
-    if (body.length > 1024) return res.status(400).json({ success: false, error: 'body is too long (max 1024 chars)' });
+    if (tenantBlocksBusinessId(req, business_id)) {
+      return respond.forbidden(req, res);
+    }
+    if (!body) return respond.invalid(req, res, 'body is required', { body: 'is invalid' });
+    if (body.length > 1024) return respond.invalid(req, res, 'body is too long (max 1024 chars)', { body: 'is invalid' });
 
     const audienceDesc = describeAudience(audience);
 
@@ -95,10 +99,9 @@ router.post('/', requirePermission('broadcasts', 'write'), async (req, res) => {
       return { broadcastId, count };
     });
 
-    res.status(201).json({ success: true, broadcast_id: result.broadcastId, target_count: result.count });
+    return respond.ok(req, res, { broadcast_id: result.broadcastId, target_count: result.count }, { status: 201 });
   } catch (err) {
-    logger.error('POST /broadcasts failed: %s', err.message);
-    res.status(500).json({ success: false, error: 'Internal server error' });
+    return respond.failInternal(req, res, logger, 'POST /broadcasts', err);
   }
 });
 
