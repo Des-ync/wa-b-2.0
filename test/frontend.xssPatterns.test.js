@@ -21,8 +21,19 @@ const path = require('path');
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 const PAGES = fs.readdirSync(PUBLIC_DIR).filter(f => f.endsWith('.html'));
 
+/**
+ * A page's full source: its markup plus the script file it loads.
+ *
+ * Every page's JavaScript moved out of its .html into a sibling .js so the CSP
+ * could drop 'unsafe-inline'. These scans must follow it — the innerHTML
+ * templates they guard are exactly what moved, so reading only the markup
+ * would leave every one of these checks passing against a file that no longer
+ * contains the code they are about.
+ */
 function readPage(name) {
-  return fs.readFileSync(path.join(PUBLIC_DIR, name), 'utf8');
+  const js = path.join(PUBLIC_DIR, name.replace(/\.html$/, '.js'));
+  return fs.readFileSync(path.join(PUBLIC_DIR, name), 'utf8')
+    + (fs.existsSync(js) ? '\n' + fs.readFileSync(js, 'utf8') : '');
 }
 
 test('no page builds an inline onclick out of an esc()-escaped value', () => {

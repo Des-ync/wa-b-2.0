@@ -10,6 +10,20 @@ function readPage(name) {
 }
 
 /**
+ * A page's full source: its markup plus the script file it loads.
+ *
+ * These pages used to be one file, and the assertions below were written
+ * against that. The behaviour did not move out of the product when it moved
+ * out of the .html, so tests that ask "does this page do X" read both halves
+ * rather than being narrowed to whichever half the code happens to sit in
+ * today.
+ */
+function readPageSource(name) {
+  const js = path.join(PUBLIC_DIR, name.replace(/\.html$/, '.js'));
+  return readPage(name) + (fs.existsSync(js) ? '\n' + fs.readFileSync(js, 'utf8') : '');
+}
+
+/**
  * Every inline <script> block must be syntactically valid JS.
  *
  * A page with no inline blocks is fine — dashboard.html's moved to
@@ -82,7 +96,7 @@ test('every function dashboard.html calls from an inline handler exists in dashb
 });
 
 test('admin.html declares its ops/webhook/audit sections and key-gated boot flow', () => {
-  const html = readPage('admin.html');
+  const html = readPageSource('admin.html');
   for (const id of ['keyCard', 'opsBox', 'webhookTable', 'auditTable', 'alertsTable']) {
     assert.match(html, new RegExp('id="' + id + '"'), `admin.html missing #${id}`);
   }
@@ -90,7 +104,7 @@ test('admin.html declares its ops/webhook/audit sections and key-gated boot flow
 });
 
 test('receipt.html reads the order id from the query string and renders a card', () => {
-  const html = readPage('receipt.html');
+  const html = readPageSource('receipt.html');
   assert.match(html, /URLSearchParams/);
   assert.match(html, /id="card"/);
   assert.match(html, /\/api\/receipts\//);
@@ -114,9 +128,7 @@ test('every page references only same-origin or well-known CDN assets (no stray 
  * the fields the checkout endpoint validates.
  */
 test('storefront.html offers product options and a fulfilment choice', () => {
-  const html = readPage('storefront.html');
-
-  assertInlineScriptsParse(html, 'storefront.html');
+  const html = readPageSource('storefront.html');
 
   // A variant is a choice, an add-on is an extra — radios and checkboxes.
   assert.match(html, /name="sf-variant"[^>]*type="radio"|type="radio"[^>]*name="sf-variant"/);
@@ -137,7 +149,7 @@ test('storefront.html offers product options and a fulfilment choice', () => {
 });
 
 test('storefront escapes every merchant-controlled option string', () => {
-  const html = readPage('storefront.html');
+  const html = readPageSource('storefront.html');
 
   // Variant, add-on and zone names are merchant-entered and land in innerHTML.
   for (const expr of ['esc(v.id)', 'esc(v.name)', 'esc(a.id)', 'esc(a.name)', 'esc(z.name)']) {
@@ -150,7 +162,7 @@ test('storefront escapes every merchant-controlled option string', () => {
 });
 
 test('the options dialog is reachable and labelled for assistive tech', () => {
-  const html = readPage('storefront.html');
+  const html = readPageSource('storefront.html');
 
   assert.match(html, /id="optsModal"[\s\S]{0,200}role="dialog"/);
   assert.match(html, /aria-modal="true"/);
@@ -197,4 +209,38 @@ test('no page loads a React development build', () => {
     .filter(f => f.endsWith('.html'))
     .filter(f => /react(-dom)?\.development\.js/.test(readPage(f)));
   assert.deepEqual(offenders, [], `development builds served to visitors: ${offenders.join(', ')}`);
+});
+
+/**
+ * The invariant the tightened CSP rests on.
+ *
+ * src/server.js no longer sends 'unsafe-inline' in script-src, which is only
+ * safe while every served page loads its JS from a file. One inline <script>
+ * block added back to any page here would not fail a build or throw — that
+ * page's JavaScript would simply stop running in production, silently. So the
+ * invariant is asserted rather than assumed.
+ */
+test('no page in public/ contains an inline <script> block', () => {
+  const offenders = [];
+  for (const page of fs.readdirSync(PUBLIC_DIR).filter(f => f.endsWith('.html'))) {
+    const html = readPage(page);
+    for (const m of html.matchAll(/<script([^>]*)>([\s\S]*?)<\/script>/g)) {
+      if (/\bsrc=/.test(m[1])) continue;
+      if (m[2].trim()) offenders.push(page);
+    }
+  }
+  assert.deepEqual([...new Set(offenders)], [],
+    `these pages have inline <script> blocks, which script-src now blocks:\n  ${[...new Set(offenders)].join('\n  ')}`);
+});
+
+test('every extracted page script parses and is referenced by its page', () => {
+  const pairs = fs.readdirSync(PUBLIC_DIR)
+    .filter(f => f.endsWith('.html'))
+    .map(page => [page, page.replace(/\.html$/, '.js')])
+    .filter(([, js]) => fs.existsSync(path.join(PUBLIC_DIR, js)));
+  assert.ok(pairs.length >= 11, `expected at least 11 extracted page scripts, found ${pairs.length}`);
+  for (const [page, js] of pairs) {
+    assert.doesNotThrow(() => new Function(readPage(js)), `${js} has a syntax error`);
+    assert.match(readPage(page), new RegExp(`<script src="${js}"`), `${page} does not load ${js}`);
+  }
 });

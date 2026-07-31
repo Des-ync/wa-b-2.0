@@ -52,16 +52,27 @@ app.set('trust proxy', 1);
 // (sync or async) needs the AsyncLocalStorage context this opens.
 app.use(requestIdMiddleware);
 
-// Security headers. The marketing site and dashboard rely on inline scripts
-// and Clerk's hosted JS, so the CSP below is deliberately permissive
-// ('unsafe-inline' + any https: origin) — but it still blocks http: script
-// injection, plugin/object embedding, and base-tag hijacking, which is far
-// better than no CSP at all. Tighten to nonces if the inline scripts move out.
+// Security headers.
+//
+// `script-src` no longer allows 'unsafe-inline'. Every page in public/ now
+// loads its JavaScript from a file — there are zero inline <script> blocks
+// left, enforced by a test — so an injected <script>…</script> payload, the
+// classic stored-XSS shape, does not execute.
+//
+// `script-src-attr` still allows it, and that is a real remaining gap, not an
+// oversight: the markup wires ~86 inline on*= handlers, so an injected
+// `<img onerror=…>` would still run. Closing it means converting every one of
+// those to addEventListener, which is a large change across pages with no
+// browser-level test coverage — worth doing, worth doing on its own.
+//
+// 'https:' stays because Clerk and the WebAuthn helper load from CDNs; the
+// policy still blocks http: script injection, plugin embedding and base-tag
+// hijacking.
 app.use(helmet({
   contentSecurityPolicy: {
     useDefaults: true,
     directives: {
-      'script-src': ["'self'", "'unsafe-inline'", 'https:'],
+      'script-src': ["'self'", 'https:'],
       'script-src-attr': ["'unsafe-inline'"],
       'style-src': ["'self'", "'unsafe-inline'", 'https:'],
       'img-src': ["'self'", 'data:', 'https:'],

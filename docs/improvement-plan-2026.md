@@ -1059,3 +1059,75 @@ ignored is exactly the kind that resurfaces in CI.
 Every endpoint listed as clientless in §15 now has one. Remaining Phase 9 work is
 `public/dashboard.html` decomposition with its dependent CSP tightening, and error
 tracking (blocked on decision #13).
+
+
+---
+
+## 21. The CSP, and what was actually blocking it
+
+The plan sequenced this as "decompose `dashboard.html`, then tighten the CSP". Checking
+before building, that was necessary but nowhere near sufficient, and the real blocker was
+somewhere else entirely.
+
+### What was found
+
+**11 files had inline `<script>` blocks**, not one — 3,519 lines across `dashboard`,
+`admin`, `storefront`, `receipt`, `accountant`, `roi-calculator`, `status`, `login`,
+`signup`, `contact` and `mobile-clerk-bridge`.
+
+**And 28 marketing pages loaded a runtime JSX toolchain.** React, ReactDOM (development
+builds) and Babel standalone, to render a design-time theme panel that showed a visitor
+nothing — its host div mounted empty. Verified in a browser: Babel transforms the JSX at
+runtime and injects the result as **inline `<script>` elements** (99 KB and 28 KB on
+`pricing.html`). Those execute only because `script-src` grants `'unsafe-inline'`, and
+being generated at runtime they can never be extracted. The panel, not `dashboard.html`,
+was what made the CSP unfixable.
+
+It was also expensive. Measured gzipped: **893 KB** of framework on top of a **3.4 KB**
+page — 260× the page weight, on a market where data is bought by the megabyte. After
+removal `pricing.html` transfers **5 KB across 6 requests**, down from ~900 KB.
+
+### Shipped
+
+1. `dashboard.html` 2,879 → 825 lines; behaviour moved verbatim to `dashboard.js`.
+2. The tweaks panel's script tags removed from all 28 marketing pages (the `.jsx` files
+   stay in the repo for local design work). The app pages — dashboard, storefront, login,
+   signup, admin, receipt — never loaded it, so no customer flow changed.
+3. The remaining 10 inline blocks extracted to sibling `.js` files. **Zero inline
+   `<script>` blocks remain anywhere in `public/`.**
+4. `script-src` tightened from `'self' 'unsafe-inline' https:` to `'self' https:`.
+
+Every extraction was verified byte-identical against the original block, parsed with
+`node --check`, and exercised in a real browser under the tightened header: the dashboard
+runs and its inline `onclick` handlers still fire, Clerk initialises on `login.html`,
+`storefront.js` reaches its correct no-slug path, and no page reports a CSP violation.
+
+### The gap that remains, stated plainly
+
+`script-src-attr` still allows `'unsafe-inline'`, because the markup wires **86 inline
+`on*=` handlers**. An injected `<img onerror=…>` would still run. What the change does buy
+is that an injected `<script>…</script>` — the classic stored-XSS shape — no longer
+executes. Closing the rest means converting every handler to `addEventListener` across
+pages with no browser-level test coverage; that is its own change, with its own risk, and
+it should not ride along with a mechanical extraction.
+
+### Tests
+
+- `test/csp.test.js` — asserts `script-src` allows neither `'unsafe-inline'` nor
+  `'unsafe-eval'`, that `object-src`/`base-uri` stay locked, and that `script-src-attr`
+  is still the *known* gap, so it stays visible rather than forgotten.
+- `frontend.smoke.test.js` — no page may contain an inline `<script>` block (the
+  invariant the CSP rests on: one added back would silently stop that page's JS in
+  production); every extracted script parses and is referenced; no page may ship a
+  runtime JSX toolchain or a React development build; and every function named in an
+  inline handler must still be defined in the page's script, since a global that stopped
+  being global would fail at click time, not load time.
+- Both frontend test files now read a page as *markup plus its script file*. Without
+  that, the XSS scans would have kept passing while pointed at files that no longer
+  contain the `innerHTML` templates they guard. Confirmed non-vacuous by mutation:
+  reintroducing a raw `${b.name}` in `admin.js` fails the guard.
+
+### Not done
+
+Converting the 86 inline `on*=` handlers, which would let `script-src-attr` drop
+`'unsafe-inline'` too. Error tracking remains blocked on decision #13.
