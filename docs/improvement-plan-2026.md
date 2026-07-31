@@ -733,7 +733,7 @@ profile. Run systematically across all mounted routes:
 |---|---|
 | `/api/inventory/*` — suppliers CRUD, restock, adjust, movements, margins | **Now shipped** (below). Only `reorder-suggestions` had a caller. |
 | `/api/keys` — issue, revoke, rotate staff keys | **Now shipped** (§16). |
-| `/api/analytics/{delivery-sla,profit,cohorts,channels}` | Richer analytics, no client. |
+| `/api/analytics/{delivery-sla,profit,cohorts,channels}` | **Now shipped** (§18). |
 | `/api/products/{variants,addons}/:id` PATCH+DELETE | Can create from mobile, cannot edit or delete. |
 | `/api/business/export`, `/api/business/close` | **Now shipped** (§17). |
 | `/api/customers/segments/summary` | Segment overview panel. |
@@ -875,4 +875,65 @@ button off-screen and never scrolled. The fix is `scrollUntilVisible` followed b
 
 ### Not done
 
-Four richer analytics views, variant/add-on editing from mobile, segment summary.
+Variant/add-on editing from mobile, segment summary.
+
+
+---
+
+## 18. The four deeper analytics views
+
+`profit`, `cohorts`, `delivery-sla` and `channels` were backend-complete with no client
+on any surface. They are tabs on the existing Analytics screen rather than four more rows
+in More, because they answer versions of the same question and a merchant comparing them
+should not have to navigate back out each time.
+
+### Two things that are about correctness, not layout
+
+**The windows differ per endpoint.** Overview and cohorts accept 7 and 30; profit,
+delivery and channels also accept 90. The server *silently falls back to its default*
+when handed a window it does not accept — so a "90d" button on the Customers tab would
+have shown 30-day figures under a 90-day label. `analyticsWindows` mirrors the route
+file, the segmented control is built from it, and switching tabs clamps the selection.
+A test asserts the cohorts request never carries `days=90`.
+
+**Margin % is taken against the revenue it was computed from.** Products with no
+`cost_price_ghs` contribute revenue but no margin. Dividing known-cost profit by *total*
+revenue would drag the percentage down for a reason that has nothing to do with the
+business — the shop would look less profitable purely because some cost prices are
+missing. In the test fixture that is 40% correct vs 27% wrong. The view also states what
+share of revenue the profit figure covers and how many products are missing a cost price,
+rather than burying it.
+
+The same honesty problem appears twice more, and is handled the same way:
+
+- A `late_rate_pct` of `null` means *no order had an ETA*, so nothing could be late. Shown
+  as an explanation, never as "0% late" — which would read as perfect performance.
+- A repeat rate with zero eligible customers reads "Not enough history yet", not "0%".
+
+### Cost of opening the screen
+
+Each tab fetches on first open and then holds its result via
+`AutomaticKeepAliveClientMixin`. Without it a `TabBarView` disposes a tab on swipe, so
+flicking between Profit and Channels would re-download both every time — a real cost on a
+metered 3G connection. Tests assert that opening Analytics issues exactly one request,
+and that returning to an already-loaded tab issues none.
+
+### Shipped
+
+- `lib/api/analytics_api.dart` — the four calls plus the per-view window table.
+- `lib/screens/analytics_views.dart` — the four views as top-level pure functions of the
+  response, so they are testable against real payload shapes with no network and no
+  controller. That is where the bugs in this area have actually been: not layout, but
+  assuming a field's type or reading a key that does not exist.
+- `lib/screens/analytics.dart` — tabs, lazy per-tab loading, window clamping. The existing
+  overview is unchanged.
+- 19 tests: shape handling (`channels` is a top-level array, not nested; `recent` carries
+  a raw null `rider_name` where `by_rider` substitutes `(unassigned)`), the three honesty
+  cases above, lazy loading, and window clamping.
+
+One label changed as a result of a test: the delivery stat "Late" collided with the
+per-delivery "Late" badge on the same screen, so the stat is now "Late orders".
+
+### Not done
+
+Variant/add-on editing from mobile, segment summary.
