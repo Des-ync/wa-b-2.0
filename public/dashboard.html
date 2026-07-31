@@ -162,17 +162,17 @@
   <a href="index.html" class="brand"><img class="brand-logo brand-logo-light" src="assets/logo-light.jpg" alt="WA-B Solutions" /><img class="brand-logo brand-logo-dark" src="assets/logo-dark.jpg" alt="WA-B Solutions" /></a>
   <nav><ul class="nav-links"><li><a href="features.html">Features</a></li><li><a href="pricing.html">Pricing</a></li><li><a href="docs.html">Docs</a></li></ul></nav>
   <div class="nav-cta" style="gap:10px">
-    <button class="btn btn-ghost btn-sm" style="display:none" id="searchBtn" onclick="openSearch()" title="Search (Ctrl/Cmd+K)">🔍<span> Search</span></button>
+    <button class="btn btn-ghost btn-sm" style="display:none" id="searchBtn" data-click="openSearch" title="Search (Ctrl/Cmd+K)">🔍<span> Search</span></button>
     <div style="position:relative;display:none" id="bellWrap">
-      <button class="btn btn-ghost btn-sm" onclick="toggleNotifPanel()" title="Notifications">🔔<span id="notifBadge" class="notif-badge" style="display:none"></span></button>
+      <button class="btn btn-ghost btn-sm" data-click="toggleNotifPanel" title="Notifications">🔔<span id="notifBadge" class="notif-badge" style="display:none"></span></button>
       <div id="notifPanel" class="notif-panel" style="display:none"></div>
     </div>
     <span id="bizName" class="muted" style="font-size:14px"></span>
-    <button id="signOutBtn" class="btn btn-ghost btn-sm" style="display:none" onclick="signOut()">Sign out</button>
+    <button id="signOutBtn" class="btn btn-ghost btn-sm" style="display:none" data-click="signOut">Sign out</button>
   </div>
 </div></header>
 
-<div id="searchOverlay" class="modal-overlay" style="display:none" onclick="if(event.target===this) closeSearch()">
+<div id="searchOverlay" class="modal-overlay" style="display:none" data-click-self="closeSearch">
   <div class="modal-box" style="max-width:560px;padding:0;overflow:hidden">
     <input id="searchInput" placeholder="Search orders, customers, products…" autocomplete="off"
       style="width:100%;padding:16px 20px;border:none;border-bottom:1px solid var(--line);font:inherit;font-size:16px;background:var(--bg);color:var(--ink);box-sizing:border-box" />
@@ -195,7 +195,7 @@
       </p>
       <div style="display:flex;gap:10px;flex-wrap:wrap">
         <input id="linkPhone" type="tel" placeholder="0241234567" style="max-width:260px" />
-        <button class="btn btn-primary btn-sm" onclick="requestLinkOtp()">Send code <span class="arr">→</span></button>
+        <button class="btn btn-primary btn-sm" data-click="requestLinkOtp">Send code <span class="arr">→</span></button>
       </div>
     </div>
 
@@ -205,19 +205,19 @@
       </p>
       <div style="display:flex;gap:10px;flex-wrap:wrap">
         <input id="linkCode" type="text" inputmode="numeric" maxlength="6" placeholder="123456" style="max-width:160px" />
-        <button class="btn btn-primary btn-sm" onclick="verifyLinkOtp()">Verify & link <span class="arr">→</span></button>
-        <button class="btn btn-ghost btn-sm" onclick="resetLinkStep()">Use a different number</button>
+        <button class="btn btn-primary btn-sm" data-click="verifyLinkOtp">Verify & link <span class="arr">→</span></button>
+        <button class="btn btn-ghost btn-sm" data-click="resetLinkStep">Use a different number</button>
       </div>
     </div>
   </div>
 
   <div id="app" style="display:none">
     <nav class="side-nav" id="sideNav" aria-label="Dashboard sections">
-      <button data-target="overview" onclick="showSection('overview')">Overview</button>
-      <button data-target="orders" onclick="showSection('orders')">Orders <span class="nav-count" id="navOpenCount" style="display:none"></span></button>
-      <button data-target="stock" onclick="showSection('stock')">Stock</button>
-      <button data-target="customers" onclick="showSection('customers')">Customers</button>
-      <button data-target="account" onclick="showSection('account')">Account</button>
+      <button data-target="overview" data-click="showSection" data-arg1="overview">Overview</button>
+      <button data-target="orders" data-click="showSection" data-arg1="orders">Orders <span class="nav-count" id="navOpenCount" style="display:none"></span></button>
+      <button data-target="stock" data-click="showSection" data-arg1="stock">Stock</button>
+      <button data-target="customers" data-click="showSection" data-arg1="customers">Customers</button>
+      <button data-target="account" data-click="showSection" data-arg1="account">Account</button>
     </nav>
 
     <div class="dash-sections">
@@ -246,8 +246,8 @@
     <div class="dash-card">
       <h2>Analytics</h2>
       <div style="display:flex;gap:8px;margin-bottom:16px">
-        <button class="btn btn-primary btn-xs" id="anaBtn7" onclick="loadAnalytics(7)">7 days</button>
-        <button class="btn btn-ghost btn-xs" id="anaBtn30" onclick="loadAnalytics(30)">30 days</button>
+        <button class="btn btn-primary btn-xs" id="anaBtn7" data-click="loadAnalytics" data-arg1="7">7 days</button>
+        <button class="btn btn-ghost btn-xs" id="anaBtn30" data-click="loadAnalytics" data-arg1="30">30 days</button>
       </div>
       <div class="stat-grid" style="margin-bottom:22px">
         <div class="stat"><div class="stat-label">Repeat customers</div><div class="stat-val" id="anaRepeat">—</div></div>
@@ -328,13 +328,13 @@
     <div class="dash-card">
       <h2>Customers</h2>
       <div style="margin-bottom:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-        <select id="custSegmentFilter" onchange="loadCustomers()" style="max-width:220px">
+        <select id="custSegmentFilter" data-change="loadCustomers" style="max-width:220px">
           <option value="">All customers</option>
           <option value="ordered_30d">Ordered in last 30 days</option>
           <option value="inactive_60d">Inactive 60+ days</option>
           <option value="abandoned_cart">Left items without buying</option>
         </select>
-        <input id="custTagFilter" placeholder="Filter by tag…" style="max-width:160px" onchange="loadCustomers()" />
+        <input id="custTagFilter" placeholder="Filter by tag…" style="max-width:160px" data-change="loadCustomers" />
       </div>
       <div class="scroll-x">
         <table id="customerTable">
@@ -365,7 +365,7 @@
         </div>
         <div><label style="font-size:12px;color:var(--muted)">Tag (optional)</label><input id="bcTag" placeholder="vip" style="max-width:120px" /></div>
         <div><label style="font-size:12px;color:var(--muted)">Min spend GH₵ (optional)</label><input id="bcMinSpend" type="number" min="0" step="0.01" style="max-width:140px" /></div>
-        <button class="btn btn-primary btn-sm" onclick="sendBroadcast()">Send broadcast</button>
+        <button class="btn btn-primary btn-sm" data-click="sendBroadcast">Send broadcast</button>
       </div>
       <div class="scroll-x">
         <table id="broadcastTable">
@@ -379,9 +379,9 @@
     <!-- ============ STOCK ============ -->
     <div class="dash-section" data-section="stock">
     <div class="sub-tabs">
-      <button class="active" data-subtarget="catalog" onclick="showSubTab('stock','catalog')">Catalog</button>
-      <button data-subtarget="inventory" onclick="showSubTab('stock','inventory')">Inventory</button>
-      <button data-subtarget="promos" onclick="showSubTab('stock','promos')">Promotions</button>
+      <button class="active" data-subtarget="catalog" data-click="showSubTab" data-arg1="stock" data-arg2="catalog">Catalog</button>
+      <button data-subtarget="inventory" data-click="showSubTab" data-arg1="stock" data-arg2="inventory">Inventory</button>
+      <button data-subtarget="promos" data-click="showSubTab" data-arg1="stock" data-arg2="promos">Promotions</button>
     </div>
 
     <div class="sub-pane active" data-subpane="catalog">
@@ -390,9 +390,9 @@
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:16px">
         <h2 style="margin-bottom:0">Products</h2>
         <div style="display:flex;gap:8px">
-          <button class="btn btn-ghost btn-sm" onclick="exportProductsCsv()">Download list</button>
-          <input type="file" id="pImportFile" accept=".csv,text/csv" style="display:none" onchange="importProductsCsv(this.files[0])" />
-          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('pImportFile').click()">Upload list</button>
+          <button class="btn btn-ghost btn-sm" data-click="exportProductsCsv">Download list</button>
+          <input type="file" id="pImportFile" accept=".csv,text/csv" style="display:none" data-change="importProductsCsvFromPicker" />
+          <button class="btn btn-ghost btn-sm" data-click-el="pImportFile">Upload list</button>
         </div>
       </div>
       <div class="scroll-x">
@@ -409,7 +409,7 @@
           <div><label for="pCat">Category</label><input id="pCat" placeholder="meals" /></div>
           <div><label for="pImage">Image URL</label><input id="pImage" placeholder="https://…" /></div>
           <div><label for="pStock">Stock (optional)</label><input id="pStock" type="number" min="0" placeholder="Unlimited" /></div>
-          <div><button class="btn btn-primary btn-sm" onclick="addProduct()">Add product</button></div>
+          <div><button class="btn btn-primary btn-sm" data-click="addProduct">Add product</button></div>
         </div>
       </div>
     </div>
@@ -455,7 +455,7 @@
           <div><label for="supContact">Contact name</label><input id="supContact" placeholder="Kwame" /></div>
           <div><label for="supPhone">Phone</label><input id="supPhone" placeholder="0241234567" /></div>
           <div><label for="supNotes">Notes</label><input id="supNotes" placeholder="Delivers Tuesdays" /></div>
-          <div><button class="btn btn-primary btn-sm" onclick="addSupplier()">Add</button></div>
+          <div><button class="btn btn-primary btn-sm" data-click="addSupplier">Add</button></div>
         </div>
       </div>
     </div>
@@ -490,7 +490,7 @@
           <div><label for="promoValue">Value</label><input id="promoValue" type="number" min="0" step="0.01" placeholder="10" /></div>
           <div><label for="promoMaxUses">Max uses (optional)</label><input id="promoMaxUses" type="number" min="1" placeholder="" /></div>
           <div><label for="promoExpires">Expires (optional)</label><input id="promoExpires" type="date" /></div>
-          <div><button class="btn btn-primary btn-sm" onclick="addPromo()">Add</button></div>
+          <div><button class="btn btn-primary btn-sm" data-click="addPromo">Add</button></div>
         </div>
         <details style="margin-top:14px">
           <summary style="cursor:pointer;font-size:13px;color:var(--muted)">More conditions (optional)</summary>
@@ -523,12 +523,12 @@
     <div class="dash-card">
       <h2>Orders</h2>
       <div style="margin-bottom:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-        <select id="orderStatusFilter" onchange="loadOrders()" style="max-width:220px">
+        <select id="orderStatusFilter" data-change="loadOrders" style="max-width:220px">
           <option value="">All statuses</option>
           <option>pending</option><option>confirmed</option>
           <option>preparing</option><option>ready</option><option>delivered</option><option>cancelled</option>
         </select>
-        <button class="btn btn-ghost btn-sm" onclick="exportOrdersCsv()">Download list</button>
+        <button class="btn btn-ghost btn-sm" data-click="exportOrdersCsv">Download list</button>
       </div>
       <div class="scroll-x">
         <table id="orderTable">
@@ -543,11 +543,11 @@
     <!-- ============ ACCOUNT ============ -->
     <div class="dash-section" data-section="account">
     <div class="sub-tabs">
-      <button class="active" data-subtarget="billing" onclick="showSubTab('account','billing')">Billing</button>
-      <button data-subtarget="bot" onclick="showSubTab('account','bot')">Bot &amp; storefront</button>
-      <button data-subtarget="growth" onclick="showSubTab('account','growth')">Growth</button>
-      <button data-subtarget="money" onclick="showSubTab('account','money')">Money</button>
-      <button data-subtarget="team" onclick="showSubTab('account','team')">Team</button>
+      <button class="active" data-subtarget="billing" data-click="showSubTab" data-arg1="account" data-arg2="billing">Billing</button>
+      <button data-subtarget="bot" data-click="showSubTab" data-arg1="account" data-arg2="bot">Bot &amp; storefront</button>
+      <button data-subtarget="growth" data-click="showSubTab" data-arg1="account" data-arg2="growth">Growth</button>
+      <button data-subtarget="money" data-click="showSubTab" data-arg1="account" data-arg2="money">Money</button>
+      <button data-subtarget="team" data-click="showSubTab" data-arg1="account" data-arg2="team">Team</button>
     </div>
 
     <div class="sub-pane active" data-subpane="billing">
@@ -589,7 +589,7 @@
             <textarea id="sZones" rows="4" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-sm,6px);font:inherit;background:var(--bg);color:var(--ink)" placeholder="East Legon: 15&#10;Osu: 10&#10;Madina: 20"></textarea>
           </div>
         </details>
-        <div><button class="btn btn-primary btn-sm" onclick="saveSettings()">Save settings</button></div>
+        <div><button class="btn btn-primary btn-sm" data-click="saveSettings">Save settings</button></div>
       </div>
     </div>
 
@@ -602,12 +602,12 @@
           <div><label for="sLogoUrl">Logo image URL (optional)</label><input id="sLogoUrl" placeholder="https://…/logo.jpg" /></div>
           <div><label for="sBannerUrl">Banner image URL (optional)</label><input id="sBannerUrl" placeholder="https://…/banner.jpg" /></div>
         </div>
-        <div><button class="btn btn-ghost btn-sm" onclick="saveBranding()">Save branding</button></div>
+        <div><button class="btn btn-ghost btn-sm" data-click="saveBranding">Save branding</button></div>
         <div>
           <label style="font-size:12px;color:var(--muted)">Web link name (letters, numbers, hyphens)</label>
           <div style="display:flex;gap:8px;align-items:center">
             <input id="sSlug" placeholder="mikes-shop" style="flex:1" />
-            <button class="btn btn-primary btn-sm" onclick="saveSlug()">Save</button>
+            <button class="btn btn-primary btn-sm" data-click="saveSlug">Save</button>
           </div>
         </div>
         <div id="storeLinkBox" style="display:none">
@@ -632,7 +632,7 @@
       <h2>Cart reminders</h2>
       <p class="muted" style="margin-bottom:14px;font-size:13px">When a customer leaves items in their cart without checking out, send them a WhatsApp reminder automatically.</p>
       <div style="display:grid;gap:14px;max-width:640px">
-        <div><label style="display:flex;align-items:center;gap:8px;font-size:13px"><input type="checkbox" id="cnEnabled" style="width:auto" onchange="syncCheckboxGroup('cnEnabled','cnFields')" /> Remind customers who leave items in their cart</label></div>
+        <div><label style="display:flex;align-items:center;gap:8px;font-size:13px"><input type="checkbox" id="cnEnabled" style="width:auto" data-change="syncCheckboxGroup" data-arg1="cnEnabled" data-arg2="cnFields" /> Remind customers who leave items in their cart</label></div>
         <div id="cnFields" style="display:grid;gap:14px">
           <div class="row-form" style="grid-template-columns:1fr 1fr">
             <div><label for="cnDelay">Wait before first reminder (minutes)</label><input id="cnDelay" type="number" min="5" max="1440" placeholder="60" /></div>
@@ -652,7 +652,7 @@
               <div><label for="cnCoupon">Coupon code to mention (optional)</label><input id="cnCoupon" placeholder="COMEBACK10" /></div>
             </div>
           </details>
-          <div><button class="btn btn-primary btn-sm" onclick="saveCartNudgeSettings()">Save cart reminder settings</button></div>
+          <div><button class="btn btn-primary btn-sm" data-click="saveCartNudgeSettings">Save cart reminder settings</button></div>
         </div>
       </div>
     </div>
@@ -662,7 +662,7 @@
       <h2>Loyalty & rewards</h2>
       <p class="muted" style="margin-bottom:14px;font-size:13px">Points, "buy N get 1 free" stamps, referral rewards, birthday coupons, and VIP tiers — all optional, all off by default.</p>
       <div style="display:grid;gap:14px;max-width:640px">
-        <div><label style="display:flex;align-items:center;gap:8px;font-size:13px"><input type="checkbox" id="loyEnabled" style="width:auto" onchange="syncCheckboxGroup('loyEnabled','loyFields')" /> Enable loyalty & rewards</label></div>
+        <div><label style="display:flex;align-items:center;gap:8px;font-size:13px"><input type="checkbox" id="loyEnabled" style="width:auto" data-change="syncCheckboxGroup" data-arg1="loyEnabled" data-arg2="loyFields" /> Enable loyalty & rewards</label></div>
         <div id="loyFields" style="display:grid;gap:14px">
           <div class="row-form" style="grid-template-columns:1fr 1fr">
             <div><label for="loyPointsPerGhs">Points earned per GH₵ spent</label><input id="loyPointsPerGhs" type="number" min="0" step="0.1" placeholder="1" /></div>
@@ -684,7 +684,7 @@
               <textarea id="loyVipTiers" rows="3" style="width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-sm,6px);font:inherit;background:var(--bg);color:var(--ink)" placeholder="Silver: 200&#10;Gold: 500&#10;Platinum: 1000"></textarea>
             </div>
           </details>
-          <div><button class="btn btn-primary btn-sm" onclick="saveLoyaltySettings()">Save loyalty settings</button></div>
+          <div><button class="btn btn-primary btn-sm" data-click="saveLoyaltySettings">Save loyalty settings</button></div>
         </div>
       </div>
     </div>
@@ -699,17 +699,17 @@
 
       <div style="display:flex;gap:10px;align-items:end;margin-bottom:16px;flex-wrap:wrap">
         <div><label style="font-size:12px;color:var(--muted)">VAT export month</label><input id="acctVatMonth" type="month" /></div>
-        <button class="btn btn-ghost btn-sm" onclick="downloadVatExportFromDash('csv')">Download VAT CSV</button>
-        <button class="btn btn-ghost btn-sm" onclick="downloadVatExportFromDash('pdf')">Download VAT PDF</button>
+        <button class="btn btn-ghost btn-sm" data-click="downloadVatExportFromDash" data-arg1="csv">Download VAT CSV</button>
+        <button class="btn btn-ghost btn-sm" data-click="downloadVatExportFromDash" data-arg1="pdf">Download VAT PDF</button>
       </div>
 
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px;border-top:1px solid var(--line);padding-top:16px">
-        <button class="btn btn-ghost btn-xs" onclick="downloadDailySales('csv')">Daily sales CSV</button>
-        <button class="btn btn-ghost btn-xs" onclick="downloadDailySales('pdf')">Daily sales PDF</button>
-        <button class="btn btn-ghost btn-xs" onclick="downloadInventoryValuation('csv')">Inventory valuation CSV</button>
-        <button class="btn btn-ghost btn-xs" onclick="downloadInventoryValuation('pdf')">Inventory valuation PDF</button>
-        <button class="btn btn-ghost btn-xs" onclick="downloadReconciliation('csv')">Payout reconciliation CSV</button>
-        <button class="btn btn-ghost btn-xs" onclick="downloadReconciliation('pdf')">Payout reconciliation PDF</button>
+        <button class="btn btn-ghost btn-xs" data-click="downloadDailySales" data-arg1="csv">Daily sales CSV</button>
+        <button class="btn btn-ghost btn-xs" data-click="downloadDailySales" data-arg1="pdf">Daily sales PDF</button>
+        <button class="btn btn-ghost btn-xs" data-click="downloadInventoryValuation" data-arg1="csv">Inventory valuation CSV</button>
+        <button class="btn btn-ghost btn-xs" data-click="downloadInventoryValuation" data-arg1="pdf">Inventory valuation PDF</button>
+        <button class="btn btn-ghost btn-xs" data-click="downloadReconciliation" data-arg1="csv">Payout reconciliation CSV</button>
+        <button class="btn btn-ghost btn-xs" data-click="downloadReconciliation" data-arg1="pdf">Payout reconciliation PDF</button>
       </div>
 
       <div style="border-top:1px solid var(--line);padding-top:16px;margin-bottom:20px">
@@ -730,7 +730,7 @@
           <div><label for="expCategory">Category</label><input id="expCategory" placeholder="ingredients" /></div>
           <div><label for="expAmount">Amount GH₵</label><input id="expAmount" type="number" min="0" step="0.01" placeholder="50.00" /></div>
           <div><label for="expDescription">Description</label><input id="expDescription" placeholder="Weekly market run" /></div>
-          <div><button class="btn btn-primary btn-sm" onclick="addExpense()">Add</button></div>
+          <div><button class="btn btn-primary btn-sm" data-click="addExpense">Add</button></div>
         </div>
       </div>
     </div>
@@ -740,8 +740,8 @@
       <h2>Data &amp; privacy</h2>
       <p class="muted" style="margin-bottom:14px;font-size:13px">Export everything this account holds, or close your account. Closing does not delete your data — orders, customers, and messages are all retained; your storefront and bot just stop being reachable.</p>
       <div style="display:flex;gap:10px;flex-wrap:wrap">
-        <button class="btn btn-ghost btn-sm" onclick="downloadAuthed('/business/export?business_id=' + BIZ.id, 'wa-b-export.json')">Export all my data (JSON)</button>
-        <button class="btn btn-ghost btn-sm" style="color:var(--danger,#c0392b)" onclick="closeAccountFlow()">Close my account</button>
+        <button class="btn btn-ghost btn-sm" data-click="downloadBusinessExport">Export all my data (JSON)</button>
+        <button class="btn btn-ghost btn-sm" style="color:var(--danger,#c0392b)" data-click="closeAccountFlow">Close my account</button>
       </div>
     </div>
     </div><!-- /money -->
@@ -769,7 +769,7 @@
             </select>
           </div>
           <div><label for="keyExpires">Expires (optional)</label><input id="keyExpires" type="date" /></div>
-          <div><button class="btn btn-primary btn-sm" onclick="issueTeamKey()">Issue key</button></div>
+          <div><button class="btn btn-primary btn-sm" data-click="issueTeamKey">Issue key</button></div>
         </div>
       </div>
     </div>
@@ -785,7 +785,7 @@
         </table>
       </div>
       <div style="margin-top:16px">
-        <button class="btn btn-ghost btn-sm" id="addPasskeyBtn" onclick="addPasskey()">+ Add a passkey</button>
+        <button class="btn btn-ghost btn-sm" id="addPasskeyBtn" data-click="addPasskey">+ Add a passkey</button>
       </div>
     </div>
     </div><!-- /team -->
@@ -797,14 +797,14 @@
 
 <div id="toast"></div>
 
-<div id="orderModalOverlay" class="modal-overlay" style="display:none" onclick="if(event.target===this) closeOrderModal()">
+<div id="orderModalOverlay" class="modal-overlay" style="display:none" data-click-self="closeOrderModal">
   <div class="modal-box">
-    <button class="btn btn-ghost btn-xs" style="float:right" onclick="closeOrderModal()">✕ Close</button>
+    <button class="btn btn-ghost btn-xs" style="float:right" data-click="closeOrderModal">✕ Close</button>
     <div id="orderModalBody"><p class="muted">Loading…</p></div>
   </div>
 </div>
 
-<div id="passkeyPromptOverlay" class="modal-overlay" style="display:none" onclick="if(event.target===this) skipPasskeyPrompt()">
+<div id="passkeyPromptOverlay" class="modal-overlay" style="display:none" data-click-self="skipPasskeyPrompt">
   <div class="modal-box" style="max-width:420px">
     <h2 style="margin-bottom:8px">Sign in faster next time?</h2>
     <p class="muted" style="font-size:14px;line-height:1.5">
@@ -813,13 +813,14 @@
       mobile app on this same account.
     </p>
     <div style="display:flex;gap:10px;margin-top:20px">
-      <button class="btn btn-primary btn-sm" id="passkeyPromptAddBtn" onclick="addPasskeyFromPrompt()">Add passkey</button>
-      <button class="btn btn-ghost btn-sm" onclick="skipPasskeyPrompt()">Not now</button>
+      <button class="btn btn-primary btn-sm" id="passkeyPromptAddBtn" data-click="addPasskeyFromPrompt">Add passkey</button>
+      <button class="btn btn-ghost btn-sm" data-click="skipPasskeyPrompt">Not now</button>
     </div>
   </div>
 </div>
 
 <script src="clerk-theme.js"></script>
 <script src="dashboard.js"></script>
+<script src="actions.js"></script>
 </body>
 </html>

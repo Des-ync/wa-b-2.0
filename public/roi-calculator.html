@@ -42,7 +42,7 @@
 
     <div>
       <h2 class="h-card" style="font-size:22px;margin-bottom:20px">Your numbers</h2>
-      <form class="form" onsubmit="event.preventDefault()">
+      <form class="form" data-submit-prevent>
         <div class="field">
           <label for="roiOrders">Orders per month</label>
           <input id="roiOrders" type="number" min="0" step="1" value="300" />
@@ -196,6 +196,7 @@
 </footer>
 
 <script src="roi-calculator.js"></script>
+<script src="actions.js"></script>
 
 <script src="script.js"></script>
 </body>

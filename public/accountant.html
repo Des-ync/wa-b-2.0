@@ -37,7 +37,7 @@
     <p class="muted" style="margin-bottom:12px;font-size:13px">Ask the shop owner for an accountant-role API key from their dashboard's "Team access" card. Stored only in this browser's local storage, sent as a Bearer token.</p>
     <div style="display:flex;gap:10px;flex-wrap:wrap">
       <input id="acctKey" type="password" placeholder="sk_live_..." style="flex:1;min-width:280px" />
-      <button class="btn btn-primary btn-sm" onclick="saveKeyAndLoad()">Connect</button>
+      <button class="btn btn-primary btn-sm" data-click="saveKeyAndLoad">Connect</button>
     </div>
     <p id="keyError" class="muted" style="color:var(--danger,#c0392b);margin-top:8px;display:none"></p>
   </div>
@@ -46,7 +46,7 @@
     <div class="dash-card">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:16px">
         <h2 style="margin-bottom:0">Today's sales</h2>
-        <button class="btn btn-ghost btn-sm" onclick="signOut()">Sign out</button>
+        <button class="btn btn-ghost btn-sm" data-click="signOut">Sign out</button>
       </div>
       <div id="dailyBox" class="stat-grid"><p class="muted">Loading…</p></div>
     </div>
@@ -56,7 +56,7 @@
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;align-items:end">
         <div><label class="muted" style="font-size:12px;display:block">From</label><input id="plFrom" type="date" /></div>
         <div><label class="muted" style="font-size:12px;display:block">To</label><input id="plTo" type="date" /></div>
-        <button class="btn btn-ghost btn-sm" onclick="loadProfitLoss()">Apply</button>
+        <button class="btn btn-ghost btn-sm" data-click="loadProfitLoss">Apply</button>
       </div>
       <div id="plBox" class="stat-grid"><p class="muted">Loading…</p></div>
       <div class="scroll-x" style="margin-top:16px">
@@ -72,7 +72,7 @@
       <p class="muted" style="margin-bottom:14px;font-size:13px">Monthly CSV of paid orders with net/VAT/gross columns, computed from the shop's configured VAT rate.</p>
       <div style="display:flex;gap:10px;align-items:end">
         <div><label class="muted" style="font-size:12px;display:block">Month</label><input id="vatMonth" type="month" /></div>
-        <button class="btn btn-ghost btn-sm" onclick="downloadVatExport()">Download CSV</button>
+        <button class="btn btn-ghost btn-sm" data-click="downloadVatExport">Download CSV</button>
       </div>
     </div>
 
@@ -112,5 +112,6 @@
 </main>
 
 <script src="accountant.js"></script>
+<script src="actions.js"></script>
 </body>
 </html>

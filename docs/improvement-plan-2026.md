@@ -1129,5 +1129,78 @@ it should not ride along with a mechanical extraction.
 
 ### Not done
 
-Converting the 86 inline `on*=` handlers, which would let `script-src-attr` drop
-`'unsafe-inline'` too. Error tracking remains blocked on decision #13.
+Error tracking remains blocked on decision #13. (The 86 inline handlers were converted
+straight after — see §22.)
+
+
+---
+
+## 22. Closing the last CSP gap
+
+The 86 inline `on*=` handlers became `data-*` attributes dispatched by a delegated
+listener, and `script-src-attr` went from `'unsafe-inline'` to `'none'`. An injected
+`<img onerror=…>` no longer executes, which was the hole left open by §21.
+
+### The dispatcher is deliberately dumb
+
+`public/actions.js` looks a function up **by name** and calls it. It does not eval, so a
+`data-*` attribute cannot carry executable source the way an `on*=` attribute could —
+that is the whole point of the change rather than an implementation detail.
+
+    data-click="saveSettings"                        → saveSettings()
+    data-click="showSubTab" data-arg1="stock" data-arg2="promos"
+    data-click-self="closeCart"                      → only when the click landed on the
+                                                       element itself (modal backdrops)
+    data-click-el="pImportFile"                      → clicks that element
+    data-submit-prevent                              → preventDefault()
+
+### The bug this would have shipped
+
+Arguments arrive from the DOM as strings. `loadAnalytics` compares
+`currentAnaDays === 7` **strictly**, so passing `"7"` would have left the active-period
+button permanently unhighlighted while the data still loaded correctly — working enough
+to pass a glance, wrong enough to look broken. Found by reading the function before
+writing the dispatcher, not after. Numeric-looking args are therefore coerced, and it is
+verified end-to-end in a browser: clicking 7d makes `#anaBtn7` `btn-primary`, clicking
+30d moves it.
+
+### Three handlers that could not be declarative
+
+A `data-*` attribute names a function; it cannot hold an expression. So
+`downloadAuthed('…' + BIZ.id, …)`, `importProductsCsv(this.files[0])` and
+`window.print()` became small named wrappers — `downloadBusinessExport`,
+`importProductsCsvFromPicker`, `printPage`. Naming them is a gain: each is now greppable
+and testable instead of living inside an attribute.
+
+### How it was verified
+
+The failure mode here is not an exception — it is a **dead button**. A typo in
+`data-click="savSettings"` is not a syntax error, not a load-time error, and produces no
+user-visible message. So:
+
+- A static test asserts every `data-click/click-self/change/input` names a function its
+  page's script actually defines. Mutation-tested: introducing `savSettings` fails it.
+- Tests also assert no page contains an inline `on*=` handler, that every
+  `data-click-el` points at an element that exists, and that any page declaring `data-*`
+  handlers loads `actions.js`.
+- In a real browser under the tightened header: all 57 dashboard actions and all 13
+  storefront actions resolve to functions, zero inline handlers remain, nav and two-arg
+  sub-tabs work, clicking a child element still reaches the handler via `closest()`, the
+  backdrop guard closes on the overlay but **not** on the dialog inside it, and the
+  ROI form's submit is still prevented (checked via `dispatchEvent`'s return value —
+  a listener registered on the form itself runs *before* the document-level one and
+  reports `defaultPrevented: false`, which looks like a failure and is not).
+- Confirmed no page script is IIFE-wrapped, since a function defined but not global
+  would satisfy the static test and still fail at runtime. Only `roi-calculator.js` is,
+  and it declares no function-valued handlers.
+
+### The CSP now
+
+    script-src       'self' https:
+    script-src-attr  'none'
+    object-src       'none'
+    base-uri         'self'
+
+`style-src` still allows `'unsafe-inline'`; ~200 `style="…"` attributes and one inline
+`<style>` block remain. That is a much weaker gap than script execution — CSS injection
+needs a separate look, and it is the next thing here if this thread continues.

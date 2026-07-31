@@ -2063,3 +2063,20 @@ async function loadSampleCatalog() {
   await window.Clerk.load();
   window.Clerk.addListener(onAuthStateChange);
 })();
+
+
+// ─── wrappers for handlers that used to be inline expressions ──────────────
+// These exist because a data-* attribute names a function; it cannot carry an
+// expression like `BIZ.id` or a reference to `this`. Naming them is the point:
+// each is now testable and greppable instead of living in an attribute.
+
+/** The export URL needs BIZ.id, which is only known at click time. */
+function downloadBusinessExport() {
+  downloadAuthed('/business/export?business_id=' + BIZ.id, 'wa-b-export.json');
+}
+
+/** The file input's own `this.files[0]`, read back by id. */
+function importProductsCsvFromPicker() {
+  var input = document.getElementById('pImportFile');
+  if (input && input.files && input.files[0]) importProductsCsv(input.files[0]);
+}

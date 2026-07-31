@@ -152,3 +152,9 @@ document.getElementById('copyLinkBtn')?.addEventListener('click', () => {
 });
 
 loadReceipt();
+
+
+/** Was an inline window.print(); named so a data-click can reach it. */
+function printPage() {
+  window.print();
+}

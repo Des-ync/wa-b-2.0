@@ -45,7 +45,7 @@
     <p class="muted" style="margin-bottom:12px;font-size:13px">Held for this browser tab only (cleared when you close it, and after 8 hours), sent as a Bearer token.</p>
     <div style="display:flex;gap:10px;flex-wrap:wrap">
       <input id="adminKey" type="password" placeholder="sk_admin_..." style="flex:1;min-width:280px" />
-      <button class="btn btn-primary btn-sm" onclick="saveKeyAndLoad()">Connect</button>
+      <button class="btn btn-primary btn-sm" data-click="saveKeyAndLoad">Connect</button>
     </div>
     <p id="keyError" class="muted" style="color:var(--danger,#c0392b);margin-top:8px;display:none"></p>
   </div>
@@ -80,7 +80,7 @@
         <div><label>MoMo number</label><input id="poMomoNumber" placeholder="0241234567" /></div>
         <div><label>Network</label><select id="poMomoNetwork"><option value="">—</option><option value="mtn">MTN</option><option value="vodafone">Vodafone/Telecel</option><option value="airteltigo">AirtelTigo</option></select></div>
         <div><label>Reference / note</label><input id="poNote" placeholder="Weekly settlement" /></div>
-        <div><button class="btn btn-primary btn-sm" onclick="recordPayout()">Record</button></div>
+        <div><button class="btn btn-primary btn-sm" data-click="recordPayout">Record</button></div>
       </div>
     </div>
 
@@ -92,15 +92,15 @@
     <div class="dash-card">
       <h2>Webhook queue <span class="muted" id="webhookFilterLabel" style="font-size:13px;font-weight:400"></span></h2>
       <div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <select id="webhookStatusFilter" onchange="loadWebhooks()">
+        <select id="webhookStatusFilter" data-change="loadWebhooks">
           <option value="failed">Failed (dead-letter)</option>
           <option value="pending">Pending</option>
           <option value="processing">Processing</option>
           <option value="done">Done</option>
           <option value="">All</option>
         </select>
-        <button class="btn btn-ghost btn-xs" onclick="retryAllFailed()">Retry all failed</button>
-        <button class="btn btn-ghost btn-xs" onclick="loadWebhooks()">Refresh</button>
+        <button class="btn btn-ghost btn-xs" data-click="retryAllFailed">Retry all failed</button>
+        <button class="btn btn-ghost btn-xs" data-click="loadWebhooks">Refresh</button>
       </div>
       <div style="overflow-x:auto">
         <table>
@@ -159,20 +159,21 @@
   </div>
 </main>
 
-<div id="webhookModalOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:100;align-items:flex-start;justify-content:center;overflow-y:auto;padding:40px 16px" onclick="if(event.target===this) closeWebhookModal()">
+<div id="webhookModalOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:100;align-items:flex-start;justify-content:center;overflow-y:auto;padding:40px 16px" data-click-self="closeWebhookModal">
   <div style="background:var(--bg);border-radius:var(--r-lg,12px);max-width:700px;width:100%;padding:24px;box-shadow:0 8px 32px rgba(0,0,0,0.2)">
-    <button class="btn btn-ghost btn-xs" style="float:right" onclick="closeWebhookModal()">✕ Close</button>
+    <button class="btn btn-ghost btn-xs" style="float:right" data-click="closeWebhookModal">✕ Close</button>
     <div id="webhookModalBody"><p class="muted">Loading…</p></div>
   </div>
 </div>
 
-<div id="bizModalOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:100;align-items:flex-start;justify-content:center;overflow-y:auto;padding:40px 16px" onclick="if(event.target===this) closeBizModal()">
+<div id="bizModalOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:100;align-items:flex-start;justify-content:center;overflow-y:auto;padding:40px 16px" data-click-self="closeBizModal">
   <div style="background:var(--bg);border-radius:var(--r-lg,12px);max-width:640px;width:100%;padding:24px;box-shadow:0 8px 32px rgba(0,0,0,0.2)">
-    <button class="btn btn-ghost btn-xs" style="float:right" onclick="closeBizModal()">✕ Close</button>
+    <button class="btn btn-ghost btn-xs" style="float:right" data-click="closeBizModal">✕ Close</button>
     <div id="bizModalBody"><p class="muted">Loading…</p></div>
   </div>
 </div>
 
 <script src="admin.js"></script>
+<script src="actions.js"></script>
 </body>
 </html>

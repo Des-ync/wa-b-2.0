@@ -87,10 +87,10 @@
     <div id="head" class="store-head"></div>
     <div class="store-cta">
       <a id="chatBtn" class="btn btn-primary" href="#" target="_blank" rel="noopener">💬 Start an order on WhatsApp</a>
-      <button id="cartTopBtn" class="btn btn-ghost" style="display:none" onclick="openCart()">🛒 View cart</button>
+      <button id="cartTopBtn" class="btn btn-ghost" style="display:none" data-click="openCart">🛒 View cart</button>
     </div>
     <div class="store-tools">
-      <input id="search" class="store-search" type="text" placeholder="Search products…" oninput="renderProducts()" />
+      <input id="search" class="store-search" type="text" placeholder="Search products…" data-input="renderProducts" />
     </div>
     <div id="catRow" class="cat-row" style="display:none"></div>
 
@@ -107,10 +107,10 @@
 
 <div id="cartBar" class="cart-bar">
   <div><strong id="cartCount">0</strong> item(s) · <span id="cartTotal">GH¢0.00</span></div>
-  <button class="btn btn-primary btn-sm" onclick="openCart()">Checkout</button>
+  <button class="btn btn-primary btn-sm" data-click="openCart">Checkout</button>
 </div>
 
-<div id="cartModal" class="modal-overlay" onclick="if(event.target===this) closeCart()">
+<div id="cartModal" class="modal-overlay" data-click-self="closeCart">
   <div class="modal-card">
     <h3>Your cart</h3>
     <div id="cartLines"></div>
@@ -120,27 +120,27 @@
       <div class="field"><label for="custPhone">WhatsApp / phone number</label><input id="custPhone" type="tel" placeholder="024xxxxxxx" /></div>
       <fieldset class="opts-fieldset">
         <legend class="opts-legend" style="padding:0">How would you like it?</legend>
-        <label class="opts-row"><input type="radio" name="sf-fulfil" value="delivery" checked onchange="renderFulfilment()" /><span>Delivery</span></label>
-        <label class="opts-row"><input type="radio" name="sf-fulfil" value="pickup" onchange="renderFulfilment()" /><span>I'll collect it myself</span></label>
+        <label class="opts-row"><input type="radio" name="sf-fulfil" value="delivery" checked data-change="renderFulfilment" /><span>Delivery</span></label>
+        <label class="opts-row"><input type="radio" name="sf-fulfil" value="pickup" data-change="renderFulfilment" /><span>I'll collect it myself</span></label>
       </fieldset>
       <div id="deliveryFields">
         <div class="field"><label for="custAddress">Delivery address</label><textarea id="custAddress" rows="2" placeholder="e.g. Blue gate, 3rd street off Boundary Rd"></textarea></div>
         <div class="field" id="zoneField" style="display:none">
           <label for="custZone">Delivery area</label>
-          <select id="custZone" onchange="renderDeliveryFee()"></select>
+          <select id="custZone" data-change="renderDeliveryFee"></select>
         </div>
         <div class="muted" id="deliveryFeeNote" style="margin:-6px 0 12px"></div>
       </div>
     </div>
     <div id="checkoutError" class="muted" style="color:var(--danger); display:none; margin-bottom:10px"></div>
     <div style="display:flex; gap:10px; justify-content:flex-end">
-      <button class="btn btn-ghost" onclick="closeCart()">Close</button>
-      <button id="checkoutBtn" class="btn btn-primary" onclick="submitCheckout()">Place order</button>
+      <button class="btn btn-ghost" data-click="closeCart">Close</button>
+      <button id="checkoutBtn" class="btn btn-primary" data-click="submitCheckout">Place order</button>
     </div>
   </div>
 </div>
 
-<div id="optsModal" class="modal-overlay" onclick="if(event.target===this) closeOptions()"
+<div id="optsModal" class="modal-overlay" data-click-self="closeOptions"
      role="dialog" aria-modal="true" aria-labelledby="optsTitle">
   <div class="modal-card">
     <h3 id="optsTitle"></h3>
@@ -151,13 +151,13 @@
       <strong id="optsTotal"></strong>
     </div>
     <div style="display:flex; gap:10px; justify-content:flex-end; margin-top:12px">
-      <button class="btn btn-ghost" onclick="closeOptions()">Cancel</button>
-      <button id="optsAddBtn" class="btn btn-primary" onclick="addConfiguredToCart()">Add to cart</button>
+      <button class="btn btn-ghost" data-click="closeOptions">Cancel</button>
+      <button id="optsAddBtn" class="btn btn-primary" data-click="addConfiguredToCart">Add to cart</button>
     </div>
   </div>
 </div>
 
-<div id="confirmModal" class="modal-overlay" onclick="if(event.target===this) closeConfirm()">
+<div id="confirmModal" class="modal-overlay" data-click-self="closeConfirm">
   <div class="modal-card" style="text-align:center">
     <h3>Order placed 🎉</h3>
     <p class="muted" id="confirmText"></p>
@@ -166,6 +166,7 @@
 </div>
 
 <script src="storefront.js"></script>
+<script src="actions.js"></script>
 
 </body>
 </html>

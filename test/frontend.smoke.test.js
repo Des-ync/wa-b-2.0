@@ -78,23 +78,6 @@ test('dashboard.html declares its core section navigation and API helper', () =>
   assert.match(js, /function showSection\(/, 'dashboard.js missing showSection()');
 });
 
-test('every function dashboard.html calls from an inline handler exists in dashboard.js', () => {
-  // The extraction only stays safe while the markup can still reach the
-  // code: inline on*= handlers resolve against globals, so a function that
-  // stopped being global would fail silently at click time, not load time.
-  const html = readPage('dashboard.html');
-  const js = readPage('dashboard.js');
-  const called = new Set(
-    [...html.matchAll(/\bon[a-z]+="\s*([A-Za-z_$][\w$]*)\s*\(/g)].map(m => m[1])
-  );
-  assert.ok(called.size > 30, `expected many inline handlers, found ${called.size}`);
-  const missing = [...called].filter(fn =>
-    !new RegExp(`(function\\s+${fn}\\b|\\b(?:const|let|var)\\s+${fn}\\s*=|\\bwindow\\.${fn}\\s*=)`).test(js)
-    && !/^(if|for|while|return|event|this|document|window|alert|confirm)$/.test(fn)
-  );
-  assert.deepEqual(missing, [], `dashboard.html calls these but dashboard.js does not define them: ${missing.join(', ')}`);
-});
-
 test('admin.html declares its ops/webhook/audit sections and key-gated boot flow', () => {
   const html = readPageSource('admin.html');
   for (const id of ['keyCard', 'opsBox', 'webhookTable', 'auditTable', 'alertsTable']) {
@@ -243,4 +226,65 @@ test('every extracted page script parses and is referenced by its page', () => {
     assert.doesNotThrow(() => new Function(readPage(js)), `${js} has a syntax error`);
     assert.match(readPage(page), new RegExp(`<script src="${js}"`), `${page} does not load ${js}`);
   }
+});
+
+/**
+ * Every declared action must name a function the page actually defines.
+ *
+ * This is the failure mode the data-* conversion introduced: a typo in
+ * `data-click="savSettings"` is not a syntax error and not a load-time error.
+ * The button simply does nothing when a merchant presses it. actions.js logs
+ * to the console at click time, which nobody is watching, so the real guard
+ * has to be here.
+ */
+test('every data-click/change/input names a function defined in the page script', () => {
+  const problems = [];
+  for (const page of fs.readdirSync(PUBLIC_DIR).filter(f => f.endsWith('.html'))) {
+    const html = readPage(page);
+    const js = path.join(PUBLIC_DIR, page.replace(/\.html$/, '.js'));
+    if (!fs.existsSync(js)) continue;
+    const src = fs.readFileSync(js, 'utf8');
+    for (const m of html.matchAll(/data-(?:click|click-self|change|input)="([A-Za-z_$][\w$]*)"/g)) {
+      const fn = m[1];
+      const defined = new RegExp(
+        `function\\s+${fn}\\b|\\b(?:const|let|var)\\s+${fn}\\s*=|\\bwindow\\.${fn}\\s*=`
+      ).test(src);
+      if (!defined) problems.push(`${page}: data-* names ${fn}(), which ${path.basename(js)} does not define`);
+    }
+  }
+  assert.deepEqual(problems, [], problems.join('\n  '));
+});
+
+test('data-click-el points at an element that exists on the page', () => {
+  const problems = [];
+  for (const page of fs.readdirSync(PUBLIC_DIR).filter(f => f.endsWith('.html'))) {
+    const html = readPage(page);
+    for (const m of html.matchAll(/data-click-el="([^"]+)"/g)) {
+      if (!html.includes(`id="${m[1]}"`)) problems.push(`${page}: data-click-el="${m[1]}" has no matching element`);
+    }
+  }
+  assert.deepEqual(problems, [], problems.join('\n  '));
+});
+
+test('no page uses an inline on*= handler', () => {
+  // The invariant script-src-attr rests on. An inline handler added back would
+  // silently stop working in production under the tightened policy.
+  const offenders = [];
+  for (const page of fs.readdirSync(PUBLIC_DIR).filter(f => f.endsWith('.html'))) {
+    const m = readPage(page).match(/\son[a-z]+="/);
+    if (m) offenders.push(`${page} (${m[0].trim()})`);
+  }
+  assert.deepEqual(offenders, [], `inline handlers found: ${offenders.join(', ')}`);
+});
+
+test('every page carrying data-* handlers loads actions.js', () => {
+  const problems = [];
+  for (const page of fs.readdirSync(PUBLIC_DIR).filter(f => f.endsWith('.html'))) {
+    const html = readPage(page);
+    const usesActions = /data-(?:click|click-self|click-el|change|input|submit-prevent)[=\s>]/.test(html);
+    if (usesActions && !/<script src="actions\.js">/.test(html)) {
+      problems.push(`${page} declares data-* handlers but never loads actions.js`);
+    }
+  }
+  assert.deepEqual(problems, [], problems.join('\n  '));
 });

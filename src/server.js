@@ -59,11 +59,11 @@ app.use(requestIdMiddleware);
 // left, enforced by a test — so an injected <script>…</script> payload, the
 // classic stored-XSS shape, does not execute.
 //
-// `script-src-attr` still allows it, and that is a real remaining gap, not an
-// oversight: the markup wires ~86 inline on*= handlers, so an injected
-// `<img onerror=…>` would still run. Closing it means converting every one of
-// those to addEventListener, which is a large change across pages with no
-// browser-level test coverage — worth doing, worth doing on its own.
+// `script-src-attr` is now 'none' too: the 86 inline on*= handlers were
+// converted to data-* attributes dispatched by public/actions.js, so an
+// injected `<img onerror=…>` no longer runs either. Tests assert no page
+// contains an inline handler and that every data-* action names a function
+// its page actually defines.
 //
 // 'https:' stays because Clerk and the WebAuthn helper load from CDNs; the
 // policy still blocks http: script injection, plugin embedding and base-tag
@@ -73,7 +73,7 @@ app.use(helmet({
     useDefaults: true,
     directives: {
       'script-src': ["'self'", 'https:'],
-      'script-src-attr': ["'unsafe-inline'"],
+      'script-src-attr': ["'none'"],
       'style-src': ["'self'", "'unsafe-inline'", 'https:'],
       'img-src': ["'self'", 'data:', 'https:'],
       'connect-src': ["'self'", 'https:'],

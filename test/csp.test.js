@@ -33,10 +33,10 @@ test('object-src and base-uri stay locked down', () => {
   assert.deepEqual(directive('base-uri'), ["'self'"]);
 });
 
-test('script-src-attr is still the known remaining gap', () => {
-  // Documented deliberately: ~86 inline on*= handlers still need it. If this
-  // ever tightens, that is a win and this test should be updated to match —
-  // it exists so the gap stays visible rather than forgotten.
-  assert.ok(directive('script-src-attr').includes("'unsafe-inline'"),
-    'script-src-attr no longer needs unsafe-inline — update this test and the comment in server.js');
+test('script-src-attr blocks inline event handlers', () => {
+  // The 86 inline on*= handlers became data-* attributes dispatched by
+  // actions.js, so an injected `<img onerror=…>` does not execute. Loosening
+  // this back to 'unsafe-inline' would reopen that without breaking anything
+  // visible, which is why it is asserted.
+  assert.deepEqual(directive('script-src-attr'), ["'none'"]);
 });
