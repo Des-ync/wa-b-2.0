@@ -65,6 +65,20 @@ app.use(requestIdMiddleware);
 // contains an inline handler and that every data-* action names a function
 // its page actually defines.
 //
+// `style-src` no longer allows 'unsafe-inline' either — the ten inline
+// <style> blocks moved to .css files — so an injected <style> block cannot
+// restyle the page. `style-src-attr` must then be stated EXPLICITLY: an
+// absent style-src-attr falls back to style-src, which would block all 819
+// `style="…"` attributes across the markup and the innerHTML templates and
+// break the layout everywhere. Converting those to classes is a much larger
+// change for a much smaller gain than the script work was — CSS injection
+// cannot execute code — so the attribute allowance stays, deliberately.
+//
+// Verified in a browser rather than assumed: under style-src-attr 'none' a
+// style attribute is dropped whether it is in the markup, injected via
+// innerHTML, or set with setAttribute — but `el.style.x = …` through the
+// CSSOM keeps working, which is what the 101 such assignments here rely on.
+//
 // 'https:' stays because Clerk and the WebAuthn helper load from CDNs; the
 // policy still blocks http: script injection, plugin embedding and base-tag
 // hijacking.
@@ -74,7 +88,8 @@ app.use(helmet({
     directives: {
       'script-src': ["'self'", 'https:'],
       'script-src-attr': ["'none'"],
-      'style-src': ["'self'", "'unsafe-inline'", 'https:'],
+      'style-src': ["'self'", 'https:'],
+      'style-src-attr': ["'unsafe-inline'"],
       'img-src': ["'self'", 'data:', 'https:'],
       'connect-src': ["'self'", 'https:'],
       'font-src': ["'self'", 'data:', 'https:'],

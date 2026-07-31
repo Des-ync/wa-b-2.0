@@ -8,51 +8,7 @@
 <link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16.png" />
 <link rel="apple-touch-icon" sizes="180x180" href="assets/favicon-180.png" />
 <link rel="stylesheet" href="styles.css" />
-<style>
-  body { background: var(--bg-2); }
-  .receipt-wrap { max-width: 480px; margin: 40px auto; padding: 0 16px; }
-  .receipt-card {
-    background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-lg);
-    padding: 28px 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.04);
-  }
-  .receipt-head { text-align: center; margin-bottom: 20px; }
-  .receipt-head .merchant-logo { width: 56px; height: 56px; border-radius: 14px; object-fit: cover; margin: 0 auto 10px; display: block; border: 1px solid var(--line); }
-  .receipt-head h1 { font-size: 18px; margin: 0 0 4px; }
-  .receipt-head .muted { color: var(--muted); font-size: 13px; }
-  .rider-call { color: var(--accent-ink); text-decoration: none; font-weight: 600; }
-  .refund-policy { margin-top: 16px; padding: 12px 14px; background: var(--bg-2); border-radius: var(--r-sm, 8px); font-size: 12px; color: var(--muted); line-height: 1.5; }
-  .refund-policy strong { color: var(--ink); display: block; margin-bottom: 4px; font-size: 12px; }
-  .receipt-status {
-    display: inline-block; margin-top: 10px; padding: 4px 12px; border-radius: 999px;
-    font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
-  }
-  .status-paid { background: var(--accent-soft); color: var(--accent-ink); }
-  .status-unpaid, .status-pending { background: #fdf3e5; color: var(--warning); }
-  .status-failed, .status-cancelled { background: #fbeaea; color: var(--danger); }
-  .receipt-meta { font-size: 13px; color: var(--muted); border-top: 1px dashed var(--line-2); border-bottom: 1px dashed var(--line-2); padding: 14px 0; margin: 16px 0; }
-  .receipt-meta div { display: flex; justify-content: space-between; padding: 2px 0; }
-  .receipt-items { margin: 16px 0; }
-  .receipt-item { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; padding: 6px 0; }
-  .receipt-item .qty { color: var(--muted); font-family: var(--font-mono); font-size: 12px; }
-  .receipt-totals { border-top: 1px solid var(--line-2); margin-top: 12px; padding-top: 12px; }
-  .receipt-totals div { display: flex; justify-content: space-between; font-size: 14px; padding: 3px 0; }
-  .receipt-totals .grand { font-size: 18px; font-weight: 700; margin-top: 6px; }
-  .receipt-footer { text-align: center; margin-top: 20px; font-size: 12px; color: var(--muted-2); }
-  .receipt-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-top: 20px; }
-  .err-box, .loading-box { text-align: center; padding: 60px 20px; color: var(--muted); }
-  .receipt-timeline { margin: 16px 0; border-top: 1px dashed var(--line-2); border-bottom: 1px dashed var(--line-2); padding: 14px 0; }
-  .receipt-timeline .tl-row { display: flex; gap: 10px; font-size: 13px; padding: 3px 0; align-items: baseline; }
-  .receipt-timeline .tl-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent-ink, #046A38); flex-shrink: 0; }
-  .receipt-timeline .tl-label { flex: 1; text-transform: capitalize; }
-  .receipt-timeline .tl-time { color: var(--muted); font-size: 12px; }
-  .receipt-proof img { max-width: 100%; border-radius: var(--r-sm, 6px); margin-top: 8px; }
-  @media print {
-    body { background: #fff; }
-    .receipt-actions, .nav, .site-footer { display: none !important; }
-    .receipt-wrap { margin: 0; max-width: none; }
-    .receipt-card { border: none; box-shadow: none; padding: 0; }
-  }
-</style>
+<link rel="stylesheet" href="receipt.css" />
 </head>
 <body>
 

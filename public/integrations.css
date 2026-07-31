@@ -1,0 +1,21 @@
+/* Page styles for integrations.html, lifted out verbatim.
+   External so style-src can drop 'unsafe-inline'; see
+   docs/improvement-plan-2026.md §23. Linked at the same position the
+   <style> block occupied, so it still overrides styles.css. */
+
+  .integ-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:20px }
+  @media (max-width:820px) { .integ-grid { grid-template-columns:1fr 1fr } }
+  @media (max-width:520px) { .integ-grid { grid-template-columns:1fr } }
+  .integ-card { border:1px solid var(--line); border-radius: var(--r-lg); padding:24px; transition: border-color 200ms, transform 200ms; background: var(--paper); display:flex; flex-direction:column; gap:12px; min-height:180px }
+  .integ-card:hover { border-color: var(--line-2); transform: translateY(-2px) }
+  .integ-icon { width:44px; height:44px; border-radius:10px; background: var(--bg-2); display:grid; place-items:center; font-family: var(--font-mono); font-weight:600; font-size:14px; color:var(--ink); border:1px solid var(--line) }
+  .integ-name { font-size: 16px; font-weight: 500; letter-spacing: -0.01em; color:var(--ink) }
+  .integ-cat { font-family:var(--font-mono); font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:0.08em }
+  .integ-desc { color:var(--muted); font-size:14px; line-height:1.55; margin:0 }
+  .integ-status { font-family:var(--font-mono); font-size:11px; padding:3px 8px; border-radius:4px; align-self:flex-start; text-transform:uppercase; letter-spacing:0.06em }
+  .integ-status.live { background:var(--accent-soft); color:var(--accent-ink) }
+  .integ-status.beta { background:rgba(201,122,29,0.12); color:#8a4f0e }
+  .integ-status.soon { background:var(--bg-2); color:var(--muted) }
+  .integ-section { margin-top:64px }
+  .integ-section h2 { font-size:24px; letter-spacing:-0.02em; margin-bottom:6px }
+  .integ-section p.lead-sub { color:var(--muted); font-size:14.5px; margin-bottom:24px }

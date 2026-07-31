@@ -1201,6 +1201,85 @@ user-visible message. So:
     object-src       'none'
     base-uri         'self'
 
-`style-src` still allows `'unsafe-inline'`; ~200 `style="…"` attributes and one inline
-`<style>` block remain. That is a much weaker gap than script execution — CSS injection
-needs a separate look, and it is the next thing here if this thread continues.
+`style-src` still allows `'unsafe-inline'` — addressed in §23, which also corrects the
+counts stated here (there are 819 style attributes and ten `<style>` blocks, not ~200
+and one).
+
+
+---
+
+## 23. style-src, and where the line was drawn
+
+`style-src` no longer allows `'unsafe-inline'`. `style-src-attr` still does, deliberately.
+
+### The measurements that decided the scope
+
+The estimate in §22 was wrong, and the real numbers change the answer:
+
+| | count |
+|---|---|
+| inline `<style>` blocks | 10 (not 1) |
+| `style="…"` attributes in markup | 628 |
+| `style="…"` built into `innerHTML` by JS | 191 |
+| `el.style.x = …` via CSSOM | 101 |
+
+### What CSP actually blocks, tested rather than assumed
+
+A scratch page served under `style-src-attr 'none'` established the boundary:
+
+| | under `style-src-attr 'none'` |
+|---|---|
+| `style="…"` in markup | **blocked** |
+| `style="…"` injected via `innerHTML` | **blocked** |
+| `setAttribute('style', …)` | **blocked** |
+| `el.style.color = …` (CSSOM) | **allowed** |
+
+So the 101 CSSOM assignments were never at risk, and the 819 attributes all were. A
+second scratch page confirmed the split this change relies on: `style-src 'self'` blocks
+an inline `<style>` block while `style-src-attr 'unsafe-inline'` keeps every attribute
+working, including ones injected through `innerHTML`.
+
+### Where the line is, and why
+
+Extracting ten `<style>` blocks is mechanical and verifiable. Converting 819 style
+attributes to classes is not: it touches every page including the customer purchase
+flow, there is no browser-level regression coverage to catch what it breaks, and the
+thing it buys is much smaller than the script work bought — **CSS injection cannot
+execute code**. It can exfiltrate via attribute selectors and redress the UI, which is
+worth fixing eventually, but not at that risk in one pass.
+
+So `<style>` blocks are gone and `style-src-attr 'unsafe-inline'` stays.
+
+### The line that must not be tidied away
+
+`'style-src-attr'` is now stated **explicitly**. An absent `style-src-attr` inherits
+`style-src`, which no longer has `'unsafe-inline'` — deleting the line as redundant would
+silently drop all 819 style attributes and break the layout on every page. A test asserts
+it is present, precisely because removing it looks like cleanup.
+
+### Verification
+
+Every extraction byte-identical against the original block, and the `<link>` placed at
+the exact position the `<style>` occupied so it still overrides `styles.css`. In a
+browser: `login.css`'s computed values compared **against production** across every
+selector it defines — zero differences; `storefront.css` 52 rules load and the 24 with
+elements on the page all apply; `dashboard.css` 94 rules load with three apparent
+mismatches, each confirmed to be correct cascade (`#app` carries an inline
+`display:none` pre-auth, and `.dash-section.active` / `.sub-pane.active` override their
+base rules).
+
+Both guards mutation-tested: reintroducing a `<style>` block fails, and deleting the
+`style-src-attr` line fails.
+
+### The CSP now
+
+    script-src       'self' https:
+    script-src-attr  'none'
+    style-src        'self' https:
+    style-src-attr   'unsafe-inline'    ← known, deliberate, 819 attributes
+    object-src       'none'
+    base-uri         'self'
+
+### Not done
+
+The 819 style attributes. Error tracking remains blocked on decision #13.

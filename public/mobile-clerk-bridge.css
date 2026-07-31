@@ -1,0 +1,42 @@
+/* Page styles for mobile-clerk-bridge.html, lifted out verbatim.
+   External so style-src can drop 'unsafe-inline'; see
+   docs/improvement-plan-2026.md §23. Linked at the same position the
+   <style> block occupied, so it still overrides styles.css. */
+
+  /*
+    This page only ever runs inside the mobile app's in-app browser tab
+    (ASWebAuthenticationSession on iOS / Chrome Custom Tabs on Android),
+    opened by flutter_web_auth_2 during "Continue with Clerk" login. It
+    has no nav/footer chrome — the user sees it for a few seconds, either
+    already signed in (straight through) or signing in right here, then
+    it hands a Clerk session token back to the app via a wabapp:// redirect
+    and the tab closes itself automatically.
+  */
+  .auth-shell {
+    min-height: 100dvh;
+    display: grid;
+    place-items: center;
+    padding: clamp(32px, 6vw, 64px) var(--gutter);
+  }
+  .auth-box { width: 100%; max-width: 420px; text-align: center; }
+  .auth-head { margin-bottom: 24px; }
+  .auth-head h1 { font-size: 22px; letter-spacing: -0.02em; font-weight: 600; }
+  .auth-head p { color: var(--muted); font-size: 14.5px; margin: 8px 0 0; }
+  #clerk-signin { display: grid; justify-content: center; min-height: 380px; text-align: left; }
+  .auth-skeleton {
+    width: 100%;
+    max-width: 400px;
+    height: 380px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-lg);
+    background: linear-gradient(100deg, var(--bg-2) 40%, var(--paper) 50%, var(--bg-2) 60%);
+    background-size: 200% 100%;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .auth-skeleton { animation: authShimmer 1.4s linear infinite; }
+  }
+  @keyframes authShimmer {
+    from { background-position: 120% 0; }
+    to { background-position: -80% 0; }
+  }
+  .auth-error { color: var(--danger); font-size: 14px; margin-top: 16px; }

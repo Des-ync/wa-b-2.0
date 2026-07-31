@@ -1,0 +1,41 @@
+/* Page styles for signup.html, lifted out verbatim.
+   External so style-src can drop 'unsafe-inline'; see
+   docs/improvement-plan-2026.md §23. Linked at the same position the
+   <style> block occupied, so it still overrides styles.css. */
+
+  .signup-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: clamp(32px, 5vw, 72px);
+    align-items: start;
+  }
+  @media (max-width: 920px) {
+    .signup-grid { grid-template-columns: 1fr; }
+  }
+  #clerk-signup { display: grid; justify-content: center; min-height: 420px; }
+  @media (min-width: 921px) {
+    #clerk-signup { justify-content: end; position: sticky; top: 96px; }
+  }
+  .auth-skeleton {
+    width: 100%;
+    max-width: 400px;
+    height: 420px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-lg);
+    background: linear-gradient(100deg, var(--bg-2) 40%, var(--paper) 50%, var(--bg-2) 60%);
+    background-size: 200% 100%;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .auth-skeleton { animation: authShimmer 1.4s linear infinite; }
+  }
+  @keyframes authShimmer {
+    from { background-position: 120% 0; }
+    to { background-position: -80% 0; }
+  }
+  .signup-note {
+    color: var(--muted);
+    font-size: 13.5px;
+    margin-top: 16px;
+    max-width: 400px;
+  }
+  @media (min-width: 921px) { .signup-note { margin-left: auto; text-align: center; } }

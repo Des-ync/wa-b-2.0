@@ -288,3 +288,29 @@ test('every page carrying data-* handlers loads actions.js', () => {
   }
   assert.deepEqual(problems, [], problems.join('\n  '));
 });
+
+test('no page contains an inline <style> block', () => {
+  // The invariant style-src rests on. A <style> block added back would simply
+  // not apply in production — the page would render unstyled in that respect,
+  // with nothing thrown.
+  const offenders = [];
+  for (const page of fs.readdirSync(PUBLIC_DIR).filter(f => f.endsWith('.html'))) {
+    for (const m of readPage(page).matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g)) {
+      if (m[1].trim()) offenders.push(page);
+    }
+  }
+  assert.deepEqual([...new Set(offenders)], [],
+    `these pages have inline <style> blocks, which style-src now blocks: ${[...new Set(offenders)].join(', ')}`);
+});
+
+test('every extracted page stylesheet exists and is linked', () => {
+  const problems = [];
+  for (const page of fs.readdirSync(PUBLIC_DIR).filter(f => f.endsWith('.html'))) {
+    const css = page.replace(/\.html$/, '.css');
+    if (!fs.existsSync(path.join(PUBLIC_DIR, css))) continue;
+    if (!new RegExp(`<link rel="stylesheet" href="${css}"`).test(readPage(page))) {
+      problems.push(`${page} does not link ${css}`);
+    }
+  }
+  assert.deepEqual(problems, [], problems.join('\n  '));
+});

@@ -40,3 +40,18 @@ test('script-src-attr blocks inline event handlers', () => {
   // visible, which is why it is asserted.
   assert.deepEqual(directive('script-src-attr'), ["'none'"]);
 });
+
+test('style-src does not allow unsafe-inline', () => {
+  // The ten inline <style> blocks moved to .css files, so an injected <style>
+  // block cannot restyle the page.
+  assert.ok(!directive('style-src').includes("'unsafe-inline'"),
+    "style-src allows 'unsafe-inline' again — an injected <style> block would apply");
+});
+
+test('style-src-attr is stated explicitly, not left to fall back', () => {
+  // This is the load-bearing one. An ABSENT style-src-attr inherits style-src,
+  // which now has no 'unsafe-inline' — that would silently drop all 819
+  // style="…" attributes across the markup and the innerHTML templates and
+  // break the layout on every page. Deleting this line looks like tidying up.
+  assert.deepEqual(directive('style-src-attr'), ["'unsafe-inline'"]);
+});
