@@ -16,6 +16,7 @@ import '../widgets/voice_update_button.dart';
 import 'barcode_scanner.dart';
 import 'bundles.dart';
 import 'categories.dart';
+import 'product_options.dart';
 
 class ProductsScreen extends StatefulWidget {
   const ProductsScreen({super.key});
@@ -522,6 +523,30 @@ class _ProductSheetState extends State<_ProductSheet> {
               activeThumbColor: WabColors.accent,
               contentPadding: EdgeInsets.zero,
             ),
+            // Only once the product exists — variants and add-ons hang off a
+            // product id, so there is nothing to attach them to until it has
+            // been saved.
+            if (isEdit) ...[
+              const Divider(height: 24),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.tune_rounded,
+                    color: WabColors.accentInk, size: 22),
+                title: const Text('Variants & add-ons',
+                    style: TextStyle(fontWeight: FontWeight.w700)),
+                subtitle: const Text('Sizes, colours and paid extras',
+                    style: TextStyle(fontSize: 12)),
+                trailing: const Icon(Icons.chevron_right_rounded,
+                    color: WabColors.muted2),
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => ProductOptionsScreen(
+                    productId: '${widget.product!['id']}',
+                    productName: '${widget.product!['name']}',
+                    basePrice: widget.product!['price_ghs'],
+                  ),
+                )),
+              ),
+            ],
             const SizedBox(height: 12),
             FilledButton(
               onPressed: _busy ? null : _save,

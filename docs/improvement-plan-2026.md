@@ -734,7 +734,7 @@ profile. Run systematically across all mounted routes:
 | `/api/inventory/*` — suppliers CRUD, restock, adjust, movements, margins | **Now shipped** (below). Only `reorder-suggestions` had a caller. |
 | `/api/keys` — issue, revoke, rotate staff keys | **Now shipped** (§16). |
 | `/api/analytics/{delivery-sla,profit,cohorts,channels}` | **Now shipped** (§18). |
-| `/api/products/{variants,addons}/:id` PATCH+DELETE | Can create from mobile, cannot edit or delete. |
+| `/api/products/{variants,addons}/:id` PATCH+DELETE | **Now shipped** (§19). The audit line was wrong — see below. |
 | `/api/business/export`, `/api/business/close` | **Now shipped** (§17). |
 | `/api/customers/segments/summary` | Segment overview panel. |
 | `/api/admin/{ops,audit-log,risk-flags,impersonation-*}` | Admin surface. |
@@ -875,7 +875,7 @@ button off-screen and never scrolled. The fix is `scrollUntilVisible` followed b
 
 ### Not done
 
-Variant/add-on editing from mobile, segment summary.
+Segment summary.
 
 
 ---
@@ -937,3 +937,62 @@ per-delivery "Late" badge on the same screen, so the stat is now "Late orders".
 ### Not done
 
 Variant/add-on editing from mobile, segment summary.
+
+
+---
+
+## 19. Variants and add-ons
+
+### The audit line was wrong
+
+§15 recorded this as "can create from mobile, cannot edit or delete". Checking before
+building: the mobile app had **no variant or add-on code at all** — `grep` over `lib/`
+returns nothing. Creation exists only on the web dashboard, through a chain of
+`prompt()` dialogs where removing one means typing `remove variant Large` and having it
+matched by name.
+
+And the PATCH endpoints for both had **no caller on any surface**. Correcting a price or
+fixing a typo has only ever been possible by deleting the option and recreating it, which
+loses its `sort_order`. So this is not "editing from mobile" as scoped — it is the first
+edit path that has existed at all.
+
+### Two distinctions the UI has to preserve
+
+The data model draws these and a naive list would flatten both:
+
+- A **variant** carries a signed `price_delta_ghs` against the product — Large is +GH¢5,
+  Small can be −GH¢2. An **add-on** carries `price_ghs`, an absolute price the server
+  refuses to let go negative. Different endpoints, different rules, so they are separate
+  sections rather than one list with a type field.
+- A variant's `stock_qty` of `null` means "not tracked separately"; `0` means "sold out".
+  Conflating them either hides something that is for sale or keeps selling something that
+  has run out. Tracking is therefore an explicit switch, and turning it **off** sends
+  `stock_qty: null` rather than omitting the field — omitting it would leave the old count
+  in place and the variant would still look tracked. Verified against the real validator,
+  not just the mock: `int({nullable: true})` accepts the null and it reaches the `SET`
+  list, so the clear actually happens.
+
+### Shipped
+
+- `lib/api/options_api.dart` — all six calls, with `clearStockQty` as a distinct argument
+  so "stop tracking" cannot be confused with "field not supplied".
+- `lib/screens/product_options.dart` — both sections, create/edit/delete, reached from the
+  product edit sheet (only once the product exists — options hang off a product id).
+- The variant sheet shows **what the customer will actually pay** as the delta is typed.
+  A merchant prices in final money, not differences.
+- Delete confirms first and states that past orders are unaffected, because orders keep
+  their own snapshot of what was bought — "delete" on a catalogue item reads riskier than
+  it is.
+- 13 tests, including that editing issues a PATCH and never a DELETE-then-POST, that
+  turning tracking off sends an explicit null, and that a negative add-on price is caught
+  before the round trip.
+
+### Still on the web dashboard only
+
+The dashboard's `manageOptions()` prompt chain is unchanged and still cannot edit — it
+only adds and removes. Mobile is now strictly better for this task. Worth replacing when
+`public/dashboard.html` is decomposed (Phase 9), not before.
+
+### Not done
+
+Segment summary.
