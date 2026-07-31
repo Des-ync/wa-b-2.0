@@ -736,7 +736,7 @@ profile. Run systematically across all mounted routes:
 | `/api/analytics/{delivery-sla,profit,cohorts,channels}` | **Now shipped** (§18). |
 | `/api/products/{variants,addons}/:id` PATCH+DELETE | **Now shipped** (§19). The audit line was wrong — see below. |
 | `/api/business/export`, `/api/business/close` | **Now shipped** (§17). |
-| `/api/customers/segments/summary` | Segment overview panel. |
+| `/api/customers/segments/summary` | **Now shipped** (§20). |
 | `/api/admin/{ops,audit-log,risk-flags,impersonation-*}` | Admin surface. |
 | `/api/accounting/inventory-valuation` | Back-office; web-appropriate. |
 
@@ -875,7 +875,7 @@ button off-screen and never scrolled. The fix is `scrollUntilVisible` followed b
 
 ### Not done
 
-Segment summary.
+Nothing from the coverage audit — see §20.
 
 
 ---
@@ -996,3 +996,66 @@ only adds and removes. Mobile is now strictly better for this task. Worth replac
 ### Not done
 
 Segment summary.
+
+
+---
+
+## 20. Customer segments — and the end of the coverage audit
+
+`GET /api/customers/segments/summary` was the last endpoint in §15 with no client. With
+this it has none left.
+
+### Why it is not three numbers
+
+Shipping the summary as a stats panel would have missed what makes it useful. The same
+filter spec that produces these counts — `segment`, `tag`, `min_spend_ghs` in
+`src/utils/audience.js` — is already what the customer list and broadcast targeting
+accept. So a count is one tap from "show me these people" and one tap from "message
+these people". A merchant does not want to know that 23 customers are slipping away;
+they want to write to those 23.
+
+Each segment therefore carries what it is *for* ("Slipping away. A win-back message goes
+here.") next to its count, and two actions. A segment with a count of zero offers
+neither — there is nothing to look at and nobody to message.
+
+### A gap found on the way
+
+`CustomersScreen` never passed `segment` or `tag`, though the endpoint has always
+supported both via `buildAudienceClauses`. Every merchant saw the same unfiltered
+top-200 list, narrowed only by a client-side name search. It now takes an audience and
+titles itself with it, so a filtered view is never mistaken for the whole list.
+
+`showBroadcastComposer()` is new for the same reason — the composer already had segment
+and tag targeting, it just could not be opened pointed at anything.
+
+### Shipped
+
+- `lib/api/segments_api.dart` — the call, plus what each segment is for.
+- `lib/screens/segments.dart` — segments with counts and both actions; tags as chips that
+  filter the list. Reached from the Customers screen.
+- `CustomersScreen({segment, tag, filterLabel})` and `showBroadcastComposer()`.
+- 7 tests, mostly about the handoff rather than the counts: that "see them" actually
+  sends `segment=`, that a tag sends `tag=` and *not* a segment, that an empty segment
+  offers no actions, and that the screen costs one request.
+
+### `test/support/reveal.dart`
+
+The off-screen-tap trap from §17 turned up again, so the helper is now shared. It is
+worth stating plainly because it fails by **passing**: `scrollUntilVisible` returns as
+soon as its finder matches, a `ListView` builds a cache extent past the viewport, so a
+`tap` computes an offset outside the render tree, silently hits nothing, and every
+assertion afterwards checks a screen that never changed. `ensureVisible` is the second
+half. `account_data_test.dart` now imports the shared helper instead of its own copy.
+
+### One thing to watch
+
+A single backend test failed once during this work (774/775) and did not reproduce in
+four subsequent full runs; the failure marker was not captured. Nothing in this change
+touches backend code. Recording it because an intermittent that is seen once and then
+ignored is exactly the kind that resurfaces in CI.
+
+### Coverage audit: closed
+
+Every endpoint listed as clientless in §15 now has one. Remaining Phase 9 work is
+`public/dashboard.html` decomposition with its dependent CSP tightening, and error
+tracking (blocked on decision #13).

@@ -9,6 +9,8 @@ import 'package:wab_app/api/client.dart';
 import 'package:wab_app/screens/account_data.dart';
 import 'package:wab_app/state/session.dart';
 
+import 'support/reveal.dart';
+
 /// Data export and account closure.
 ///
 /// Two things are worth pinning down here and the rest is presentation:
@@ -25,20 +27,6 @@ Widget _app(ApiClient api, {Map<String, dynamic>? business}) {
     value: session,
     child: const MaterialApp(home: AccountDataScreen()),
   );
-}
-
-/// Brings [f] into the viewport whether or not it has been built yet.
-///
-/// Neither call alone is enough: `scrollUntilVisible` returns the moment the
-/// finder matches, and a ListView builds a cache extent past the viewport, so
-/// it happily stops on a widget that is still off-screen and untappable —
-/// which is how a tap can silently miss and leave a test passing for the
-/// wrong reason. `ensureVisible` then scrolls that built widget into reach.
-Future<void> _reveal(WidgetTester t, Finder f) async {
-  await t.scrollUntilVisible(f, 120,
-      scrollable: find.byType(Scrollable).first);
-  await t.ensureVisible(f);
-  await t.pumpAndSettle();
 }
 
 ApiClient _client({List<String>? calls, int closeStatus = 200}) =>
@@ -65,7 +53,7 @@ void main() {
 
     expect(find.text('Download your data'), findsOneWidget);
     expect(find.text('Close this account'), findsOneWidget);
-    await _reveal(tester, find.text('Delete everything permanently'));
+    await reveal(tester, find.text('Delete everything permanently'));
     expect(find.text('Delete everything permanently'), findsOneWidget);
   });
 
@@ -161,7 +149,7 @@ void main() {
     await tester.pumpWidget(_app(_client()));
     await tester.pumpAndSettle();
 
-    await _reveal(tester, find.text('dev@skes.tech'));
+    await reveal(tester, find.text('dev@skes.tech'));
 
     expect(find.text('dev@skes.tech'), findsOneWidget);
     expect(find.text('Delete my WA-B account'), findsOneWidget);
@@ -178,7 +166,7 @@ void main() {
     // Scroll it into reach first — on a 640px-tall screen the button is below
     // the fold, and tapping a point outside the viewport would silently do
     // nothing and let this test pass without ever opening the sheet.
-    await _reveal(tester, find.text('Close my account'));
+    await reveal(tester, find.text('Close my account'));
     await tester.tap(find.text('Close my account'));
     await tester.pumpAndSettle();
 

@@ -5,9 +5,19 @@ import '../state/session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import 'customer_detail.dart';
+import 'segments.dart';
 
 class CustomersScreen extends StatefulWidget {
-  const CustomersScreen({super.key});
+  /// [segment] and [tag] narrow the list to an audience. The endpoint has
+  /// always supported them via buildAudienceClauses — nothing on mobile ever
+  /// passed them, so every merchant saw the same unfiltered top-200 list.
+  /// When set, the screen is a filtered view opened from Segments and says
+  /// so, rather than silently showing fewer people than expected.
+  const CustomersScreen({super.key, this.segment, this.tag, this.filterLabel});
+
+  final String? segment;
+  final String? tag;
+  final String? filterLabel;
 
   @override
   State<CustomersScreen> createState() => _CustomersScreenState();
@@ -25,6 +35,8 @@ class _CustomersScreenState extends State<CustomersScreen> {
       'business_id': session.businessId,
       'limit': 200,
       if (_sort == 'recent') 'sort': 'recent',
+      if (widget.segment != null) 'segment': widget.segment,
+      if (widget.tag != null) 'tag': widget.tag,
     });
     return ((res['customers'] as List?) ?? []).cast<Map<String, dynamic>>();
   }
@@ -48,8 +60,15 @@ class _CustomersScreenState extends State<CustomersScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Customers'),
+        title: Text(widget.filterLabel ?? 'Customers'),
         actions: [
+          if (widget.segment == null && widget.tag == null)
+            IconButton(
+              tooltip: 'Segments',
+              onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const SegmentsScreen())),
+              icon: const Icon(Icons.donut_small_rounded),
+            ),
           Padding(
             padding: const EdgeInsets.only(right: 12),
             child: SegmentedButton<String>(

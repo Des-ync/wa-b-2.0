@@ -147,8 +147,29 @@ class _BroadcastsScreenState extends State<BroadcastsScreen> {
   }
 }
 
+/// Opens the broadcast composer already aimed at an audience.
+///
+/// Exists so the Segments screen can go straight from "23 customers are
+/// slipping away" to writing to those 23 — the filter spec is the same one
+/// the composer already sends, so this passes it rather than asking the
+/// merchant to re-pick a segment they just tapped.
+Future<bool?> showBroadcastComposer(BuildContext context,
+    {String? segment, String? tag}) {
+  return showModalBottomSheet<bool>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: WabColors.bg,
+    shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+    builder: (_) => _ComposeSheet(initialSegment: segment, initialTag: tag),
+  );
+}
+
 class _ComposeSheet extends StatefulWidget {
-  const _ComposeSheet();
+  const _ComposeSheet({this.initialSegment, this.initialTag});
+
+  final String? initialSegment;
+  final String? initialTag;
 
   @override
   State<_ComposeSheet> createState() => _ComposeSheetState();
@@ -161,6 +182,13 @@ class _ComposeSheetState extends State<_ComposeSheet> {
   String? _segment;
   bool _sending = false;
   bool _testing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _segment = widget.initialSegment;
+    if (widget.initialTag != null) _tagCtrl.text = widget.initialTag!;
+  }
 
   @override
   void dispose() {
