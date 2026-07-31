@@ -1271,15 +1271,42 @@ base rules).
 Both guards mutation-tested: reintroducing a `<style>` block fails, and deleting the
 `style-src-attr` line fails.
 
+### Reverted: style-src cannot drop 'unsafe-inline'
+
+**This shipped, broke production, and was reverted.** Clerk styles its sign-in widget by
+injecting a `<style>` element into the document at runtime. Under `style-src 'self'
+https:` that element is blocked and arrives empty, so the entire login form renders as
+unstyled browser defaults — visibly broken, on the auth path.
+
+Why the local checks missed it: the Clerk widget only renders with a live publishable
+key, so locally `#clerk-signin` was an empty container. Every check passed against a
+component that was not there. The regression was caught by screenshotting **production**
+after deploy, which is the only reason it was found in minutes rather than by a user.
+
+The lesson generalises past Clerk: `style-src` restricts any third-party widget that
+styles itself at runtime, and those are exactly the components that do not render in a
+local no-credentials environment. A CSP change involving a hosted widget has to be
+verified against a page where that widget actually renders.
+
+`style-src` is back to `'self' 'unsafe-inline' https:`, with a test asserting it stays
+that way so the next attempt starts from this finding instead of rediscovering it the
+same way. The `<style>` extraction was kept — it is worth having regardless, and
+`style-src-attr` is still stated explicitly so the 819 attributes no longer depend on
+`style-src`'s value.
+
 ### The CSP now
 
     script-src       'self' https:
     script-src-attr  'none'
-    style-src        'self' https:
-    style-src-attr   'unsafe-inline'    ← known, deliberate, 819 attributes
+    style-src        'self' 'unsafe-inline' https:   ← required by Clerk
+    style-src-attr   'unsafe-inline'                 ← 819 attributes
     object-src       'none'
     base-uri         'self'
 
+The script surface is fully closed. The style surface is not, and cannot be without
+either Clerk-supported nonces or dropping Clerk.
+
 ### Not done
 
-The 819 style attributes. Error tracking remains blocked on decision #13.
+The 819 style attributes, and `style-src` itself. Error tracking remains blocked on
+decision #13.

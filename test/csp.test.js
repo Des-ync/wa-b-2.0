@@ -41,11 +41,15 @@ test('script-src-attr blocks inline event handlers', () => {
   assert.deepEqual(directive('script-src-attr'), ["'none'"]);
 });
 
-test('style-src does not allow unsafe-inline', () => {
-  // The ten inline <style> blocks moved to .css files, so an injected <style>
-  // block cannot restyle the page.
-  assert.ok(!directive('style-src').includes("'unsafe-inline'"),
-    "style-src allows 'unsafe-inline' again — an injected <style> block would apply");
+test('style-src still allows unsafe-inline, because Clerk requires it', () => {
+  // Tightening this was tried and reverted. Clerk injects a <style> element at
+  // runtime to style the sign-in widget; without 'unsafe-inline' the whole
+  // login form renders as unstyled browser defaults. The widget only appears
+  // with a live Clerk key, so this cannot be caught locally — it reached
+  // production before it was seen. Asserted so the next attempt starts here
+  // rather than rediscovering it the same way.
+  assert.ok(directive('style-src').includes("'unsafe-inline'"),
+    'style-src dropped unsafe-inline — this breaks the Clerk sign-in widget');
 });
 
 test('style-src-attr is stated explicitly, not left to fall back', () => {
