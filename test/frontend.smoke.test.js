@@ -160,3 +160,41 @@ test('the options dialog is reachable and labelled for assistive tech', () => {
   assert.match(html, /aria-label="Remove one/);
   assert.match(html, /aria-label="Add one/);
 });
+
+/**
+ * The marketing pages must not ship a runtime JSX toolchain.
+ *
+ * They used to load React + ReactDOM (development builds) and Babel
+ * standalone on all 28 of them to render a design-time theme panel that
+ * showed a visitor nothing: ~893 KB gzipped on top of a 3.4 KB page, on a
+ * market where mobile data is bought by the megabyte.
+ *
+ * It also made the CSP unfixable. Babel transforms the JSX in the browser and
+ * injects the result as inline <script> elements, so `script-src` had to keep
+ * 'unsafe-inline' for those pages to work at all.
+ *
+ * tweaks.jsx and tweaks-panel.jsx stay in the repo for local design work.
+ * This guards only against them being wired back into a served page.
+ */
+test('no page loads a runtime JSX toolchain', () => {
+  const offenders = [];
+  for (const page of fs.readdirSync(PUBLIC_DIR).filter(f => f.endsWith('.html'))) {
+    const html = readPage(page);
+    if (/type="text\/babel"/.test(html)) offenders.push(`${page}: text/babel script`);
+    if (/unpkg\.com\/@babel\/standalone/.test(html)) offenders.push(`${page}: babel standalone`);
+    if (/unpkg\.com\/react(-dom)?@/.test(html)) offenders.push(`${page}: react from unpkg`);
+  }
+  assert.deepEqual(offenders, [],
+    `these pages ship a runtime JSX toolchain to visitors:\n  ${offenders.join('\n  ')}`);
+});
+
+test('no page loads a React development build', () => {
+  // Distinct from the check above on purpose: a production React build would
+  // still be ~45 KB of framework on a static marketing page, but a
+  // *development* build is strictly a mistake — it is bigger and slower and
+  // exists to print warnings to a console no visitor is reading.
+  const offenders = fs.readdirSync(PUBLIC_DIR)
+    .filter(f => f.endsWith('.html'))
+    .filter(f => /react(-dom)?\.development\.js/.test(readPage(f)));
+  assert.deepEqual(offenders, [], `development builds served to visitors: ${offenders.join(', ')}`);
+});
