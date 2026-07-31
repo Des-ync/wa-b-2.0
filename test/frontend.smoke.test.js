@@ -9,13 +9,27 @@ function readPage(name) {
   return fs.readFileSync(path.join(PUBLIC_DIR, name), 'utf8');
 }
 
-/** Every inline <script> block must be syntactically valid JS. */
+/**
+ * Every inline <script> block must be syntactically valid JS.
+ *
+ * A page with no inline blocks is fine — dashboard.html's moved to
+ * dashboard.js — so this no longer demands that at least one exists. The
+ * guard that its JS parses did not go away, it followed the code; see
+ * assertScriptFileParses below.
+ */
 function assertInlineScriptsParse(html, pageName) {
   const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]);
-  assert.ok(scripts.length > 0, `${pageName} has no inline <script> blocks — expected at least one`);
   for (const [i, src] of scripts.entries()) {
     assert.doesNotThrow(() => new Function(src), `${pageName} inline script #${i} has a syntax error`);
   }
+}
+
+/** An extracted script file must parse, and must actually be referenced. */
+function assertScriptFileParses(pageName, scriptName) {
+  const src = readPage(scriptName);
+  assert.doesNotThrow(() => new Function(src), `${scriptName} has a syntax error`);
+  assert.match(readPage(pageName), new RegExp(`<script src="${scriptName}"`),
+    `${pageName} does not load ${scriptName}`);
 }
 
 const PAGES = ['dashboard.html', 'admin.html', 'receipt.html', 'login.html', 'signup.html'];
@@ -34,13 +48,37 @@ test('every dashboard-family page\'s inline JS is syntactically valid', () => {
   }
 });
 
+test('dashboard.js parses and is loaded by dashboard.html', () => {
+  assertScriptFileParses('dashboard.html', 'dashboard.js');
+});
+
 test('dashboard.html declares its core section navigation and API helper', () => {
   const html = readPage('dashboard.html');
   for (const id of ['sideNav', 'app', 'orderModalOverlay', 'searchOverlay', 'notifPanel']) {
     assert.match(html, new RegExp('id="' + id + '"'), `dashboard.html missing #${id}`);
   }
-  assert.match(html, /async function api\(/, 'dashboard.html missing its api() fetch helper');
-  assert.match(html, /function showSection\(/, 'dashboard.html missing showSection()');
+  // The behaviour lives in dashboard.js now; the markup still has to be able
+  // to reach it, so these are asserted where they actually are.
+  const js = readPage('dashboard.js');
+  assert.match(js, /async function api\(/, 'dashboard.js missing its api() fetch helper');
+  assert.match(js, /function showSection\(/, 'dashboard.js missing showSection()');
+});
+
+test('every function dashboard.html calls from an inline handler exists in dashboard.js', () => {
+  // The extraction only stays safe while the markup can still reach the
+  // code: inline on*= handlers resolve against globals, so a function that
+  // stopped being global would fail silently at click time, not load time.
+  const html = readPage('dashboard.html');
+  const js = readPage('dashboard.js');
+  const called = new Set(
+    [...html.matchAll(/\bon[a-z]+="\s*([A-Za-z_$][\w$]*)\s*\(/g)].map(m => m[1])
+  );
+  assert.ok(called.size > 30, `expected many inline handlers, found ${called.size}`);
+  const missing = [...called].filter(fn =>
+    !new RegExp(`(function\\s+${fn}\\b|\\b(?:const|let|var)\\s+${fn}\\s*=|\\bwindow\\.${fn}\\s*=)`).test(js)
+    && !/^(if|for|while|return|event|this|document|window|alert|confirm)$/.test(fn)
+  );
+  assert.deepEqual(missing, [], `dashboard.html calls these but dashboard.js does not define them: ${missing.join(', ')}`);
 });
 
 test('admin.html declares its ops/webhook/audit sections and key-gated boot flow', () => {
