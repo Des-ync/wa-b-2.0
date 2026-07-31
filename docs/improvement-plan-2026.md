@@ -735,7 +735,7 @@ profile. Run systematically across all mounted routes:
 | `/api/keys` — issue, revoke, rotate staff keys | **Now shipped** (§16). |
 | `/api/analytics/{delivery-sla,profit,cohorts,channels}` | Richer analytics, no client. |
 | `/api/products/{variants,addons}/:id` PATCH+DELETE | Can create from mobile, cannot edit or delete. |
-| `/api/business/export`, `/api/business/close` | Data export and account closure — GDPR-adjacent. |
+| `/api/business/export`, `/api/business/close` | **Now shipped** (§17). |
 | `/api/customers/segments/summary` | Segment overview panel. |
 | `/api/admin/{ops,audit-log,risk-flags,impersonation-*}` | Admin surface. |
 | `/api/accounting/inventory-valuation` | Back-office; web-appropriate. |
@@ -766,8 +766,8 @@ Postgres NUMERIC and arrive as **strings**, which the fixtures use deliberately.
 
 ### Not done
 
-Staff-key management UI, the four richer analytics views, variant/add-on editing from
-mobile, data export and account closure, segment summary. All independent.
+Staff-key management UI (§16), the four richer analytics views, variant/add-on editing
+from mobile, data export and account closure (§17), segment summary. All independent.
 
 
 ---
@@ -815,5 +815,64 @@ checked for the same fault at 375×600 and does not have it, so it was left alon
 
 ### Still unreachable
 
-Four richer analytics views, variant/add-on editing from mobile, data export and account
-closure, segment summary. All independent.
+Four richer analytics views, variant/add-on editing from mobile, segment summary. All
+independent.
+
+
+---
+
+## 17. Data export and account closure
+
+`GET /api/business/export` and `POST /api/business/close` had no client on any surface.
+That was worth fixing ahead of the remaining analytics work for a reason that is not
+really about API coverage: an app that lets someone create an account has to let them
+leave, and Play requires that route to be findable from inside the app rather than only
+in a support email.
+
+### The distinction the screen is built around
+
+The two endpoints do not do what their names suggest to a merchant:
+
+- `/close` sets `closed_at` and stops the storefront and bot. **Every order, customer and
+  message is retained**, and the export keeps working afterwards.
+- Actual deletion is not an API call at all. Per `public/delete-account.html` it is an
+  email to `dev@skes.tech`, verified against the WhatsApp number on file before anything
+  is erased — deliberately, so that nobody can destroy a merchant's business records by
+  getting hold of their phone for a minute.
+
+So the screen never lets "close" imply "delete". It states the retention plainly, and
+names the real deletion route with the exact address, subject line and required details,
+each copyable. Two tests hold that wording still: one asserts the screen says closing
+does **not** delete, one asserts the deletion details are present and reachable.
+
+### Shipped
+
+- `lib/api/account_api.dart` — both calls, plus the deletion-request constants mirrored
+  from the published policy page.
+- `lib/screens/account_data.dart` — one screen, three depths, in the order download →
+  close → delete, so a merchant is offered their copy of the data *before* giving up
+  access to it.
+- `ApiClient.getRaw` — the export is a file, not an envelope. Kept separate from `get`
+  because the bytes must survive unreformatted (decoding to a Map and re-encoding would
+  reformat the merchant's file and double peak memory on a low-end phone), and because a
+  full bundle needs far more than the standard 25s timeout on a 3G connection.
+- Closing requires typing `CLOSE`, not a second tap — a mis-tap should not be able to
+  take a shop offline. It asks an optional reason first, then signs out, since every
+  screen behind it would otherwise be describing a shop that is no longer trading.
+- `share_plus` added (the one new dependency): the export goes straight to the system
+  share sheet, because on these phones a file saved "somewhere in Downloads" is one the
+  merchant will never find again, whereas WhatsApp-to-self or Drive is somewhere they
+  already know how to get back to.
+
+### A test that was passing for the wrong reason
+
+The short-screen test tapped a button at y=882 on a 640px-tall viewport. The tap silently
+missed, the sheet never opened, and `takeException()` was null — so it passed while
+verifying nothing. `dragUntilVisible` had not helped: it stops the moment its finder
+matches, and a `ListView` builds a cache extent past the viewport, so it kept finding the
+button off-screen and never scrolled. The fix is `scrollUntilVisible` followed by
+`ensureVisible`; both are needed, and neither alone is enough.
+
+### Not done
+
+Four richer analytics views, variant/add-on editing from mobile, segment summary.

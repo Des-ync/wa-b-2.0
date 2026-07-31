@@ -94,6 +94,42 @@ class ApiClient {
           {Map<String, dynamic>? query}) =>
       _send(() => _client.delete(_uri(path, query), headers: _headers));
 
+  /// A GET whose body is a FILE, not an envelope — currently only the data
+  /// export, which the server sends as a JSON attachment.
+  ///
+  /// Kept separate from [get] rather than folded into it because the two
+  /// differ in three ways that all matter: the body must survive as the exact
+  /// bytes the server produced (decoding to a Map and re-encoding would
+  /// reformat the merchant's file and double peak memory on a low-end phone),
+  /// a full bundle is far slower than a normal request so 25s is too short,
+  /// and a failure still arrives as a JSON error envelope that must raise the
+  /// same [ApiException] every other call site already handles.
+  Future<String> getRaw(String path,
+      {Map<String, dynamic>? query,
+      Duration timeout = const Duration(seconds: 120)}) async {
+    http.Response res;
+    try {
+      res = await _client
+          .get(_uri(path, query), headers: _headers)
+          .timeout(timeout);
+    } on SocketException {
+      throw ApiException(
+          0, 'No connection. Check your internet and try again.');
+    } catch (_) {
+      throw ApiException(0, 'Network error. Please try again.');
+    }
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      Map<String, dynamic> json;
+      try {
+        json = jsonDecode(res.body) as Map<String, dynamic>;
+      } catch (_) {
+        json = {};
+      }
+      throw _errorFrom(res.statusCode, json);
+    }
+    return res.body;
+  }
+
   Future<Map<String, dynamic>> _send(
       Future<http.Response> Function() run) async {
     http.Response res;

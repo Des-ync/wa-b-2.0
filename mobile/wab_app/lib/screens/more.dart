@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../services/biometric_gate.dart';
 import '../state/session.dart';
 import '../theme.dart';
+import 'account_data.dart';
 import 'accounting.dart';
 import 'analytics.dart';
 import 'audit_log.dart';
@@ -142,6 +143,13 @@ class MoreScreen extends StatelessWidget {
           const SizedBox(height: 10),
           item(Icons.settings_rounded, 'Settings',
               'Bot, delivery, hours, subscription', const SettingsScreen()),
+          const SizedBox(height: 10),
+          // Last in the list on purpose — it is where you go to leave, not
+          // somewhere to land by accident — but present, because an account
+          // you can create in the app has to be closable from the app too.
+          item(Icons.shield_outlined, 'Your data & account',
+              'Download your data, close or delete your account',
+              const AccountDataScreen()),
           const SizedBox(height: 24),
           OutlinedButton.icon(
             onPressed: () async {
