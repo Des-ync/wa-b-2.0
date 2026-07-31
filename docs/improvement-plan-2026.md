@@ -732,7 +732,7 @@ profile. Run systematically across all mounted routes:
 | Surface | Status |
 |---|---|
 | `/api/inventory/*` — suppliers CRUD, restock, adjust, movements, margins | **Now shipped** (below). Only `reorder-suggestions` had a caller. |
-| `/api/keys` — issue, revoke, rotate staff keys | No UI. This is Phase 9's "staff roles and permissions UI". |
+| `/api/keys` — issue, revoke, rotate staff keys | **Now shipped** (§16). |
 | `/api/analytics/{delivery-sla,profit,cohorts,channels}` | Richer analytics, no client. |
 | `/api/products/{variants,addons}/:id` PATCH+DELETE | Can create from mobile, cannot edit or delete. |
 | `/api/business/export`, `/api/business/close` | Data export and account closure — GDPR-adjacent. |
@@ -768,3 +768,52 @@ Postgres NUMERIC and arrive as **strings**, which the fixtures use deliberately.
 
 Staff-key management UI, the four richer analytics views, variant/add-on editing from
 mobile, data export and account closure, segment summary. All independent.
+
+
+---
+
+## 16. Staff access management
+
+Branch `phase-9/staff-keys`. Phase 9's "staff roles and permissions UI", and the
+unreachable surface with a security dimension rather than a convenience one.
+
+### The gap
+
+Keys could only be issued by calling `/api/keys` directly. Nothing could **list** what
+existed or **revoke** it, so a shop owner had no way to answer "who still has access" —
+the question that matters after someone leaves. The backend RBAC (`utils/permissions.js`,
+five roles, `rbac.test.js`) has been complete throughout.
+
+### What the design turns on
+
+The secret is returned **exactly once**, at creation or rotation, and stored hashed. Every
+choice in the reveal follows from that being genuinely irreversible:
+
+- the dialog is `barrierDismissible: false`, so tapping away cannot silently lose it
+- the copy says "the only time it will be shown", not "keep this safe"
+- the confirm button reads "I've saved it", not "OK"
+- the remedy is named in the dialog itself: rotate the key
+
+Other decisions worth keeping:
+
+- **Roles are shown by capability, not name.** "Support" and "Manager" mean nothing to
+  someone handing out access; the picker says which one can see the money.
+- **Revoked keys stay listed**, as a record of what access existed and when it ended.
+- **"Never used" is surfaced**, because a key nobody has picked up can be revoked with no
+  disruption.
+- **Rotate and revoke are separate actions with separate confirmations.** Rotating an
+  intended revoke would leave the person with access — the worst possible mis-tap here.
+- An unnamed key is refused: a key nobody can later identify as theirs cannot be safely
+  revoked.
+
+### A layout bug the tests caught
+
+The create sheet — four role options with their explanations, plus a field and a button —
+**overflowed a short screen**, clipping the Create button off the bottom on exactly the
+cheap handsets this product targets. Now scrollable. The inventory restock sheet was
+checked for the same fault at 375×600 and does not have it, so it was left alone.
+
+### Still unreachable
+
+Four richer analytics views, variant/add-on editing from mobile, data export and account
+closure, segment summary. All independent.

@@ -8,6 +8,7 @@ import 'package:wab_app/api/broadcast_api.dart';
 import 'package:wab_app/api/client.dart';
 import 'package:wab_app/api/customer_api.dart';
 import 'package:wab_app/api/inventory_api.dart';
+import 'package:wab_app/api/staff_api.dart';
 import 'package:wab_app/api/order_api.dart';
 
 /// The API layer.
@@ -227,6 +228,48 @@ void main() {
         api.sendPaymentReminder('ord-1'),
         throwsA(isA<ApiException>().having((e) => e.status, 'status', 429)),
       );
+    });
+  });
+
+  group('StaffApi', () {
+    test('creating a key sends name and role', () async {
+      final cap = Capture();
+      await cap.client().createStaffKey('biz-1', name: 'Ama', role: 'support');
+
+      expect(cap.last.method, 'POST');
+      expect(cap.last.url.path, '/api/keys');
+      expect(cap.lastBody, {'business_id': 'biz-1', 'name': 'Ama', 'role': 'support'});
+    });
+
+    test('an absent expiry means the key does not expire', () async {
+      final cap = Capture();
+      await cap.client().createStaffKey('biz-1', name: 'Ama', role: 'support', expiresAt: '');
+      expect(cap.lastBody.containsKey('expires_at'), isFalse);
+
+      await cap.client().createStaffKey('biz-1', name: 'Ama', role: 'support',
+          expiresAt: '2027-01-01T00:00:00Z');
+      expect(cap.lastBody['expires_at'], '2027-01-01T00:00:00Z');
+    });
+
+    test('revoke and rotate target the right key and are distinct', () async {
+      final cap = Capture();
+      await cap.client().revokeStaffKey('key-1');
+      expect(cap.last.url.path, '/api/keys/key-1/revoke');
+
+      await cap.client().rotateStaffKey('key-1');
+      // Rotating an intended revoke would leave the person with access.
+      expect(cap.last.url.path, '/api/keys/key-1/rotate');
+    });
+
+    test('the role list matches the backend capability matrix', () async {
+      // src/utils/permissions.js — if a role is added there and not here, the
+      // picker silently cannot grant it.
+      expect(staffRoles.keys.toSet(),
+          {'owner', 'manager', 'support', 'accountant', 'readonly'});
+      for (final r in staffRoles.values) {
+        expect(r.summary, isNotEmpty,
+            reason: 'a role with no explanation cannot be granted safely');
+      }
     });
   });
 

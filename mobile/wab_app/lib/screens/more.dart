@@ -11,6 +11,7 @@ import 'automations.dart';
 import 'broadcasts.dart';
 import 'customers.dart';
 import 'inventory.dart';
+import 'staff_keys.dart';
 import 'onboarding_checklist.dart';
 import 'promos.dart';
 import 'settings.dart';
@@ -116,6 +117,10 @@ class MoreScreen extends StatelessWidget {
           item(Icons.inventory_2_rounded, 'Stock',
               'What is running low, what it earns, what moved',
               const InventoryScreen()),
+          const SizedBox(height: 10),
+          item(Icons.key_rounded, 'Staff access',
+              'Who can get in, and how to take it back',
+              const StaffKeysScreen()),
           const SizedBox(height: 10),
           item(Icons.people_alt_rounded, 'Customers',
               'Everyone who has chatted or ordered', const CustomersScreen()),
