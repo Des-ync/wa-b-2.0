@@ -1510,3 +1510,58 @@ whitespace` flagged.
 
 Phase 9's remaining named item is a formatter (`.prettierrc`); ESLint is configured and
 gating CI. Decision #13 stays partially addressed.
+
+
+---
+
+## 27. Reverted: `script-src-attr 'none'` killed 61 dynamically-built handlers
+
+**This shipped and broke production.** Found while starting the photo-upload work, by
+noticing an `onclick=` inside a `dashboard.js` template string.
+
+§22 converted the 86 inline `on*=` handlers in the `.html` files to `data-*` attributes and
+set `script-src-attr` to `'none'`. But the page scripts **build another 61 inline handlers
+into markup they assign through `innerHTML`** — and those are subject to `script-src-attr`
+exactly like static ones. 49 in `dashboard.js`, 5 in `storefront.js` (customer-facing), 5
+in `admin.js`, 2 in `receipt.js`.
+
+Confirmed empirically under the shipped policy, not inferred:
+
+    { "injectedOnclickWorks": false, "injectedOnerrorWorks": false }
+
+So the product-list Image button, the stock/featured/hidden toggles, order status changes,
+webhook retries, the storefront's option pickers — all silently inert. **Nothing throws
+when a handler is refused.** The button simply does nothing.
+
+### Why every check passed
+
+Three failures lined up, and each one alone would have caught it:
+
+1. The conversion script globbed `*.html`.
+2. The test asserted "no page contains an inline `on*=` handler" — over `*.html`.
+3. The browser verification ran on pages with **no data**. Nothing dynamic had rendered,
+   so no injected handler existed to fail.
+
+That third one is the same blind spot as §23, where Clerk's widget did not render locally.
+Verifying against an empty page keeps producing confident, wrong results.
+
+### What was done
+
+`script-src-attr` is back to `'unsafe-inline'`, restoring all 61. The test no longer
+asserts a fixed value — it ties the policy to the actual state of the files:
+
+    if script-src-attr is tightened → assert NO .js or .html builds an inline handler
+    else                            → assert some still do (i.e. the work is genuinely pending)
+
+Mutation-tested: re-tightening fails with the offending files and counts listed. That is
+the check that should have existed before the directive was ever changed.
+
+### Still to do
+
+Convert the 61, then re-tighten. They are harder than the static ones — seven structural
+shapes including `this.dataset.*`, `this.value`, compound statements, boolean arguments
+that `actions.js` does not yet coerce, and one fully generated `onclick="${onclick(row)}"`.
+That is its own change, and it is now guarded so it cannot be skipped again.
+
+`script-src` remains `'self' https:` and is unaffected: injected `<script>` blocks are
+still refused.

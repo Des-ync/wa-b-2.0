@@ -33,12 +33,32 @@ test('object-src and base-uri stay locked down', () => {
   assert.deepEqual(directive('base-uri'), ["'self'"]);
 });
 
-test('script-src-attr blocks inline event handlers', () => {
-  // The 86 inline on*= handlers became data-* attributes dispatched by
-  // actions.js, so an injected `<img onerror=…>` does not execute. Loosening
-  // this back to 'unsafe-inline' would reopen that without breaking anything
-  // visible, which is why it is asserted.
-  assert.deepEqual(directive('script-src-attr'), ["'none'"]);
+test('script-src-attr may only be tightened once NO file builds an inline handler', () => {
+  // The relationship this asserts is the one that was missed. The .html files
+  // were converted to data-* attributes and script-src-attr was set to 'none'
+  // — but the page scripts BUILD another 61 inline handlers into markup they
+  // assign via innerHTML, and those are subject to script-src-attr exactly
+  // like static ones. 49 dashboard controls and 5 on the storefront stopped
+  // working, silently, because nothing throws when a handler is refused.
+  //
+  // So the policy is tied to the actual state of the files rather than to
+  // anyone remembering: tighten it and this test tells you what still builds
+  // handlers.
+  const fs2 = require('fs');
+  const dir = path.join(__dirname, '..', 'public');
+  const offenders = [];
+  for (const f of fs2.readdirSync(dir).filter(n => n.endsWith('.js') || n.endsWith('.html'))) {
+    const matches = fs2.readFileSync(path.join(dir, f), 'utf8').match(/\son[a-z]+="/g);
+    if (matches) offenders.push(`${f} (${matches.length})`);
+  }
+  const tightened = !directive('script-src-attr').includes("'unsafe-inline'");
+  if (tightened) {
+    assert.deepEqual(offenders, [],
+      `script-src-attr is tightened but these files still build inline handlers, which will silently stop working:\n  ${offenders.join('\n  ')}`);
+  } else {
+    assert.ok(offenders.length > 0,
+      'nothing builds inline handlers any more — script-src-attr can now be set to \'none\'');
+  }
 });
 
 test('style-src still allows unsafe-inline, because Clerk requires it', () => {

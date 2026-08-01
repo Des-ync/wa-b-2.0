@@ -61,11 +61,17 @@ app.use(requestIdMiddleware);
 // left, enforced by a test — so an injected <script>…</script> payload, the
 // classic stored-XSS shape, does not execute.
 //
-// `script-src-attr` is now 'none' too: the 86 inline on*= handlers were
-// converted to data-* attributes dispatched by public/actions.js, so an
-// injected `<img onerror=…>` no longer runs either. Tests assert no page
-// contains an inline handler and that every data-* action names a function
-// its page actually defines.
+// `script-src-attr` MUST keep 'unsafe-inline' for now. The 86 inline on*=
+// handlers in the .html files were converted to data-* attributes — but the
+// page scripts BUILD another 61 inline handlers into markup they assign
+// through innerHTML, and those are subject to script-src-attr exactly like
+// static ones. Setting this to 'none' silently killed 49 dashboard controls
+// and 5 on the storefront until this revert.
+//
+// The conversion only scanned .html; the tests only scanned .html; and the
+// browser checks ran on pages with no data, so nothing dynamic had rendered.
+// Re-tighten only once `grep -oE ' on[a-z]+="' public/*.js` is empty — a test
+// now asserts that relationship rather than leaving it to memory.
 //
 // `style-src` MUST keep 'unsafe-inline'. Clerk styles its sign-in widget by
 // injecting a <style> element into the document at runtime; blocking it
@@ -86,7 +92,7 @@ app.use(helmet({
     useDefaults: true,
     directives: {
       'script-src': ["'self'", 'https:'],
-      'script-src-attr': ["'none'"],
+      'script-src-attr': ["'unsafe-inline'"],
       'style-src': ["'self'", "'unsafe-inline'", 'https:'],
       'style-src-attr': ["'unsafe-inline'"],
       'img-src': ["'self'", 'data:', 'https:'],
