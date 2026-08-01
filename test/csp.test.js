@@ -59,3 +59,9 @@ test('style-src-attr is stated explicitly, not left to fall back', () => {
   // break the layout on every page. Deleting this line looks like tidying up.
   assert.deepEqual(directive('style-src-attr'), ["'unsafe-inline'"]);
 });
+
+test('the policy names a report endpoint', () => {
+  // Without report-uri the browser has nowhere to say that it blocked
+  // something, which is how a broken login page shipped unnoticed.
+  assert.deepEqual(directive('report-uri'), ['/api/csp-report']);
+});

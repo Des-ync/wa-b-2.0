@@ -1310,3 +1310,62 @@ either Clerk-supported nonces or dropping Clerk.
 
 The 819 style attributes, and `style-src` itself. Error tracking remains blocked on
 decision #13.
+
+
+---
+
+## 24. CSP violation reporting
+
+Directly motivated by §23. When `style-src` blocked the `<style>` element Clerk injects,
+the login form rendered unstyled **in production, on the auth path**, and nothing raised
+a signal. Nothing threw, no request 500'd, the HTML was byte-perfect. It was found by a
+human opening the page and looking at it.
+
+Every visitor's browser knew. None of them had anywhere to say so. `report-uri` now
+points at `/api/csp-report`.
+
+This is the part of error tracking that needs no vendor and no decision — worth having
+regardless of how #13 lands.
+
+### The failure mode being designed against
+
+The endpoint is unauthenticated (browsers send these with no credentials and will not
+negotiate), every visitor's browser can post to it, and one bad directive fires on
+**every page view**. Alerting per report would be a self-inflicted outage. So:
+
+- **Extension noise is dropped.** `chrome-extension:`, `moz-extension:`, `about:` and
+  friends are the overwhelming majority of real-world reports — a password manager
+  restyling a login form is not a regression. Left in, this endpoint would alert
+  constantly and be muted within a day, which is the same as not having it.
+- **One alert per distinct violation, per process.** Signature is
+  `directive | blocked-uri | document *path*` — the path, because query strings carry
+  order ids and shop slugs, so two shops hitting one bug is one bug.
+- **Held in memory, not the database.** The map empties on restart, so the first deploy
+  after a bad change re-reports it rather than staying quiet because an earlier release
+  already mentioned it. Capped at 200 signatures.
+- **Answers 204 immediately**, before parsing. A browser is never made to wait, and a
+  body that cannot be parsed is not the reporter's problem. Rate-limited to 60/min, and
+  its limiter answers 204 too rather than JSON the browser never asked for.
+- Body capped at 16 KB, and parsed for `application/csp-report` *and*
+  `application/reports+json` — `express.json()` ignores both by default and would have
+  handed the route an empty body.
+
+### Verified against the actual bug
+
+Not just unit-tested. With `style-src` temporarily re-tightened locally, a real browser
+injecting a `<style>` element produced a real report, delivered and logged:
+
+    CSP violation (first occurrence): directive: style-src-elem | blocked: inline | page: /wa-b/login.html
+
+That is character-for-character the signature the Clerk regression produced, and it is
+the string the test asserts. Also confirmed live: extension-scheme reports are dropped,
+and a repeat of a known signature logs nothing.
+
+Worth noting what this run *also* confirmed — Clerk injects no `<style>` at all locally,
+which is precisely why §23 shipped broken. The blind spot is real and is not fixed by
+being more careful; it is fixed by the browser being able to report.
+
+### Not done
+
+Error tracking proper (decision #13) — this covers blocked resources, not JavaScript
+exceptions. The 819 style attributes, and `style-src` itself.
