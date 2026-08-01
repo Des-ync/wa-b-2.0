@@ -1,6 +1,7 @@
 const express = require('express');
 const logger = require('../utils/logger');
 const { alertOps } = require('../services/alert.service');
+const { safeForAlert } = require('../utils/untrustedText');
 
 const router = express.Router();
 
@@ -105,13 +106,20 @@ router.post('/', (req, res) => {
   seen.add(sig);
 
   const where = report.source ? `${report.source}:${report.line}` : '(no source)';
-  const detail = `${report.kind}: ${report.message}\n`
-    + `at: ${where}\n`
-    + `page: ${report.page}`
-    + (report.stack ? `\n\n${report.stack.slice(0, 400)}` : '');
+  // Everything below is browser-supplied and this endpoint is unauthenticated,
+  // so it is defanged before going anywhere a person might tap it. See
+  // utils/untrustedText.js — the risk is phishing through our own alert
+  // channel, not code execution.
+  const detail = `[browser-reported, unverified]\n`
+    + `${report.kind}: ${safeForAlert(report.message)}\n`
+    + `at: ${safeForAlert(where, 200)}\n`
+    + `page: ${safeForAlert(report.page, 200)}`
+    + (report.stack ? `\n\n${safeForAlert(report.stack, 400)}` : '');
 
+  // Defanged here too, not just in the outbound alert: log viewers linkify
+  // URLs, so the same one-tap risk exists for whoever reads the logs.
   logger.error('Client error (first occurrence): %s | %s | %s',
-    report.message, where, report.page);
+    safeForAlert(report.message), safeForAlert(where, 200), safeForAlert(report.page, 200));
   alertOps('Client error', detail);
 });
 

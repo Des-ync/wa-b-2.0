@@ -144,6 +144,10 @@ release tracking, breadcrumbs leading up to the error, user/session context, and
 and aggregation UI instead of one WhatsApp message and a log line. **Still needed:** the
 vendor decision, now against a floor rather than against zero.
 
+### 13b. CSRF — closed, no decision needed
+Verified as not applicable: no cookie auth anywhere, header-based Bearer/`x-api-key` only,
+no CORS. See improvement-plan §26. No action required.
+
 ### 14. Are `.env` and `firebase-service-account.json` in the working tree intentional?
 **Not a blocker, flagged for awareness.** Both are present at the repo root. `.gitignore`
 covers them and `git status` confirms neither is tracked, so nothing is committed — but

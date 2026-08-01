@@ -1,6 +1,7 @@
 const express = require('express');
 const logger = require('../utils/logger');
 const { alertOps } = require('../services/alert.service');
+const { safeForAlert } = require('../utils/untrustedText');
 
 const router = express.Router();
 
@@ -112,9 +113,13 @@ router.post('/', (req, res) => {
     }
     seen.add(sig);
 
-    const detail = `directive: ${trim(v.directive, 100)}\n`
-      + `blocked: ${trim(v.blockedUri, 200)}\n`
-      + `page: ${trim(v.documentUri, 200)}`;
+    // Browser-supplied and unauthenticated: defanged before it reaches an ops
+    // phone. For a CSP report the URIs are the whole signal, so they are
+    // defanged rather than stripped.
+    const detail = `[browser-reported, unverified]\n`
+      + `directive: ${safeForAlert(v.directive, 100)}\n`
+      + `blocked: ${safeForAlert(v.blockedUri, 200)}\n`
+      + `page: ${safeForAlert(v.documentUri, 200)}`;
     logger.warn('CSP violation (first occurrence): %s', detail.replace(/\n/g, ' | '));
     alertOps('CSP violation', detail);
   }

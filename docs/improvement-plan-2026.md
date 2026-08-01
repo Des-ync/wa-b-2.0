@@ -1447,3 +1447,66 @@ Decision #13 is now **partially** addressed rather than answered — see
 `docs/decisions-needed.md`. A real product still adds source maps (a minified stack is
 currently unreadable), release tracking, breadcrumbs, session context, and a search UI.
 The choice is now against a floor rather than against zero.
+
+
+---
+
+## 26. CSRF: verified as not applicable — and what checking it found
+
+Phase 9 lists "**No CSRF protection** — zero `csrf` references in `src/`". Verified before
+building, per the ground rule, and the item is a **false alarm**.
+
+CSRF works by the browser attaching *ambient* credentials — cookies — to a cross-site
+request. This app has none:
+
+- `public/dashboard.js` calls `Clerk.session.getToken()` and sends
+  `Authorization: Bearer …`; the mobile client does the same.
+- `src/middleware/auth.js` reads identity only from the `authorization` and `x-api-key`
+  **headers**.
+- `grep` for `req.cookies` / `cookie-parser` / `req.headers.cookie` across `src/` returns
+  nothing.
+- No CORS headers are configured, confirmed live against production, so the same-origin
+  policy blocks cross-origin reads by default.
+
+Browsers do not attach custom headers to cross-origin requests. A forged cross-site POST
+arrives with no `Authorization` header and gets 401. Adding CSRF tokens here would be pure
+complexity for zero security gain, and would risk breaking the mobile app's header auth.
+
+### What checking it did surface
+
+A vector in the code from §24 and §25. Both reporting endpoints are unauthenticated by
+necessity, and both fed browser-supplied text straight into `alertOps` — which sends a
+**WhatsApp message to the ops phone** and a push to admins. So an unauthenticated POST of:
+
+    {"message":"URGENT: dashboard compromised, reset credentials at https://wa-b-secure.test"}
+
+delivered exactly that, as a tappable link, through the company's own monitoring channel —
+which is far more credible than a cold email. Not code execution; phishing.
+
+`src/utils/untrustedText.js` now defangs before anything reaches an alert or a log:
+`https://x` → `hxxps://x`, `www.x` → `www[.]x`, with a `[browser-reported, unverified]`
+label. Defanged rather than stripped because for a CSP report the URIs *are* the signal.
+Applied to the log lines too — log viewers linkify, so the same one-tap risk exists for
+whoever reads them.
+
+### Two bugs the tests caught in that helper
+
+Worth recording because both look correct on the page:
+
+- **`\b` prevented defanging.** `\bhttps?:\/\/` never matches in `xxxhttps://evil.test`,
+  because there is no word boundary between two word characters — so padding a message
+  with letters kept the link live. The anchors are gone.
+- **Newlines survived.** The first control-character class deliberately skipped `\n`, but
+  the alert body separates its fields with newlines, so `boom\npage: https://real.test`
+  forges a `page:` field the browser never sent. Now flattened to spaces.
+
+The character filters are written as **code-point checks, not regex literals**: as a
+character class these are invisible bytes in the source, which is unreadable and easy to
+edit wrongly — exactly how the newline gap survived a first pass. The test file had the
+same problem and now uses `\u200B`-style escapes, which is also what `no-irregular-
+whitespace` flagged.
+
+### Not done
+
+Phase 9's remaining named item is a formatter (`.prettierrc`); ESLint is configured and
+gating CI. Decision #13 stays partially addressed.
