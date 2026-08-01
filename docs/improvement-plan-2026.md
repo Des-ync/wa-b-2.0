@@ -1365,6 +1365,18 @@ Worth noting what this run *also* confirmed — Clerk injects no `<style>` at al
 which is precisely why §23 shipped broken. The blind spot is real and is not fixed by
 being more careful; it is fixed by the browser being able to report.
 
+### A defect found by testing it against production
+
+The first deploy answered **500** to an unparseable body. `express.json()` throws before
+the route runs, so the route's own "answer 204 first, always" never got the chance and
+the generic handler turned it into a server error — making the file's own comment
+("a report that cannot be parsed is still not the reporter's problem") false.
+
+Browsers do not send garbage, so the practical impact was small, but a reporting endpoint
+that answers 5xx manufactures the errors it exists to surface. A dedicated error handler
+now swallows it to 204. Found only because the live endpoint was poked with a malformed
+body rather than only the well-formed ones the unit tests cover.
+
 ### Not done
 
 Error tracking proper (decision #13) — this covers blocked resources, not JavaScript

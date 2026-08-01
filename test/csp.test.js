@@ -65,3 +65,14 @@ test('the policy names a report endpoint', () => {
   // something, which is how a broken login page shipped unnoticed.
   assert.deepEqual(directive('report-uri'), ['/api/csp-report']);
 });
+
+test('an unparseable report body is swallowed, not turned into a 500', () => {
+  // express.json() throws before the route runs, so the route's own
+  // "always answer 204" never gets the chance and the generic handler makes
+  // it a 500. A reporting endpoint that answers 5xx manufactures the errors
+  // it exists to surface. Asserted structurally because booting the app
+  // needs a database.
+  const m = SERVER.match(/app\.use\('\/api\/csp-report',\s*\(err[^)]*\)\s*=>\s*\{[\s\S]{0,200}?\}\);/);
+  assert.ok(m, 'no error handler mounted for /api/csp-report');
+  assert.match(m[0], /res\.status\(204\)/, 'the csp-report error handler must answer 204');
+});

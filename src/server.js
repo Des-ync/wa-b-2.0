@@ -150,6 +150,16 @@ app.use('/api/csp-report', express.json({
   limit: '16kb'
 }));
 
+// A body express.json() cannot parse throws BEFORE the route runs, so the
+// route's own "always answer 204" never gets the chance and the generic
+// handler turns it into a 500. A reporting endpoint answering 5xx is worse
+// than useless: it manufactures the errors it exists to surface. Swallow it
+// here — an unparseable report is nothing to act on and nothing to log.
+app.use('/api/csp-report', (err, _req, res, next) => {
+  if (err) return res.status(204).end();
+  return next();
+});
+
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(latencyMiddleware);
