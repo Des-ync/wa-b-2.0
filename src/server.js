@@ -41,6 +41,7 @@ const automationsRoutes = require('./routes/automations.routes');
 const contactRoutes = require('./routes/contact.routes');
 const auditlogRoutes = require('./routes/auditlog.routes');
 const cspReportRoutes = require('./routes/cspreport.routes');
+const clientErrorRoutes = require('./routes/clienterror.routes');
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
@@ -156,6 +157,19 @@ app.use('/api/csp-report', express.json({
 // than useless: it manufactures the errors it exists to surface. Swallow it
 // here — an unparseable report is nothing to act on and nothing to log.
 app.use('/api/csp-report', (err, _req, res, next) => {
+  if (err) return res.status(204).end();
+  return next();
+});
+
+// sendBeacon posts a Blob, so the content type is whatever the Blob declares.
+// Capped small — an error report is a few hundred bytes.
+app.use('/api/client-error', express.json({
+  type: ['application/json', 'text/plain'],
+  limit: '16kb'
+}));
+app.use('/api/client-error', (err, _req, res, next) => {
+  // Same reasoning as /api/csp-report: a reporting endpoint that answers 5xx
+  // manufactures the errors it exists to surface.
   if (err) return res.status(204).end();
   return next();
 });
@@ -361,6 +375,7 @@ const cspReportLimiter = rateLimit({
   handler: (_req, res) => res.status(204).end()
 });
 app.use('/api/csp-report', cspReportLimiter, cspReportRoutes);
+app.use('/api/client-error', cspReportLimiter, clientErrorRoutes);
 
 app.use('/api/webhooks', webhookRoutes);
 app.use('/api/payments', paymentRoutes);

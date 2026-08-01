@@ -1381,3 +1381,69 @@ body rather than only the well-formed ones the unit tests cover.
 
 Error tracking proper (decision #13) — this covers blocked resources, not JavaScript
 exceptions. The 819 style attributes, and `style-src` itself.
+
+
+---
+
+## 25. Client-side error reporting
+
+The companion to §24, and the other half of what was missing. That endpoint hears about
+resources the browser **blocked**; this one hears about JavaScript that **ran and threw**.
+
+Both describe failures the server cannot see. A `TypeError` in `dashboard.js` returns 200
+for every request, logs nothing, and leaves a merchant looking at a screen that quietly
+stopped updating. This is the same shape as the 18 hanging endpoints in §11 — invisible
+precisely because nothing errored server-side.
+
+`public/errors.js` (≈2 KB) installs `error` and `unhandledrejection` handlers and posts to
+`/api/client-error`. It loads **before** each page's own script, so an exception thrown
+during parsing is still caught; a test enforces the ordering, since loading it second
+would look correct and silently miss the earliest failures.
+
+### Privacy is what shapes it
+
+These pages carry order ids and shop slugs in their query strings. URLs are reduced to
+their path in the browser **and again on the server** — the body is untrusted input like
+any other, so it is not merely trusted to have been stripped already. Nothing else about
+the page is collected: no form values, no cookies, no storage, no identifiers. That is
+also what keeps this outside the third-party-processor question in decision #13.
+
+### Restraint, again
+
+- **Capped at 5 reports per page load**, deduplicated in the browser. One broken render
+  loop must not become a flood before the request ever leaves.
+- **One alert per distinct error per process** server-side, keyed on
+  `kind|message|source|line|page`. Because `page` is already path-only, two shops hitting
+  one bug produce one signature.
+- **`Script error.` is dropped.** That is what a cross-origin script reports without CORS
+  headers — no file, no line, no stack. It cannot be investigated, so alerting on it only
+  teaches people to ignore alerts. Same for `ResizeObserver loop`, aborted fetches, and
+  extension frames.
+- `sendBeacon` where available, so a report survives the page being closed — which is
+  exactly when a fatal error tends to happen.
+- Answers 204 before parsing, rate-limited, 16 KB cap, and the same error-handler trick as
+  §24 so an unparseable body cannot become a 500.
+
+### Verified with real thrown exceptions
+
+Not only unit tests. In a browser against a running server:
+
+    Uncaught TypeError: Cannot read properties of null … | /wa-b/receipt.html
+    ApiError: request timed out after 25000ms            | /wa-b/receipt.html   ← unhandledrejection
+    Uncaught TypeError: Cannot set properties of null …  | /wa-b/_probe.js:5
+
+The third came from a real file and captured **exact file and line**. The first two showed
+`(no source)` — worth knowing why: they were injected via `eval`, which carries no
+filename. That is a property of how they were triggered, not a defect, and the probe
+confirmed it. Reloading the probe page with a different query string logged **nothing
+further**, confirming dedup holds across page loads and across query strings.
+
+The second line is the notable one: an unhandled rejection from a timed-out API call is
+precisely the client-side symptom the 18 hanging endpoints produced.
+
+### Not done
+
+Decision #13 is now **partially** addressed rather than answered — see
+`docs/decisions-needed.md`. A real product still adds source maps (a minified stack is
+currently unreadable), release tracking, breadcrumbs, session context, and a search UI.
+The choice is now against a floor rather than against zero.

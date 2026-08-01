@@ -136,6 +136,14 @@ Sentry's free tier is generous but is a third-party data processor, which intera
 the existing `data-processing.html` commitments. **Needed:** approval of the vendor, or a
 self-hosted alternative (GlitchTip), or a decision to stay on log-grepping.
 
+**Partially addressed, still open.** `/api/csp-report` (§24) and `/api/client-error`
+(§25) now cover blocked resources and uncaught JavaScript exceptions, first-party, with
+no third-party processor involved — so the question is no longer "anything vs nothing".
+What a real product still adds: source maps (a minified stack is currently unreadable),
+release tracking, breadcrumbs leading up to the error, user/session context, and a search
+and aggregation UI instead of one WhatsApp message and a log line. **Still needed:** the
+vendor decision, now against a floor rather than against zero.
+
 ### 14. Are `.env` and `firebase-service-account.json` in the working tree intentional?
 **Not a blocker, flagged for awareness.** Both are present at the repo root. `.gitignore`
 covers them and `git status` confirms neither is tracked, so nothing is committed — but

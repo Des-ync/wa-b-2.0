@@ -314,3 +314,39 @@ test('every extracted page stylesheet exists and is linked', () => {
   }
   assert.deepEqual(problems, [], problems.join('\n  '));
 });
+
+test('every page that ships JavaScript also loads the error reporter', () => {
+  // A page with its own script can throw; a page that throws with no reporter
+  // fails exactly the way the CSP regression did — silently, in production.
+  const problems = [];
+  for (const page of fs.readdirSync(PUBLIC_DIR).filter(f => f.endsWith('.html'))) {
+    const js = page.replace(/\.html$/, '.js');
+    if (!fs.existsSync(path.join(PUBLIC_DIR, js))) continue;
+    const html = readPage(page);
+    if (!/<script src="errors\.js">/.test(html)) problems.push(`${page} loads ${js} but not errors.js`);
+  }
+  assert.deepEqual(problems, [], problems.join('\n  '));
+});
+
+test('the error reporter is loaded before the page script it watches', () => {
+  // Installed late, it misses anything the page throws while parsing.
+  const problems = [];
+  for (const page of fs.readdirSync(PUBLIC_DIR).filter(f => f.endsWith('.html'))) {
+    const js = page.replace(/\.html$/, '.js');
+    if (!fs.existsSync(path.join(PUBLIC_DIR, js))) continue;
+    const html = readPage(page);
+    const reporter = html.indexOf('<script src="errors.js">');
+    const own = html.indexOf(`<script src="${js}">`);
+    if (reporter === -1 || own === -1) continue;
+    if (reporter > own) problems.push(`${page} loads errors.js after ${js}`);
+  }
+  assert.deepEqual(problems, [], problems.join('\n  '));
+});
+
+test('the reporter never sends a full URL', () => {
+  // Query strings on these pages carry order ids and shop slugs.
+  const src = readPage('errors.js');
+  assert.match(src, /function safeUrl/, 'errors.js must strip URLs before sending');
+  assert.ok(!/location\.href\s*[,)]/.test(src.replace(/safeUrl\(location\.href\)/g, '')),
+    'errors.js sends location.href without stripping it');
+});
