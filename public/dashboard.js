@@ -224,8 +224,7 @@ async function loadNotifications() {
 function renderNotifPanel() {
   const panel = document.getElementById('notifPanel');
   const items = lastNotifications.map(n => `
-    <div class="notif-item ${n.read_at ? '' : 'unread'}" data-click="handleNotifClick" data-args="${dataArgs(n.id, n.type, n.order_id || '', n.customer_id || '')}"
-         data-order-id="${esc(n.data?.order_id || '')}" data-customer-id="${esc(n.data?.customer_id || '')}">
+    <div class="notif-item ${n.read_at ? '' : 'unread'}" data-click="handleNotifClick" data-args="${dataArgs(n.id, n.type, n.order_id || '', n.customer_id || '')}">
       <div class="notif-title">${esc(n.title)}</div>
       ${n.body ? `<div>${esc(n.body)}</div>` : ''}
       <div class="notif-time">${new Date(n.created_at).toLocaleString()}</div>
@@ -383,14 +382,14 @@ async function loadProducts() {
         <button class="btn btn-ghost btn-xs" data-click="editPrice" data-args="${dataArgs(p.id, Number(p.price_ghs))}">Price</button>
         <button class="btn btn-ghost btn-xs" data-click="editCostPrice" data-args="${dataArgs(p.id, p.cost_price_ghs == null ? null : Number(p.cost_price_ghs))}">Cost</button>
         <button class="btn btn-ghost btn-xs" data-click="editStockQty" data-args="${dataArgs(p.id, p.stock_qty == null ? null : p.stock_qty)}">Qty</button>
-        <button class="btn btn-ghost btn-xs" data-name="${esc(p.name)}" data-click="quickRestock" data-args="${dataArgs(p.id, p.name)}">Add stock</button>
+        <button class="btn btn-ghost btn-xs" data-click="quickRestock" data-args="${dataArgs(p.id, p.name)}">Add stock</button>
         <button class="btn btn-ghost btn-xs" data-click="editThreshold" data-args="${dataArgs(p.id, threshold)}">Low-stock at</button>
         <button class="btn btn-ghost btn-xs" data-click="editImage" data-args="${dataArgs(p.id)}">${p.image_url ? 'Replace photo' : 'Add photo'}</button>${p.image_url ? `<button class="btn btn-ghost btn-xs" data-click="removeProductImage" data-args="${dataArgs(p.id)}">Remove photo</button>` : ''}
         <button class="btn btn-ghost btn-xs" data-click="toggleFeatured" data-args="${dataArgs(p.id, !p.featured)}">${p.featured ? 'Unfeature' : 'Feature'}</button>
         <button class="btn btn-ghost btn-xs" data-click="toggleHidden" data-args="${dataArgs(p.id, !p.hidden)}">${p.hidden ? 'Unhide' : 'Hide'}</button>
-        <button class="btn btn-ghost btn-xs" data-from="${esc(p.available_from || '')}" data-to="${esc(p.available_to || '')}" data-click="editAvailability" data-args="${dataArgs(p.id, p.available_from || '', p.available_to || '')}">Hours</button>
-        <button class="btn btn-ghost btn-xs" data-name="${esc(p.name)}" data-click="manageOptions" data-args="${dataArgs(p.id, p.name)}">Options</button>
-        <button class="btn btn-ghost btn-xs" data-name="${esc(p.name)}" data-click="removeProduct" data-args="${dataArgs(p.id, p.name)}">Delete</button>
+        <button class="btn btn-ghost btn-xs" data-click="editAvailability" data-args="${dataArgs(p.id, p.available_from || '', p.available_to || '')}">Hours</button>
+        <button class="btn btn-ghost btn-xs" data-click="manageOptions" data-args="${dataArgs(p.id, p.name)}">Options</button><button class="btn btn-ghost btn-xs" data-click="duplicateProduct" data-args="${dataArgs(p.id, p.name)}">Duplicate</button>
+        <button class="btn btn-ghost btn-xs" data-click="removeProduct" data-args="${dataArgs(p.id, p.name)}">Delete</button>
       </td>
     </tr>`;
   }).join('') || '<tr><td colspan="8" class="muted">No products yet. Add your first below.</td></tr>';
@@ -544,7 +543,7 @@ async function loadCategories() {
         <button class="btn btn-ghost btn-xs" ${i === categories.length - 1 ? 'disabled' : ''} data-click="moveCategoryBy" data-args="${dataArgs(i, 1)}">▼</button>
       </td>
       <td>${c.hidden ? '<span class="pill pill-off">Hidden</span>' : '<span class="pill pill-ok">Visible</span>'}</td>
-      <td><button class="btn btn-ghost btn-xs" data-name="${esc(c.name)}" data-click="toggleCategoryHidden" data-args="${dataArgs(c.name, !c.hidden)}">${c.hidden ? 'Show' : 'Hide'}</button></td>
+      <td><button class="btn btn-ghost btn-xs" data-click="toggleCategoryHidden" data-args="${dataArgs(c.name, !c.hidden)}">${c.hidden ? 'Show' : 'Hide'}</button></td>
     </tr>
   `).join('') || '<tr><td colspan="4" class="muted">No categories yet — add a product with a category to see it here.</td></tr>';
 }
@@ -785,7 +784,7 @@ async function loadSuppliers() {
       <td class="muted">${esc(s.contact_name || '')}</td>
       <td class="muted">${esc(s.contact_phone || '')}</td>
       <td class="muted">${esc(s.notes || '')}</td>
-      <td><button class="btn btn-ghost btn-xs" data-name="${esc(s.name)}" data-click="deleteSupplier" data-args="${dataArgs(s.id, s.name)}">Delete</button></td>
+      <td><button class="btn btn-ghost btn-xs" data-click="deleteSupplier" data-args="${dataArgs(s.id, s.name)}">Delete</button></td>
     </tr>
   `).join('') || '<tr><td colspan="5" class="muted">No suppliers yet. Add your first below.</td></tr>';
   window.SUPPLIERS = suppliers;
@@ -828,7 +827,7 @@ async function loadReorderSuggestions() {
       <td><span class="pill ${s.stock_qty === 0 ? 'pill-off' : 'pill-warn'}">${esc(String(s.stock_qty))}</span></td>
       <td>${esc(String(s.suggested_reorder_qty))}</td>
       <td class="muted">${s.supplier_name ? esc(s.supplier_name) + (s.supplier_phone ? ' (' + esc(s.supplier_phone) + ')' : '') : '—'}</td>
-      <td><button class="btn btn-ghost btn-xs" data-name="${esc(s.name)}" data-click="quickRestock" data-args="${dataArgs(s.id, s.name)}">Add stock</button></td>
+      <td><button class="btn btn-ghost btn-xs" data-click="quickRestock" data-args="${dataArgs(s.id, s.name)}">Add stock</button></td>
     </tr>
   `).join('') || '<tr><td colspan="5" class="muted">Nothing low on stock right now.</td></tr>';
 }
@@ -1185,7 +1184,7 @@ async function loadCustomers() {
       <td>${ghs(c.total_spent_ghs)}</td>
       <td>${(c.tags || []).map(t => `<span class="pill pill-off" style="margin:1px">${esc(t)}</span>`).join('') || '<span class="muted" style="font-size:12px">—</span>'}</td>
       <td class="muted">${new Date(c.last_seen_at).toLocaleDateString()}</td>
-      <td><button class="btn btn-ghost btn-xs" data-tags="${esc((c.tags || []).join(','))}" data-click="editCustomerTags" data-args="${dataArgs(c.id, (c.tags || []).join(', '))}">Tags</button></td>
+      <td><button class="btn btn-ghost btn-xs" data-click="editCustomerTags" data-args="${dataArgs(c.id, (c.tags || []).join(', '))}">Tags</button></td>
     </tr>`).join('') || '<tr><td colspan="7" class="muted">No customers yet.</td></tr>';
 }
 
@@ -2293,4 +2292,27 @@ async function bulkChangeCategory() {
   const trimmed = category.trim();
   if (!trimmed) return toast('Enter a category name');
   await bulkSet({ category: trimmed });
+}
+
+
+/**
+ * Copies a product, with its variants and add-ons.
+ *
+ * The copy arrives hidden — it shares the original's name stem, price and
+ * photo, so publishing it instantly would put two near-identical items in
+ * front of customers while the merchant is still editing. The message says so
+ * rather than leaving them to wonder why it is not on the storefront.
+ */
+async function duplicateProduct(id, name) {
+  if (!confirm(`Make a copy of "${name}"?\n\nIts sizes and extras are copied too. The copy starts hidden so you can edit it first.`)) return;
+  try {
+    const res = await api('/products/' + id + '/duplicate', { method: 'POST' });
+    const extras = [];
+    if (res.variants_copied) extras.push(`${res.variants_copied} variant${res.variants_copied === 1 ? '' : 's'}`);
+    if (res.addons_copied) extras.push(`${res.addons_copied} add-on${res.addons_copied === 1 ? '' : 's'}`);
+    toast(extras.length
+      ? `Copy created (hidden) with ${extras.join(' and ')}`
+      : 'Copy created (hidden)');
+    await loadProducts();
+  } catch (err) { toast(err.message); }
 }

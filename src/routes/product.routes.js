@@ -184,6 +184,119 @@ const BULK_MAX_IDS = 200;
  * MUST be declared before `/:id`, or Express matches this path as a product
  * whose id is the literal string "bulk".
  */
+/**
+ * A name for the copy that is not the original's.
+ *
+ * Nothing in the database forbids two products sharing a name, and the bot
+ * resolves what a customer picked by **id**, so a collision breaks nothing.
+ * It is still wrong to leave: a merchant scanning their catalogue — and a
+ * customer reading a list — sees "Jollof Rice" twice with no way to tell which
+ * is which.
+ *
+ * Counts up rather than stopping, so duplicating the same product three times
+ * gives three distinguishable names instead of failing on the second.
+ */
+function copyNameFor(originalName, takenNames) {
+  const taken = new Set(takenNames.map(n => String(n).toLowerCase()));
+  const base = String(originalName || 'Product');
+  let candidate = `${base} (copy)`;
+  let n = 2;
+  while (taken.has(candidate.toLowerCase())) {
+    candidate = `${base} (copy ${n})`;
+    n++;
+  }
+  // The column is TEXT but `name` is capped at 200 by the schema; a long
+  // original must not produce a copy the normal edit form would then reject.
+  return candidate.slice(0, 200);
+}
+
+/**
+ * POST /api/products/:id/duplicate
+ *
+ * The point of this is the variants and add-ons. Re-keying a product's fields
+ * is a minute's work; re-entering eight sizes and four extras is what makes a
+ * merchant not bother, and then the catalogue stays thin.
+ *
+ * Declared before `/:id` routes that could shadow it, and wrapped in one
+ * transaction so a copy never lands with half its options.
+ */
+router.post('/:id/duplicate', requirePermission('products', 'write'), async (req, res) => {
+  try {
+    const existing = await query('SELECT * FROM products WHERE id = $1', [req.params.id]);
+    const original = existing.rows[0];
+    if (!original) return respond.notFound(req, res, 'Product');
+    if (tenantBlocksBusinessId(req, original.business_id)) {
+      return respond.forbidden(req, res);
+    }
+
+    const namesRes = await query(
+      'SELECT name FROM products WHERE business_id = $1', [original.business_id]);
+    const name = copyNameFor(original.name, namesRes.rows.map(r => r.name));
+
+    const created = await transaction(async client => {
+      const productRes = await client.query(
+        `INSERT INTO products (
+           business_id, name, description, price_ghs, category, in_stock, image_url,
+           stock_qty, low_stock_threshold, featured, hidden, sort_order,
+           available_from, available_to, cost_price_ghs, supplier_id
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+         RETURNING *`,
+        [
+          original.business_id, name, original.description, original.price_ghs,
+          original.category, original.in_stock, original.image_url,
+          // Whether stock is TRACKED is copied; the count is not. A copy of
+          // "Large, 7 in stock" made to become "Small" has not got seven of
+          // anything — inheriting the number would invent inventory, and the
+          // bot decrements it on payment.
+          original.stock_qty === null ? null : 0,
+          original.low_stock_threshold, original.featured,
+          // Hidden regardless of the original. The copy shares its name stem,
+          // price and photo, so publishing it instantly puts two near-identical
+          // items in front of customers while the merchant is still editing.
+          // The response says so and the UI repeats it.
+          true,
+          original.sort_order, original.available_from, original.available_to,
+          original.cost_price_ghs, original.supplier_id
+        ]
+      );
+      const copy = productRes.rows[0];
+
+      // The options are the reason this endpoint exists, so they are copied in
+      // the same transaction: a product that arrives without its variants is
+      // worse than no copy at all, because the gap is easy to miss.
+      const variantsRes = await client.query(
+        `INSERT INTO product_variants (product_id, business_id, name, price_delta_ghs, stock_qty, sort_order)
+         SELECT $1, business_id, name, price_delta_ghs,
+                CASE WHEN stock_qty IS NULL THEN NULL ELSE 0 END,
+                sort_order
+           FROM product_variants WHERE product_id = $2
+         RETURNING id`,
+        [copy.id, original.id]
+      );
+      const addonsRes = await client.query(
+        `INSERT INTO product_addons (product_id, business_id, name, price_ghs, sort_order)
+         SELECT $1, business_id, name, price_ghs, sort_order
+           FROM product_addons WHERE product_id = $2
+         RETURNING id`,
+        [copy.id, original.id]
+      );
+      return { copy, variants: variantsRes.rowCount, addons: addonsRes.rowCount };
+    });
+
+    logger.info('product %s duplicated to %s (%d variants, %d add-ons)',
+      original.id, created.copy.id, created.variants, created.addons);
+
+    return respond.ok(req, res, {
+      product: created.copy,
+      variants_copied: created.variants,
+      addons_copied: created.addons,
+      hidden: true
+    }, { status: 201 });
+  } catch (err) {
+    return respond.failInternal(req, res, logger, 'POST /products/:id/duplicate', err);
+  }
+});
+
 router.patch('/bulk', requirePermission('products', 'write'), async (req, res) => {
   try {
     const businessId = req.body?.business_id || req.auth?.businessId;
@@ -888,3 +1001,4 @@ router.delete('/bundles/:id', requirePermission('products', 'write'), async (req
 });
 
 module.exports = router;
+module.exports._testing = { copyNameFor, BULK_EDITABLE, BULK_MAX_IDS };

@@ -1819,3 +1819,60 @@ because the attribute and the function live in different files. Mutation-tested.
 ### Not done
 
 Bulk edit on the Flutter app — the product list there has no multi-select. Separate change.
+
+
+---
+
+## 32. Duplicate product
+
+`POST /api/products/:id/duplicate`, plus a Duplicate button on each row.
+
+### The point is the variants and add-ons
+
+Re-keying a product's fields is a minute's work. Re-entering eight sizes and four extras
+is what makes a merchant not bother — and then the catalogue stays thin. So the copy takes
+its `product_variants` and `product_addons` too, in **one transaction**: a copy that
+arrives without its options is worse than no copy, because the gap is easy to miss.
+
+### What is deliberately NOT copied
+
+This is where the care goes, because copying too much fails quietly.
+
+- **The stock count.** Whether stock is *tracked* is preserved; the number is not. A copy
+  of "Large, 7 in stock" made to become "Small" has not got seven of anything, and the bot
+  decrements that number on payment. Tracked copies start at 0, untracked stay untracked —
+  and the same rule applies to each variant's own count.
+- **`low_stock_notified`.** It means "we already warned you". Copied as true, the merchant
+  never gets the first low-stock warning for the new product.
+- **`created_at` / `updated_at`.** The copy is a new row.
+
+### Two judgement calls
+
+**The copy is created hidden.** It shares the original's name stem, price and photo, so
+publishing it the instant it exists puts two near-identical items in front of customers
+while the merchant is still editing. The response says `hidden: true` and the UI repeats
+it, so it is not a mystery why the copy is not on the storefront.
+
+**The name gets a suffix, counting up.** Nothing in the database forbids duplicate names,
+and the bot resolves what a customer picked by **id** — checked, not assumed — so a
+collision breaks nothing. It is still wrong to leave: a merchant scanning their catalogue
+sees "Jollof Rice" twice with no way to tell which is which. Matching is case-insensitive,
+and the result is capped at 200 chars so a long original cannot produce a copy the normal
+edit form would then refuse to save.
+
+### Incidental cleanup, verified
+
+The handler conversion (§28) moved values into `data-args` and left 11 `data-name`,
+`data-tags`, `data-from`, `data-to`, `data-image-url`, `data-order-id` and
+`data-customer-id` attributes in `dashboard.js` that nothing reads — 398 bytes on every
+product render, and misleading to anyone who assumes they are used. Removed after checking
+for `dataset.*` reads, CSS attribute selectors and HTML references. The one surviving
+`dataset.name` is `storefront.js`'s own add-to-cart hook, which predates this and stays.
+
+Re-run through `tools/browser-fixture` afterwards: 24 handlers still dispatch, zero
+unresolved, and the Duplicate button carries `["p1","Ama's Shito"]` — the apostrophe
+proving the `dataArgs()` escaping still holds.
+
+### Not done
+
+Duplicate on the Flutter app.
