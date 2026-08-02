@@ -89,8 +89,7 @@ brokers.
 ## Security practices
 
 - **Data encrypted in transit**: Yes — all API traffic goes over HTTPS to
-  `skes.tech` (TLS via Certbot, confirmed live in
-  [[project-wab-deployment]] memory).
+  `skes.tech` (TLS via Certbot, confirmed live).
 - **Data encrypted at rest**: Partially — Postgres itself isn't
   disk-encrypted by this app (relies on the Oracle Cloud VM's underlying
   storage), but sensitive values (API keys, OTP codes) are hashed, never
