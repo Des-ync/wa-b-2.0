@@ -261,7 +261,7 @@ function openOptions(productId) {
       ${p.variants.map((v, i) => `
         <label class="opts-row">
           <input type="radio" name="sf-variant" value="${esc(v.id)}" ${i === 0 ? 'checked' : ''}
-                 data-delta="${esc(v.price_delta_ghs)}" onchange="renderOptsTotal()" />
+                 data-delta="${esc(v.price_delta_ghs)}" data-change="renderOptsTotal" />
           <span>${esc(v.name)}</span>
           <span class="opts-price">${v.price_delta_ghs ? (v.price_delta_ghs > 0 ? '+' : '') + money(v.price_delta_ghs) : ''}</span>
         </label>`).join('')}
@@ -273,7 +273,7 @@ function openOptions(productId) {
       ${p.addons.map(a => `
         <label class="opts-row">
           <input type="checkbox" name="sf-addon" value="${esc(a.id)}"
-                 data-price="${esc(a.price_ghs)}" onchange="renderOptsTotal()" />
+                 data-price="${esc(a.price_ghs)}" data-change="renderOptsTotal" />
           <span>${esc(a.name)}</span>
           <span class="opts-price">+${money(a.price_ghs)}</span>
         </label>`).join('')}
@@ -342,7 +342,7 @@ document.getElementById('bundleGrid').addEventListener('click', onAddToCartClick
 function productCard(p, digits) {
   return `
     <div class="prod-card">
-      ${p.image_url ? `<img class="prod-img" src="${esc(p.image_url)}" alt="${esc(p.name)}" loading="lazy" decoding="async" onerror="this.style.display='none'" />` : ''}
+      ${p.image_url ? `<img class="prod-img" src="${esc(p.image_url)}" alt="${esc(p.name)}" loading="lazy" decoding="async" data-on-error="hide" />` : ''}
       <div class="prod-body">
         <div class="prod-cat">${esc(p.category)}</div>
         <div class="prod-name">${esc(p.name)}</div>
@@ -380,7 +380,7 @@ function renderBundles() {
   wrap.style.display = 'block';
   document.getElementById('bundleGrid').innerHTML = BUNDLES.map(b => `
     <div class="prod-card">
-      ${b.image_url ? `<img class="prod-img" src="${esc(b.image_url)}" alt="${esc(b.name)}" loading="lazy" decoding="async" onerror="this.style.display='none'" />` : ''}
+      ${b.image_url ? `<img class="prod-img" src="${esc(b.image_url)}" alt="${esc(b.name)}" loading="lazy" decoding="async" data-on-error="hide" />` : ''}
       <div class="prod-body">
         <div class="prod-cat">Bundle</div>
         <div class="prod-name">${esc(b.name)}</div>
@@ -426,7 +426,7 @@ async function loadStore() {
       bannerEl.style.display = 'block';
     }
     document.getElementById('head').innerHTML = `
-      ${SHOP.logo_url ? `<img class="store-logo" src="${esc(SHOP.logo_url)}" alt="" onerror="this.style.display='none'" />` : ''}
+      ${SHOP.logo_url ? `<img class="store-logo" src="${esc(SHOP.logo_url)}" alt="" data-on-error="hide" />` : ''}
       <h1>${esc(SHOP.name)}</h1>
       ${SHOP.welcome_message ? `<div class="muted">${esc(SHOP.welcome_message)}</div>` : ''}
       <span class="store-open ${SHOP.open_now ? 'open-yes' : 'open-no'}">${SHOP.open_now ? 'Open now' : 'Currently closed'}</span>

@@ -78,12 +78,12 @@ async function loadReceipt() {
     const proofHtml = r.delivery_proof_url ? `
       <div class="receipt-proof">
         <div class="muted" style="font-size:12px">Delivery proof</div>
-        <img src="${esc(r.delivery_proof_url)}" alt="Delivery proof" onerror="this.style.display='none'" />
+        <img src="${esc(r.delivery_proof_url)}" alt="Delivery proof" data-on-error="hide" />
       </div>
     ` : '';
 
     const logoHtml = r.business_logo_url
-      ? `<img class="merchant-logo" src="${esc(r.business_logo_url)}" alt="${esc(r.business_name)}" onerror="this.remove()" />`
+      ? `<img class="merchant-logo" src="${esc(r.business_logo_url)}" alt="${esc(r.business_name)}" data-on-error="remove" />`
       : '';
 
     cardEl.innerHTML = `

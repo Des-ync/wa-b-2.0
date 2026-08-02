@@ -233,7 +233,7 @@ async function loadAllBusinesses() {
         <td><span class="pill ${b.status === 'active' || b.status === 'trial' ? 'pill-ok' : (b.status === 'grace' ? 'pill-warn' : 'pill-off')}">${esc(b.status)}</span></td>
         <td>${esc(b.plan_name || '—')}</td>
         <td class="muted">${fmtDate(b.created_at)}</td>
-        <td><button class="btn btn-ghost btn-xs" onclick="openBizModal('${b.id}')">Details</button></td>
+        <td><button class="btn btn-ghost btn-xs" data-click="openBizModal" data-args="${dataArgs(b.id)}">Details</button></td>
       </tr>
     `).join('') || '<tr><td colspan="6" class="muted">No businesses yet.</td></tr>';
   } catch (err) {
@@ -292,7 +292,7 @@ async function openBizModal(id) {
       <h3 style="font-size:14px;margin-bottom:10px">Support-mode access (read-only)</h3>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <input id="impReason" placeholder="Reason (required, e.g. support ticket #123)" style="flex:1;min-width:220px" />
-        <button class="btn btn-primary btn-sm" onclick="startImpersonation('${id}')">Start read-only session</button>
+        <button class="btn btn-primary btn-sm" data-click="startImpersonation" data-args="${dataArgs(id)}">Start read-only session</button>
       </div>
       <div id="impResult" style="margin-top:10px"></div>
     `;
@@ -372,8 +372,8 @@ async function loadWebhooks() {
         <td class="muted" style="font-size:12px;max-width:280px">${esc((w.last_error || '').slice(0, 160))}</td>
         <td class="muted">${fmtDateTime(w.received_at)}</td>
         <td style="white-space:nowrap">
-          <button class="btn btn-ghost btn-xs" onclick="viewWebhook('${w.id}')">View</button>
-          ${w.status === 'failed' ? `<button class="btn btn-ghost btn-xs" onclick="retryWebhook('${w.id}')">Retry</button>` : ''}
+          <button class="btn btn-ghost btn-xs" data-click="viewWebhook" data-args="${dataArgs(w.id)}">View</button>
+          ${w.status === 'failed' ? `<button class="btn btn-ghost btn-xs" data-click="retryWebhook" data-args="${dataArgs(w.id)}">Retry</button>` : ''}
         </td>
       </tr>`).join('') || '<tr><td colspan="6" class="muted">Nothing here.</td></tr>';
   } catch (err) {
@@ -424,7 +424,7 @@ async function viewWebhook(id) {
         <div style="background:var(--bg-2);border-radius:6px;padding:8px 10px;font-size:13px;margin-bottom:16px;white-space:pre-wrap">${esc(w.last_error)}</div>` : ''}
       <h3 style="font-size:14px;margin-bottom:6px">Raw payload</h3>
       <pre style="background:var(--bg-2);border-radius:6px;padding:10px;font-size:12px;overflow-x:auto;max-height:320px">${esc(JSON.stringify(w.payload, null, 2))}</pre>
-      ${w.status === 'failed' ? `<div style="margin-top:16px"><button class="btn btn-primary btn-sm" onclick="retryWebhook('${w.id}').then(closeWebhookModal)">Retry this event</button></div>` : ''}
+      ${w.status === 'failed' ? `<div style="margin-top:16px"><button class="btn btn-primary btn-sm" data-click="retryWebhookAndClose" data-args="${dataArgs(w.id)}">Retry this event</button></div>` : ''}
     `;
   } catch (err) {
     document.getElementById('webhookModalBody').innerHTML = '<p class="muted">Could not load: ' + esc(err.message) + '</p>';
@@ -468,3 +468,14 @@ function saveKeyAndLoad() {
 }
 
 if (getKey()) boot();
+
+
+/**
+ * Was `retryWebhook(id).then(closeWebhookModal)` in an attribute.
+ *
+ * A data-* attribute names a function; it cannot hold a promise chain. Named
+ * here so it is greppable and testable rather than living in markup.
+ */
+function retryWebhookAndClose(id) {
+  return retryWebhook(id).then(closeWebhookModal);
+}

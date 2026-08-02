@@ -61,17 +61,22 @@ app.use(requestIdMiddleware);
 // left, enforced by a test — so an injected <script>…</script> payload, the
 // classic stored-XSS shape, does not execute.
 //
-// `script-src-attr` MUST keep 'unsafe-inline' for now. The 86 inline on*=
-// handlers in the .html files were converted to data-* attributes — but the
-// page scripts BUILD another 61 inline handlers into markup they assign
-// through innerHTML, and those are subject to script-src-attr exactly like
-// static ones. Setting this to 'none' silently killed 49 dashboard controls
-// and 5 on the storefront until this revert.
+// `script-src-attr` is 'none': an injected `<img onerror=…>` does not run.
 //
-// The conversion only scanned .html; the tests only scanned .html; and the
-// browser checks ran on pages with no data, so nothing dynamic had rendered.
-// Re-tighten only once `grep -oE ' on[a-z]+="' public/*.js` is empty — a test
-// now asserts that relationship rather than leaving it to memory.
+// This took two attempts. The first converted only the 86 handlers in the
+// .html files and missed the 61 the page scripts BUILD into markup they assign
+// through innerHTML — which are subject to this directive exactly like static
+// ones — silently killing 49 dashboard controls and 5 on the storefront.
+// Nothing throws when a handler is refused; the button just stops working.
+//
+// All 147 are now data-* attributes dispatched by public/actions.js. Three
+// things hold it there: a test that ties this directive to the actual state of
+// the files (tighten it while anything still builds a handler and it fails,
+// naming the file), a test that every data-* names a function its file
+// defines, and tools/browser-fixture/ — which renders real markup from
+// fixture data and confirms the handlers actually dispatch. That last one is
+// what was missing: every earlier check ran against pages with no data, so
+// nothing dynamic had rendered and no injected handler existed to fail.
 //
 // `style-src` MUST keep 'unsafe-inline'. Clerk styles its sign-in widget by
 // injecting a <style> element into the document at runtime; blocking it
@@ -92,7 +97,7 @@ app.use(helmet({
     useDefaults: true,
     directives: {
       'script-src': ["'self'", 'https:'],
-      'script-src-attr': ["'unsafe-inline'"],
+      'script-src-attr': ["'none'"],
       'style-src': ["'self'", "'unsafe-inline'", 'https:'],
       'style-src-attr': ["'unsafe-inline'"],
       'img-src': ["'self'", 'data:', 'https:'],

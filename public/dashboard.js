@@ -224,14 +224,14 @@ async function loadNotifications() {
 function renderNotifPanel() {
   const panel = document.getElementById('notifPanel');
   const items = lastNotifications.map(n => `
-    <div class="notif-item ${n.read_at ? '' : 'unread'}" onclick="handleNotifClick('${n.id}', '${n.type}', this.dataset.orderId, this.dataset.customerId)"
+    <div class="notif-item ${n.read_at ? '' : 'unread'}" data-click="handleNotifClick" data-args="${dataArgs(n.id, n.type, n.order_id || '', n.customer_id || '')}"
          data-order-id="${esc(n.data?.order_id || '')}" data-customer-id="${esc(n.data?.customer_id || '')}">
       <div class="notif-title">${esc(n.title)}</div>
       ${n.body ? `<div>${esc(n.body)}</div>` : ''}
       <div class="notif-time">${new Date(n.created_at).toLocaleString()}</div>
     </div>`).join('') || '<div class="notif-item muted">No notifications yet.</div>';
   panel.innerHTML = `
-    <div class="notif-head"><strong>Notifications</strong><button class="btn btn-ghost btn-xs" onclick="markAllNotifsRead()">Mark all read</button></div>
+    <div class="notif-head"><strong>Notifications</strong><button class="btn btn-ghost btn-xs" data-click="markAllNotifsRead">Mark all read</button></div>
     ${items}`;
 }
 
@@ -290,13 +290,20 @@ async function runSearch(q) {
   try {
     const r = await api('/search?business_id=' + BIZ.id + '&q=' + encodeURIComponent(q));
     const sections = [
-      ['Orders', r.orders, o => `${esc(o.order_number)} — GH₵${Number(o.total_ghs).toFixed(2)} — ${esc(o.status)}`, o => `jumpToOrder('${o.id}')`],
-      ['Customers', r.customers, c => `${esc(c.display_name || c.whatsapp_number)} — ${esc(c.whatsapp_number)}`, c => `jumpToCustomer('${c.id}')`],
-      ['Products', r.products, p => `${esc(p.name)} — GH₵${Number(p.price_ghs).toFixed(2)}${p.in_stock ? '' : ' (out of stock)'}`, () => `jumpToStock()`]
+      // The fourth entry names the handler and its arguments rather than
+      // returning a snippet of JavaScript. It used to build a string that went
+      // straight into an onclick attribute, which is exactly the shape CSP's
+      // script-src-attr refuses.
+      ['Orders', r.orders, o => `${esc(o.order_number)} — GH₵${Number(o.total_ghs).toFixed(2)} — ${esc(o.status)}`, o => ({ fn: 'jumpToOrder', args: [o.id] })],
+      ['Customers', r.customers, c => `${esc(c.display_name || c.whatsapp_number)} — ${esc(c.whatsapp_number)}`, c => ({ fn: 'jumpToCustomer', args: [c.id] })],
+      ['Products', r.products, p => `${esc(p.name)} — GH₵${Number(p.price_ghs).toFixed(2)}${p.in_stock ? '' : ' (out of stock)'}`, () => ({ fn: 'jumpToStock', args: [] })]
     ];
-    const html = sections.filter(([, rows]) => rows.length).map(([label, rows, render, onclick]) => `
+    const html = sections.filter(([, rows]) => rows.length).map(([label, rows, render, action]) => `
       <div class="search-section-label">${label}</div>
-      ${rows.map(row => `<div class="search-result-row" onclick="${onclick(row)}">${render(row)}</div>`).join('')}
+      ${rows.map(row => {
+        const a = action(row);
+        return `<div class="search-result-row" data-click="${a.fn}" data-args="${dataArgs.apply(null, a.args)}">${render(row)}</div>`;
+      }).join('')}
     `).join('');
     box.innerHTML = html || '<div class="search-result-row muted">No matches.</div>';
   } catch (err) {
@@ -363,7 +370,7 @@ async function loadProducts() {
     ].filter(Boolean).join(' ') || '<span class="muted" style="font-size:12px">—</span>';
     return `
     <tr data-id="${p.id}">
-      <td>${p.image_url ? `<img src="${esc(p.image_url)}" alt="${esc(p.name || 'Product photo')}" class="thumb" onerror="this.style.display='none'" />` : '<span class="muted" style="font-size:12px">—</span>'}</td>
+      <td>${p.image_url ? `<img src="${esc(p.image_url)}" alt="${esc(p.name || 'Product photo')}" class="thumb" data-on-error="hide" />` : '<span class="muted" style="font-size:12px">—</span>'}</td>
       <td><strong>${esc(p.name)}</strong></td>
       <td class="muted">${esc(p.description || '')}</td>
       <td>${Number(p.price_ghs).toFixed(2)}</td>
@@ -371,18 +378,18 @@ async function loadProducts() {
       <td><span class="pill ${stockPill}">${esc(String(stockLabel))}</span></td>
       <td>${flags}</td>
       <td style="white-space:nowrap">
-        <button class="btn btn-ghost btn-xs" onclick="toggleStock('${p.id}', ${!p.in_stock})">${p.in_stock ? 'Mark out' : 'Mark in stock'}</button>
-        <button class="btn btn-ghost btn-xs" onclick="editPrice('${p.id}', ${Number(p.price_ghs)})">Price</button>
-        <button class="btn btn-ghost btn-xs" onclick="editCostPrice('${p.id}', ${p.cost_price_ghs == null ? 'null' : Number(p.cost_price_ghs)})">Cost</button>
-        <button class="btn btn-ghost btn-xs" onclick="editStockQty('${p.id}', ${p.stock_qty == null ? 'null' : p.stock_qty})">Qty</button>
-        <button class="btn btn-ghost btn-xs" data-name="${esc(p.name)}" onclick="quickRestock('${p.id}', this.dataset.name)">Add stock</button>
-        <button class="btn btn-ghost btn-xs" onclick="editThreshold('${p.id}', ${threshold})">Low-stock at</button>
-        <button class="btn btn-ghost btn-xs" data-image-url="${esc(p.image_url || '')}" onclick="editImage('${p.id}', this.dataset.imageUrl)">Image</button>
-        <button class="btn btn-ghost btn-xs" onclick="toggleFeatured('${p.id}', ${!p.featured})">${p.featured ? 'Unfeature' : 'Feature'}</button>
-        <button class="btn btn-ghost btn-xs" onclick="toggleHidden('${p.id}', ${!p.hidden})">${p.hidden ? 'Unhide' : 'Hide'}</button>
-        <button class="btn btn-ghost btn-xs" data-from="${esc(p.available_from || '')}" data-to="${esc(p.available_to || '')}" onclick="editAvailability('${p.id}', this.dataset.from, this.dataset.to)">Hours</button>
-        <button class="btn btn-ghost btn-xs" data-name="${esc(p.name)}" onclick="manageOptions('${p.id}', this.dataset.name)">Options</button>
-        <button class="btn btn-ghost btn-xs" data-name="${esc(p.name)}" onclick="removeProduct('${p.id}', this.dataset.name)">Delete</button>
+        <button class="btn btn-ghost btn-xs" data-click="toggleStock" data-args="${dataArgs(p.id, !p.in_stock)}">${p.in_stock ? 'Mark out' : 'Mark in stock'}</button>
+        <button class="btn btn-ghost btn-xs" data-click="editPrice" data-args="${dataArgs(p.id, Number(p.price_ghs))}">Price</button>
+        <button class="btn btn-ghost btn-xs" data-click="editCostPrice" data-args="${dataArgs(p.id, p.cost_price_ghs == null ? null : Number(p.cost_price_ghs))}">Cost</button>
+        <button class="btn btn-ghost btn-xs" data-click="editStockQty" data-args="${dataArgs(p.id, p.stock_qty == null ? null : p.stock_qty)}">Qty</button>
+        <button class="btn btn-ghost btn-xs" data-name="${esc(p.name)}" data-click="quickRestock" data-args="${dataArgs(p.id, p.name)}">Add stock</button>
+        <button class="btn btn-ghost btn-xs" data-click="editThreshold" data-args="${dataArgs(p.id, threshold)}">Low-stock at</button>
+        <button class="btn btn-ghost btn-xs" data-image-url="${esc(p.image_url || '')}" data-click="editImage" data-args="${dataArgs(p.id, p.image_url || '')}">Image</button>
+        <button class="btn btn-ghost btn-xs" data-click="toggleFeatured" data-args="${dataArgs(p.id, !p.featured)}">${p.featured ? 'Unfeature' : 'Feature'}</button>
+        <button class="btn btn-ghost btn-xs" data-click="toggleHidden" data-args="${dataArgs(p.id, !p.hidden)}">${p.hidden ? 'Unhide' : 'Hide'}</button>
+        <button class="btn btn-ghost btn-xs" data-from="${esc(p.available_from || '')}" data-to="${esc(p.available_to || '')}" data-click="editAvailability" data-args="${dataArgs(p.id, p.available_from || '', p.available_to || '')}">Hours</button>
+        <button class="btn btn-ghost btn-xs" data-name="${esc(p.name)}" data-click="manageOptions" data-args="${dataArgs(p.id, p.name)}">Options</button>
+        <button class="btn btn-ghost btn-xs" data-name="${esc(p.name)}" data-click="removeProduct" data-args="${dataArgs(p.id, p.name)}">Delete</button>
       </td>
     </tr>`;
   }).join('') || '<tr><td colspan="8" class="muted">No products yet. Add your first below.</td></tr>';
@@ -532,11 +539,11 @@ async function loadCategories() {
     <tr>
       <td><strong>${esc(c.name)}</strong></td>
       <td>
-        <button class="btn btn-ghost btn-xs" ${i === 0 ? 'disabled' : ''} onclick="moveCategory(CATEGORY_ORDER, ${i}, -1)">▲</button>
-        <button class="btn btn-ghost btn-xs" ${i === categories.length - 1 ? 'disabled' : ''} onclick="moveCategory(CATEGORY_ORDER, ${i}, 1)">▼</button>
+        <button class="btn btn-ghost btn-xs" ${i === 0 ? 'disabled' : ''} data-click="moveCategoryBy" data-args="${dataArgs(i, -1)}">▲</button>
+        <button class="btn btn-ghost btn-xs" ${i === categories.length - 1 ? 'disabled' : ''} data-click="moveCategoryBy" data-args="${dataArgs(i, 1)}">▼</button>
       </td>
       <td>${c.hidden ? '<span class="pill pill-off">Hidden</span>' : '<span class="pill pill-ok">Visible</span>'}</td>
-      <td><button class="btn btn-ghost btn-xs" data-name="${esc(c.name)}" onclick="toggleCategoryHidden(this.dataset.name, ${!c.hidden})">${c.hidden ? 'Show' : 'Hide'}</button></td>
+      <td><button class="btn btn-ghost btn-xs" data-name="${esc(c.name)}" data-click="toggleCategoryHidden" data-args="${dataArgs(c.name, !c.hidden)}">${c.hidden ? 'Show' : 'Hide'}</button></td>
     </tr>
   `).join('') || '<tr><td colspan="4" class="muted">No categories yet — add a product with a category to see it here.</td></tr>';
 }
@@ -678,7 +685,7 @@ async function loadSuppliers() {
       <td class="muted">${esc(s.contact_name || '')}</td>
       <td class="muted">${esc(s.contact_phone || '')}</td>
       <td class="muted">${esc(s.notes || '')}</td>
-      <td><button class="btn btn-ghost btn-xs" data-name="${esc(s.name)}" onclick="deleteSupplier('${s.id}', this.dataset.name)">Delete</button></td>
+      <td><button class="btn btn-ghost btn-xs" data-name="${esc(s.name)}" data-click="deleteSupplier" data-args="${dataArgs(s.id, s.name)}">Delete</button></td>
     </tr>
   `).join('') || '<tr><td colspan="5" class="muted">No suppliers yet. Add your first below.</td></tr>';
   window.SUPPLIERS = suppliers;
@@ -721,7 +728,7 @@ async function loadReorderSuggestions() {
       <td><span class="pill ${s.stock_qty === 0 ? 'pill-off' : 'pill-warn'}">${esc(String(s.stock_qty))}</span></td>
       <td>${esc(String(s.suggested_reorder_qty))}</td>
       <td class="muted">${s.supplier_name ? esc(s.supplier_name) + (s.supplier_phone ? ' (' + esc(s.supplier_phone) + ')' : '') : '—'}</td>
-      <td><button class="btn btn-ghost btn-xs" data-name="${esc(s.name)}" onclick="quickRestock('${s.id}', this.dataset.name)">Add stock</button></td>
+      <td><button class="btn btn-ghost btn-xs" data-name="${esc(s.name)}" data-click="quickRestock" data-args="${dataArgs(s.id, s.name)}">Add stock</button></td>
     </tr>
   `).join('') || '<tr><td colspan="5" class="muted">Nothing low on stock right now.</td></tr>';
 }
@@ -764,10 +771,10 @@ async function loadOrders() {
       <td><span class="pill ${payPill}">${esc(o.payment_status)}</span></td>
       <td><span class="pill pill-off">${esc(o.status)}</span></td>
       <td style="white-space:nowrap">
-        <select onchange="setOrderStatus('${o.id}', this.value); this.value='';" style="max-width:140px">
+        <select data-change="setOrderStatusFromSelect" data-el data-args="${dataArgs(o.id)}" style="max-width:140px">
           <option value="">Move to…</option>${options}
         </select>
-        <button class="btn btn-ghost btn-xs" onclick="openOrderDetail('${o.id}')">Details</button>
+        <button class="btn btn-ghost btn-xs" data-click="openOrderDetail" data-args="${dataArgs(o.id)}">Details</button>
       </td>
     </tr>`;
   }).join('') || '<tr><td colspan="6" class="muted">No orders yet.</td></tr>';
@@ -847,7 +854,7 @@ function renderOrderModal(detail) {
 
     ${detail.customer ? `<p style="margin-top:10px;font-size:13px">
       <strong>${esc(detail.customer.display_name || detail.customer.whatsapp_number)}</strong> · ${esc(detail.customer.whatsapp_number)}
-      <button class="btn btn-ghost btn-xs" onclick="jumpToCustomerThread('${detail.customer.id}')">Open conversation</button>
+      <button class="btn btn-ghost btn-xs" data-click="jumpToCustomerThread" data-args="${dataArgs(detail.customer.id)}">Open conversation</button>
     </p>` : ''}
     ${o.cancellation_reason ? `<p class="muted" style="font-size:13px">Cancelled: ${esc(o.cancellation_reason)}</p>` : ''}
 
@@ -870,24 +877,24 @@ function renderOrderModal(detail) {
           ${['unassigned', 'assigned', 'picked_up', 'delivered'].map(s => `<option value="${s}" ${o.delivery_status === s ? 'selected' : ''}>${s}</option>`).join('')}
         </select>
       </div>
-      <div><button class="btn btn-primary btn-sm" onclick="saveOrderDelivery('${o.id}')">Save</button></div>
+      <div><button class="btn btn-primary btn-sm" data-click="saveOrderDelivery" data-args="${dataArgs(o.id)}">Save</button></div>
     </div>
     <div style="margin-top:10px">
       <label style="font-size:12px;color:var(--muted)">Delivery proof photo URL — set this alongside marking the order "delivered" to notify the customer with the photo</label>
       <input id="omDeliveryProof" placeholder="https://…" value="${esc(o.delivery_proof_url || '')}" style="width:100%" />
-      ${o.delivery_proof_url ? `<div style="margin-top:6px"><img src="${esc(o.delivery_proof_url)}" alt="Delivery proof photo" style="max-width:160px;border-radius:var(--r-sm,6px)" onerror="this.style.display='none'" /></div>` : ''}
+      ${o.delivery_proof_url ? `<div style="margin-top:6px"><img src="${esc(o.delivery_proof_url)}" alt="Delivery proof photo" style="max-width:160px;border-radius:var(--r-sm,6px)" data-on-error="hide" /></div>` : ''}
     </div>
     <div class="row-form" style="grid-template-columns:1fr 1fr;margin-top:10px">
       <div><label for="omReadyAt">Estimated ready</label><input id="omReadyAt" type="datetime-local" value="${o.estimated_ready_at ? toLocalDatetimeValue(o.estimated_ready_at) : ''}" /></div>
       <div><label for="omDeliveryAt">Estimated delivery</label><input id="omDeliveryAt" type="datetime-local" value="${o.estimated_delivery_at ? toLocalDatetimeValue(o.estimated_delivery_at) : ''}" /></div>
     </div>
-    <div style="margin-top:8px"><button class="btn btn-ghost btn-sm" onclick="saveOrderEstimates('${o.id}')">Save ETAs</button></div>
+    <div style="margin-top:8px"><button class="btn btn-ghost btn-sm" data-click="saveOrderEstimates" data-args="${dataArgs(o.id)}">Save ETAs</button></div>
 
     <h3>Internal notes (not shown to customer)</h3>
     <div style="white-space:pre-wrap;font-size:13px;background:var(--bg-2);border-radius:var(--r-sm,6px);padding:10px;margin-bottom:8px">${esc(o.internal_notes || '') || '<span class="muted">No notes yet.</span>'}</div>
     <div style="display:flex;gap:8px">
       <input id="omNewNote" placeholder="Add a note…" style="flex:1;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-sm,6px);font:inherit;background:var(--bg);color:var(--ink)" />
-      <button class="btn btn-ghost btn-sm" onclick="addOrderNoteFromModal('${o.id}')">Add</button>
+      <button class="btn btn-ghost btn-sm" data-click="addOrderNoteFromModal" data-args="${dataArgs(o.id)}">Add</button>
     </div>
 
     ${refundEligible ? `
@@ -897,12 +904,12 @@ function renderOrderModal(detail) {
       <div style="display:flex;gap:8px;align-items:end">
         <div><label style="font-size:12px;color:var(--muted)">Amount GH₵</label><input id="omRefundAmount" type="number" min="0.01" step="0.01" style="width:120px" /></div>
         <div style="flex:1"><label style="font-size:12px;color:var(--muted)">Reason</label><input id="omRefundReason" placeholder="Item unavailable" style="width:100%" /></div>
-        <button class="btn btn-primary btn-sm" onclick="submitRefund('${o.id}')">Refund</button>
+        <button class="btn btn-primary btn-sm" data-click="submitRefund" data-args="${dataArgs(o.id)}">Refund</button>
       </div>
     ` : ''}
 
     <div style="margin-top:20px;border-top:1px solid var(--line);padding-top:14px">
-      <button class="btn btn-ghost btn-sm" onclick="printKitchenTicket()">🖨️ Print kitchen ticket</button>
+      <button class="btn btn-ghost btn-sm" data-click="printKitchenTicket">🖨️ Print kitchen ticket</button>
     </div>
   `;
 }
@@ -1031,7 +1038,7 @@ async function loadSubscription() {
         <div><strong>${esc(sub.plan_display_name || sub.plan_name || 'Plan')}</strong>
           <span class="pill ${pill}" style="margin-left:8px">${esc(sub.status)}</span></div>
         <div class="muted">${sub.next_billing_date ? 'Next billing: ' + new Date(sub.next_billing_date).toLocaleDateString() : ''}</div>
-        <button class="btn btn-primary btn-xs" onclick="renewSubscription()">Renew now</button>
+        <button class="btn btn-primary btn-xs" data-click="renewSubscription">Renew now</button>
       </div>
       ${['grace','suspended'].includes(sub.status) ? '<p class="muted" style="margin-top:10px">⚠️ Your last payment didn\'t go through — renew now to keep your bot taking orders.</p>' : ''}`;
   } catch (err) {
@@ -1072,13 +1079,13 @@ async function loadCustomers() {
   const tbody = document.querySelector('#customerTable tbody');
   tbody.innerHTML = customers.map(c => `
     <tr>
-      <td><a href="#" onclick="openCustomerProfile('${c.id}');return false;"><strong>${esc(c.display_name || c.whatsapp_number)}</strong></a><br><span class="muted" style="font-size:12px">${esc(c.whatsapp_number)}</span></td>
+      <td><a href="#" data-click="openCustomerProfile" data-prevent data-args="${dataArgs(c.id)}"><strong>${esc(c.display_name || c.whatsapp_number)}</strong></a><br><span class="muted" style="font-size:12px">${esc(c.whatsapp_number)}</span></td>
       <td class="muted">${esc(c.channel || 'whatsapp')}</td>
       <td>${c.total_orders}</td>
       <td>${ghs(c.total_spent_ghs)}</td>
       <td>${(c.tags || []).map(t => `<span class="pill pill-off" style="margin:1px">${esc(t)}</span>`).join('') || '<span class="muted" style="font-size:12px">—</span>'}</td>
       <td class="muted">${new Date(c.last_seen_at).toLocaleDateString()}</td>
-      <td><button class="btn btn-ghost btn-xs" data-tags="${esc((c.tags || []).join(','))}" onclick="editCustomerTags('${c.id}', this.dataset.tags)">Tags</button></td>
+      <td><button class="btn btn-ghost btn-xs" data-tags="${esc((c.tags || []).join(','))}" data-click="editCustomerTags" data-args="${dataArgs(c.id, (c.tags || []).join(', '))}">Tags</button></td>
     </tr>`).join('') || '<tr><td colspan="7" class="muted">No customers yet.</td></tr>';
 }
 
@@ -1120,10 +1127,10 @@ async function openCustomerProfile(id) {
       </div>
       <div style="display:flex;gap:8px;align-items:end;margin-bottom:14px">
         <div><label style="font-size:12px;color:var(--muted)">Redeem points</label><input id="redeemPointsInput" type="number" min="1" max="${loy.points}" style="width:100px" /></div>
-        <button class="btn btn-ghost btn-xs" onclick="redeemCustomerPoints('${c.id}')">Issue reward</button>
+        <button class="btn btn-ghost btn-xs" data-click="redeemCustomerPoints" data-args="${dataArgs(c.id)}">Issue reward</button>
         <div style="flex:1"></div>
         <div><label style="font-size:12px;color:var(--muted)">Birthday</label><input id="birthdayInput" type="date" value="${loy.date_of_birth ? String(loy.date_of_birth).slice(0, 10) : ''}" /></div>
-        <button class="btn btn-ghost btn-xs" onclick="saveCustomerBirthday('${c.id}')">Save</button>
+        <button class="btn btn-ghost btn-xs" data-click="saveCustomerBirthday" data-args="${dataArgs(c.id)}">Save</button>
       </div>
     ` : '';
 
@@ -1144,7 +1151,7 @@ async function openCustomerProfile(id) {
       <h3>Conversation history</h3>
       ${convo}
       <div style="margin-top:20px;border-top:1px solid var(--line);padding-top:14px">
-        <button class="btn btn-ghost btn-sm" onclick="jumpToCustomerThread('${c.id}')">Open conversation</button>
+        <button class="btn btn-ghost btn-sm" data-click="jumpToCustomerThread" data-args="${dataArgs(c.id)}">Open conversation</button>
       </div>
     `;
   } catch (err) {
@@ -1330,7 +1337,7 @@ async function loadConversations() {
   try {
     const { conversations } = await api('/conversations?business_id=' + BIZ.id + '&limit=50');
     list.innerHTML = conversations.map(c => `
-      <div class="conv-item ${c.id === activeConvId ? 'active' : ''}" onclick="openConversation('${c.id}')">
+      <div class="conv-item ${c.id === activeConvId ? 'active' : ''}" data-click="openConversation" data-args="${dataArgs(c.id)}">
         <div class="name">${esc(c.display_name || c.whatsapp_number)}${c.bot_paused ? ' ⏸️' : ''}${c.opted_out ? ' 🔕' : ''}</div>
         <div class="preview">${esc(c.last_message || 'No messages yet')}</div>
       </div>`).join('') || '<p class="muted" style="padding:12px;font-size:13px">No conversations yet.</p>';
@@ -1361,7 +1368,7 @@ async function openConversation(id) {
     thread.innerHTML = `
       <div class="conv-thread-head">
         <div><strong>${esc(customer.display_name || customer.whatsapp_number)}</strong><br><span class="muted" style="font-size:12px">${esc(customer.whatsapp_number)}</span></div>
-        <button class="btn btn-ghost btn-xs" onclick="togglePause('${customer.id}', ${!customer.bot_paused})">${customer.bot_paused ? 'Resume bot' : 'Pause bot'}</button>
+        <button class="btn btn-ghost btn-xs" data-click="togglePause" data-args="${dataArgs(customer.id, !customer.bot_paused)}">${customer.bot_paused ? 'Resume bot' : 'Pause bot'}</button>
       </div>
       ${summaryHtml}
       <div class="conv-messages" id="convMessages">
@@ -1372,8 +1379,8 @@ async function openConversation(id) {
           </div>`).join('') || '<p class="muted" style="font-size:13px">No messages yet.</p>'}
       </div>
       <div class="conv-reply">
-        <input id="replyInput" placeholder="Type a reply…" onkeydown="if(event.key==='Enter') sendReply('${customer.id}')" />
-        <button class="btn btn-primary btn-xs" onclick="sendReply('${customer.id}')">Send</button>
+        <input id="replyInput" placeholder="Type a reply…" data-enter="sendReply" data-args="${dataArgs(customer.id)}" />
+        <button class="btn btn-primary btn-xs" data-click="sendReply" data-args="${dataArgs(customer.id)}">Send</button>
       </div>`;
     const msgBox = document.getElementById('convMessages');
     msgBox.scrollTop = msgBox.scrollHeight;
@@ -1425,8 +1432,8 @@ async function loadPromos() {
       <td class="muted">${p.expires_at ? new Date(p.expires_at).toLocaleDateString() : '—'}</td>
       <td><span class="pill ${p.active ? 'pill-ok' : 'pill-off'}">${p.active ? 'Active' : 'Off'}</span></td>
       <td style="white-space:nowrap">
-        <button class="btn btn-ghost btn-xs" onclick="togglePromo('${p.id}', ${!p.active})">${p.active ? 'Disable' : 'Enable'}</button>
-        <button class="btn btn-ghost btn-xs" onclick="showPromoPerformance('${p.id}')">Performance</button>
+        <button class="btn btn-ghost btn-xs" data-click="togglePromo" data-args="${dataArgs(p.id, !p.active)}">${p.active ? 'Disable' : 'Enable'}</button>
+        <button class="btn btn-ghost btn-xs" data-click="showPromoPerformance" data-args="${dataArgs(p.id)}">Performance</button>
       </td>
     </tr>`;
   }).join('') || '<tr><td colspan="7" class="muted">No promo codes yet.</td></tr>';
@@ -1719,7 +1726,7 @@ async function loadExpenses() {
       <td>${esc(e.category)}</td>
       <td>${Number(e.amount_ghs).toFixed(2)}</td>
       <td class="muted">${esc(e.description || '')}</td>
-      <td><button class="btn btn-ghost btn-xs" onclick="deleteExpense('${e.id}')">Delete</button></td>
+      <td><button class="btn btn-ghost btn-xs" data-click="deleteExpense" data-args="${dataArgs(e.id)}">Delete</button></td>
     </tr>
   `).join('') || '<tr><td colspan="5" class="muted">No expenses recorded yet.</td></tr>';
 }
@@ -1774,8 +1781,8 @@ async function loadTeamKeys() {
         <td>${statusPill}</td>
         <td style="white-space:nowrap">
           ${!revoked ? `
-            <button class="btn btn-ghost btn-xs" onclick="rotateTeamKey('${k.id}')">Rotate</button>
-            <button class="btn btn-ghost btn-xs" onclick="revokeTeamKey('${k.id}')">Revoke</button>
+            <button class="btn btn-ghost btn-xs" data-click="rotateTeamKey" data-args="${dataArgs(k.id)}">Rotate</button>
+            <button class="btn btn-ghost btn-xs" data-click="revokeTeamKey" data-args="${dataArgs(k.id)}">Revoke</button>
           ` : ''}
         </td>
       </tr>`;
@@ -1837,7 +1844,7 @@ async function loadPasskeys() {
         <td><strong>${esc(p.device_name || 'Device')}</strong></td>
         <td class="muted">${new Date(p.created_at).toLocaleDateString()}</td>
         <td class="muted">${p.last_used_at ? new Date(p.last_used_at).toLocaleString() : 'Never'}</td>
-        <td style="white-space:nowrap"><button class="btn btn-ghost btn-xs" onclick="revokePasskey('${p.id}')">Remove</button></td>
+        <td style="white-space:nowrap"><button class="btn btn-ghost btn-xs" data-click="revokePasskey" data-args="${dataArgs(p.id)}">Remove</button></td>
       </tr>`).join('') || '<tr><td colspan="4" class="muted">No passkeys yet — add one below.</td></tr>';
   } catch (err) {
     PASSKEYS = [];
@@ -2025,9 +2032,9 @@ async function loadOnboarding() {
       <span>
         <strong>${s.label}</strong>
         <div class="muted" style="font-size:13px">${s.description}</div>
-        ${s.key === 'test_message' && !s.complete ? '<button class="btn btn-ghost btn-xs" style="margin-top:6px" onclick="sendTestMessage()">Send test message</button>' : ''}
-        ${s.key === 'first_products' && !s.complete ? '<button class="btn btn-ghost btn-xs" style="margin-top:6px" onclick="loadSampleCatalog()">Load a sample catalog to start</button>' : ''}
-        ${s.key === 'invite_staff' && !s.complete ? '<button class="btn btn-ghost btn-xs" style="margin-top:6px" onclick="showSection(\'account\'); showSubTab(\'account\',\'team\')">Go to Team access</button>' : ''}
+        ${s.key === 'test_message' && !s.complete ? '<button class="btn btn-ghost btn-xs" style="margin-top:6px" data-click="sendTestMessage">Send test message</button>' : ''}
+        ${s.key === 'first_products' && !s.complete ? '<button class="btn btn-ghost btn-xs" style="margin-top:6px" data-click="loadSampleCatalog">Load a sample catalog to start</button>' : ''}
+        ${s.key === 'invite_staff' && !s.complete ? '<button class="btn btn-ghost btn-xs" style="margin-top:6px" data-click="goToTeamAccess">Go to Team access</button>' : ''}
       </span>
     </li>
   `).join('');
@@ -2079,4 +2086,28 @@ function downloadBusinessExport() {
 function importProductsCsvFromPicker() {
   var input = document.getElementById('pImportFile');
   if (input && input.files && input.files[0]) importProductsCsv(input.files[0]);
+}
+
+
+/** Was `showSection('account'); showSubTab('account','team')` in an attribute. */
+function goToTeamAccess() {
+  showSection('account');
+  showSubTab('account', 'team');
+}
+
+/** Was `setOrderStatus(id, this.value); this.value=''` — needs the <select>. */
+function setOrderStatusFromSelect(orderId, el) {
+  const value = el.value;
+  el.value = '';
+  if (value) setOrderStatus(orderId, value);
+}
+
+/**
+ * Was `moveCategory(CATEGORY_ORDER, i, dir)`.
+ *
+ * CATEGORY_ORDER is module state, not something markup should be naming — the
+ * attribute now carries only the index and direction.
+ */
+function moveCategoryBy(index, direction) {
+  moveCategory(CATEGORY_ORDER, index, direction);
 }

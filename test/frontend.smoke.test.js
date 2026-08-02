@@ -350,3 +350,53 @@ test('the reporter never sends a full URL', () => {
   assert.ok(!/location\.href\s*[,)]/.test(src.replace(/safeUrl\(location\.href\)/g, '')),
     'errors.js sends location.href without stripping it');
 });
+
+test('no fixture or scratch page is served from public/', () => {
+  // Everything in public/ is served in production. The browser fixture stubs
+  // api() and renders fake data — harmless, but needless surface, and it is
+  // easy to leave behind after using it.
+  const stray = fs.readdirSync(PUBLIC_DIR).filter(f => /^_/.test(f));
+  assert.deepEqual(stray, [], `scratch files left in public/: ${stray.join(', ')}`);
+});
+
+test('every data-* handler built in JS names a function that file defines', () => {
+  // The .html files had this check already. The page scripts BUILD handlers
+  // into markup via innerHTML, and those went unchecked — which is how 61 of
+  // them were converted in .html, left alone in .js, and shipped dead.
+  const problems = [];
+  for (const js of fs.readdirSync(PUBLIC_DIR).filter(f => f.endsWith('.js'))) {
+    // actions.js documents the attribute names in comments; it defines none.
+    if (js === 'actions.js') continue;
+    const src = readPage(js);
+    const named = new Set();
+    for (const m of src.matchAll(/data-(?:click|click-self|change|input|enter)="([A-Za-z_$][\w$]*)"/g)) {
+      named.add(m[1]);
+    }
+    for (const fn of named) {
+      const defined = new RegExp(
+        `function\\s+${fn}\\b|\\b(?:const|let|var)\\s+${fn}\\s*=|\\bwindow\\.${fn}\\s*=`
+      ).test(src);
+      if (!defined) problems.push(`${js}: data-* names ${fn}(), which it does not define`);
+    }
+  }
+  assert.deepEqual(problems, [], problems.join('\n  '));
+});
+
+test('markup built in JS uses dataArgs() rather than raw interpolation', () => {
+  // A bare `data-args="[\"${p.id}\"]"` would break on a product name carrying
+  // a quote, and silently produce a dead control. dataArgs() escapes the way
+  // esc() does.
+  const problems = [];
+  for (const js of fs.readdirSync(PUBLIC_DIR).filter(f => f.endsWith('.js'))) {
+    const src = readPage(js);
+    for (const m of src.matchAll(/data-args="([^"]*)"/g)) {
+      const value = m[1];
+      // `dataArgs(...)` or `dataArgs.apply(...)` — the search results build
+      // their argument list dynamically and call it through apply.
+      if (value.includes('${') && !value.includes('dataArgs')) {
+        problems.push(`${js}: data-args interpolates without dataArgs(): ${value.slice(0, 60)}`);
+      }
+    }
+  }
+  assert.deepEqual(problems, [], problems.join('\n  '));
+});

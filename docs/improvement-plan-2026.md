@@ -1565,3 +1565,68 @@ That is its own change, and it is now guarded so it cannot be skipped again.
 
 `script-src` remains `'self' https:` and is unaffected: injected `<script>` blocks are
 still refused.
+
+
+---
+
+## 28. The 61 dynamically-built handlers, converted properly
+
+§27 reverted `script-src-attr` because the page scripts build 61 inline handlers into
+markup they assign through `innerHTML`. All 61 are now `data-*` attributes, and the
+directive is back to `'none'` — this time on evidence.
+
+### What the dispatcher had to grow
+
+The static handlers were uniform. These were not — seven shapes, each needing something:
+
+| Shape | Handling |
+|---|---|
+| `toggleStock(id, ${!p.in_stock})` | `data-args` carries **JSON**, so `false` stays a boolean |
+| `editStockQty(id, ${… 'null' …})` | JSON `null`, not the string `"null"` — they mean different things |
+| `quickRestock(id, this.dataset.name)` | value moved into `data-args` at render time |
+| `setOrderStatus(id, this.value); this.value=''` | `data-el` appends the element; named wrapper |
+| `retryWebhook(id).then(closeWebhookModal)` | named wrapper — an attribute cannot hold a promise chain |
+| `openCustomerProfile(id);return false;` | `data-prevent` |
+| `onerror="this.style.display='none'"` | `data-on-error="hide"` / `"remove"` |
+| `onclick="${onclick(row)}"` | the search rows now return `{fn, args}` instead of a JS string |
+
+`dataArgs()` builds the JSON and escapes it the way `esc()` does, so a product named
+`The "Big" One's <b>` cannot break out of the attribute.
+
+The `error` listener is registered in the **capture** phase: `error` on `<img>` does not
+bubble, so a document-level bubble listener would look right and never fire.
+
+### tools/browser-fixture — the check that was missing
+
+Every earlier verification ran against pages with **no data**. Nothing dynamic had
+rendered, so no injected handler existed to fail, and the checks passed while 61 controls
+were dead. The fixture renders real markup by driving the real loader with fixture data,
+under the real CSP from the real server, and asserts:
+
+- no inline `on*=` survives in the produced markup;
+- every `data-*` names a function that exists;
+- `data-args` keeps its **types** — `editStockQty(id, null)` means untracked, and the
+  string `"null"` would mean something else;
+- clicking each control dispatches with the right values;
+- `data-on-error` fires, in both modes.
+
+Result under `script-src-attr 'none'`: 24 handlers dispatched, 0 inline, 0 unresolved, 0
+errors, booleans and nulls intact, and `The "Big" One's <b>` round-tripped exactly. No CSP
+violation was reported during the run.
+
+It lives outside `public/` because everything there is served in production, and a test
+asserts no `_`-prefixed file is left behind.
+
+### The CSP now
+
+    script-src       'self' https:
+    script-src-attr  'none'
+    style-src        'self' 'unsafe-inline' https:   ← required by Clerk
+    style-src-attr   'unsafe-inline'                 ← 819 attributes
+    object-src       'none'
+    base-uri         'self'
+    report-uri       /api/csp-report
+
+### Not done
+
+`style-src` (Clerk) and the 819 style attributes. Decision #13 stays partially addressed.
