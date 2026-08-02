@@ -144,5 +144,53 @@
     result.order.noOpAtTopPosts = posted.length - countBefore;
   }
 
+  // 8. Order board. The safety property is that a drag does NOT hit the server
+  //    until the undo window closes — that gap is all that stands between a
+  //    slip of the hand and a WhatsApp message that cannot be recalled.
+  result.board = {};
+  {
+    const ORDERS = [
+      { id: 'o1', order_number: 'A1', status: 'pending', total_ghs: 25, items: [1], payment_status: 'paid' },
+      { id: 'o2', order_number: 'A2', status: 'preparing', total_ghs: 40, items: [1, 2], payment_status: 'pending' },
+      // Outside the flow: must still be visible somewhere.
+      { id: 'o3', order_number: 'A3', status: 'cancelled', total_ghs: 10, items: [], payment_status: 'pending' }
+    ];
+    const sent = [];
+    api = async function (path, opts) {
+      if (path.indexOf('/orders?') === 0) return { orders: ORDERS };
+      if (path.indexOf('/orders/') === 0) { sent.push({ path, body: JSON.parse(opts.body) }); return {}; }
+      if (path.indexOf('/products?') === 0) return { products: PRODUCTS };
+      return {};
+    };
+    window.toast = function () {};
+
+    await loadOrderBoard();
+    result.board.columns = [...document.querySelectorAll('#orderBoard .board-col')]
+      .map(c => c.querySelector('.board-col-head span').textContent);
+    result.board.cancelledStillVisible =
+      !!document.querySelector('#orderBoard [data-order-card="o3"]');
+    result.board.otherColumnRefusesDrops =
+      !!document.querySelector('#orderBoard .board-col.no-drop');
+
+    // Move o1 pending -> ready, then immediately undo.
+    scheduleStatusMove('o1', 'ready');
+    result.board.cardMovedImmediately =
+      document.querySelector('.board-col[data-status="ready"] [data-order-card="o1"]') !== null;
+    result.board.requestsBeforeUndo = sent.length;
+    undoStatusMove('o1');
+    result.board.cardRestored =
+      document.querySelector('.board-col[data-status="pending"] [data-order-card="o1"]') !== null;
+    result.board.requestsAfterUndo = sent.length;
+
+    // Move o2, then move it again before the window closes: one request, for
+    // where it ended up.
+    scheduleStatusMove('o2', 'ready');
+    scheduleStatusMove('o2', 'delivered');
+    flushPendingMoves();
+    await new Promise(r => setTimeout(r, 50));
+    result.board.requestsAfterTwoMoves = sent.filter(s => s.path.indexOf('o2') > -1).length;
+    result.board.finalStatusSent = (sent.find(s => s.path.indexOf('o2') > -1) || {}).body;
+  }
+
   document.getElementById('out').textContent = JSON.stringify(result, null, 1);
 })();

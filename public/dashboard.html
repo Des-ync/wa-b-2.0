@@ -402,6 +402,11 @@
     <!-- Orders -->
     <div class="dash-card">
       <h2>Orders</h2>
+      <div class="sub-tabs" role="tablist">
+        <button class="active" data-subtarget="list" data-click="showSubTab" data-arg1="orders" data-arg2="list">List</button>
+        <button data-subtarget="board" data-click="showSubTab" data-arg1="orders" data-arg2="board">Board</button>
+      </div>
+      <div class="sub-pane active" data-subpane="list">
       <div style="margin-bottom:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
         <select id="orderStatusFilter" data-change="loadOrders" style="max-width:220px">
           <option value="">All statuses</option>
@@ -415,6 +420,16 @@
           <thead><tr><th>Order</th><th>Items</th><th>Total</th><th>Payment</th><th>Status</th><th>Update</th></tr></thead>
           <tbody><tr><td colspan="6" class="muted">Loading…</td></tr></tbody>
         </table>
+      </div>
+      </div>
+
+      <div class="sub-pane" data-subpane="board">
+        <p class="muted board-hint">
+          Move a card to update the order. The customer is messaged on WhatsApp
+          each time — you get a few seconds to undo before that is sent.
+          To cancel an order, open it: cancelling is not a drag.
+        </p>
+        <div id="orderBoard" class="board"><div class="muted">Loading…</div></div>
       </div>
     </div>
 

@@ -1928,3 +1928,61 @@ stored — otherwise the screen quietly disagrees with reality.
 ### Not done
 
 Reordering on the Flutter app.
+
+
+---
+
+## 34. Order board (Kanban)
+
+A Board tab beside the orders list: columns you drag cards between.
+
+### The constraint that designed it
+
+A Kanban makes changing an order's status a casual gesture. It is not one.
+`notifyOrderStatusChange` messages the customer on WhatsApp for **every** status in this
+flow — confirmed, preparing, ready, delivered, cancelled — and a WhatsApp message cannot
+be unsent. A mis-drag tells someone their food is ready when it is not, and the merchant
+has no way to take it back.
+
+Checked before building, not assumed. A test now pins `STATUS_KEYS`, so adding a status
+there cannot silently give the board a new irreversible side effect.
+
+### The move is optimistic; the request is not
+
+The card jumps immediately, a toast offers **Undo**, and the PATCH only goes out when that
+window closes. Undo cancels the timer outright — nothing was ever sent. Verified against a
+real clock in the fixture: **0 requests before undo, 0 after**.
+
+Three details that follow from it:
+
+- **A second move replaces the first.** Dragging pending → preparing → ready sends *one*
+  message, about where the order ended up, not one per column crossed. Verified: two moves
+  produce one request carrying `delivered`.
+- **Pending moves flush on `pagehide`.** Otherwise closing the tab inside the undo window
+  drops a change the merchant already watched happen, and the board disagrees with the
+  server on next load.
+- **A failed request puts the card back**, rather than leaving the board showing a status
+  the server never accepted.
+
+### Two deliberate omissions
+
+**`cancelled` is not a column.** It is terminal, its message is the worst one to send by
+accident, and cancelling already has a considered path in the order detail view. A board
+should not make it a flick of the wrist.
+
+**Nothing is hidden.** Orders outside the flow — a cancelled one, or the legacy `paid`
+status left by the mark-paid bug — appear in an "Other" column that refuses drops, because
+there is no transition *into* it. Hiding an order because its status is unfamiliar is
+silent data loss.
+
+### Smaller things
+
+The board fetches on open rather than with the rest of the dashboard: a merchant who never
+opens it should not pay for the request. The undo toast is built with `addEventListener`
+rather than an inline handler — under `script-src-attr 'none'` an `onclick` Undo button
+would silently do nothing, which for *this* button means the move commits anyway. A test
+asserts that specifically.
+
+### Not done
+
+The board on the Flutter app.

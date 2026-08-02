@@ -78,6 +78,9 @@ function showSubTab(section, name) {
     el.classList.toggle('active', el.dataset.subpane === name));
   scope.querySelectorAll(':scope > .sub-tabs button').forEach(btn =>
     btn.classList.toggle('active', btn.dataset.subtarget === name));
+  // The board fetches on open rather than with the rest of the dashboard: a
+  // merchant who never opens it should not pay for the request.
+  if (section === 'orders' && name === 'board') loadOrderBoard();
 }
 
 async function signOut() {
@@ -2414,4 +2417,207 @@ document.addEventListener('dragend', async () => {
   if (row) row.classList.remove('dragging');
   DRAG_PRODUCT_ID = null;
   await saveProductOrder();
+});
+
+// ─── order board ───────────────────────────────────────────────────────────
+//
+// A Kanban makes changing an order's status a casual gesture. It is not one:
+// notifyOrderStatusChange messages the customer on WhatsApp for EVERY status
+// in this flow — confirmed, preparing, ready, delivered, cancelled — and a
+// WhatsApp message cannot be unsent. A mis-drag tells a customer their food is
+// ready when it is not, and the merchant has no way to take it back.
+//
+// So the move is optimistic but the REQUEST is deferred. The card jumps
+// immediately, a toast offers Undo, and only when that window closes does the
+// PATCH go out. Undo puts the card back and nothing was ever sent.
+//
+// `cancelled` is deliberately NOT a column. It is terminal, its message is the
+// worst one to send by accident, and cancelling already has a considered path
+// in the order detail view. A board should not make it a flick of the wrist.
+
+const BOARD_COLUMNS = [
+  { key: 'pending', label: 'New' },
+  { key: 'confirmed', label: 'Confirmed' },
+  { key: 'preparing', label: 'Preparing' },
+  { key: 'ready', label: 'Ready' },
+  { key: 'delivered', label: 'Delivered' }
+];
+
+const UNDO_MS = 6000;
+
+let BOARD_ORDERS = [];
+let DRAG_ORDER_ID = null;
+/** orderId -> { timer, from }. One pending move per order. */
+const PENDING_MOVES = new Map();
+
+async function loadOrderBoard() {
+  const host = document.getElementById('orderBoard');
+  if (!host) return;
+  try {
+    const { orders } = await api('/orders?business_id=' + BIZ.id + '&limit=200');
+    BOARD_ORDERS = orders || [];
+    renderOrderBoard();
+  } catch (err) {
+    host.innerHTML = `<div class="muted">${esc(err.message)}</div>`;
+  }
+}
+
+function renderOrderBoard() {
+  const host = document.getElementById('orderBoard');
+  if (!host) return;
+
+  const known = new Set(BOARD_COLUMNS.map(c => c.key));
+  // Anything outside the flow — a cancelled order, or the legacy `paid`
+  // status — still gets shown. Hiding an order because its status is
+  // unexpected is exactly the kind of silent loss worth avoiding; it just
+  // is not a drop target, because there is no transition INTO "other".
+  const other = BOARD_ORDERS.filter(o => !known.has(o.status));
+
+  const columns = BOARD_COLUMNS.map(col => {
+    const cards = BOARD_ORDERS.filter(o => o.status === col.key);
+    return `
+      <div class="board-col" data-status="${col.key}">
+        <div class="board-col-head"><span>${col.label}</span><span class="board-col-count">${cards.length}</span></div>
+        ${cards.map(boardCard).join('') || '<div class="board-empty">Nothing here</div>'}
+      </div>`;
+  }).join('');
+
+  const otherCol = other.length ? `
+      <div class="board-col no-drop" data-status="">
+        <div class="board-col-head"><span>Other</span><span class="board-col-count">${other.length}</span></div>
+        ${other.map(boardCard).join('')}
+      </div>` : '';
+
+  host.innerHTML = columns + otherCol;
+}
+
+function boardCard(o) {
+  const items = Array.isArray(o.items) ? o.items.length : 0;
+  return `
+    <div class="board-card" draggable="true" data-order-card="${esc(o.id)}"
+         data-click="openOrderDetail" data-args="${dataArgs(o.id)}">
+      <div class="board-card-num">#${esc(o.order_number)}</div>
+      <div class="board-card-meta">GH₵${Number(o.total_ghs || 0).toFixed(2)} · ${items} item${items === 1 ? '' : 's'}${o.payment_status === 'paid' ? ' · paid' : ''}</div>
+    </div>`;
+}
+
+/**
+ * Applies a move locally and schedules the request.
+ *
+ * Nothing reaches the server until the undo window closes, so an accidental
+ * drag costs the merchant nothing at all.
+ */
+function scheduleStatusMove(orderId, toStatus) {
+  const order = BOARD_ORDERS.find(o => o.id === orderId);
+  if (!order || order.status === toStatus) return;
+
+  // A second move of the same order replaces the first: the customer should
+  // hear one message about where the order actually ended up, not one per
+  // drag along the way.
+  const existing = PENDING_MOVES.get(orderId);
+  const from = existing ? existing.from : order.status;
+  if (existing) clearTimeout(existing.timer);
+
+  order.status = toStatus;
+  renderOrderBoard();
+
+  const timer = setTimeout(() => commitStatusMove(orderId), UNDO_MS);
+  PENDING_MOVES.set(orderId, { timer, from });
+
+  const label = (BOARD_COLUMNS.find(c => c.key === toStatus) || {}).label || toStatus;
+  showUndoToast(`#${order.order_number} → ${label}`, () => undoStatusMove(orderId));
+}
+
+async function commitStatusMove(orderId) {
+  const pending = PENDING_MOVES.get(orderId);
+  if (!pending) return;
+  PENDING_MOVES.delete(orderId);
+  clearTimeout(pending.timer);
+  const order = BOARD_ORDERS.find(o => o.id === orderId);
+  if (!order) return;
+  try {
+    await api('/orders/' + orderId + '/status', {
+      method: 'PATCH',
+      body: JSON.stringify({ status: order.status })
+    });
+  } catch (err) {
+    toast(err.message);
+    order.status = pending.from;
+    renderOrderBoard();
+  }
+}
+
+function undoStatusMove(orderId) {
+  const pending = PENDING_MOVES.get(orderId);
+  if (!pending) return;
+  clearTimeout(pending.timer);
+  PENDING_MOVES.delete(orderId);
+  const order = BOARD_ORDERS.find(o => o.id === orderId);
+  if (order) order.status = pending.from;
+  renderOrderBoard();
+  toast('Move undone — nothing was sent');
+}
+
+/**
+ * Sends every pending move immediately.
+ *
+ * Without this, closing the tab inside the undo window would drop a change the
+ * merchant already saw applied — the board would disagree with the server on
+ * the next load.
+ */
+function flushPendingMoves() {
+  for (const id of [...PENDING_MOVES.keys()]) commitStatusMove(id);
+}
+window.addEventListener('pagehide', flushPendingMoves);
+
+/** A toast with an Undo affordance, built without inline handlers. */
+function showUndoToast(message, onUndo) {
+  const host = document.getElementById('toast');
+  if (!host) return;
+  host.textContent = message + '  ';
+  const btn = document.createElement('button');
+  btn.className = 'btn btn-ghost btn-xs';
+  btn.textContent = 'Undo';
+  btn.addEventListener('click', () => { onUndo(); host.classList.remove('show'); });
+  host.appendChild(btn);
+  host.classList.add('show');
+  clearTimeout(showUndoToast._t);
+  showUndoToast._t = setTimeout(() => host.classList.remove('show'), UNDO_MS);
+}
+
+document.addEventListener('dragstart', ev => {
+  const card = ev.target instanceof Element && ev.target.closest('[data-order-card]');
+  if (!card) return;
+  DRAG_ORDER_ID = card.dataset.orderCard;
+  card.classList.add('dragging');
+  ev.dataTransfer.effectAllowed = 'move';
+  try { ev.dataTransfer.setData('text/plain', DRAG_ORDER_ID); } catch (e) { /* Firefox */ }
+});
+
+document.addEventListener('dragover', ev => {
+  if (!DRAG_ORDER_ID) return;
+  const col = ev.target instanceof Element && ev.target.closest('.board-col');
+  // `no-drop` columns hold statuses with no transition into them.
+  if (!col || col.classList.contains('no-drop')) return;
+  ev.preventDefault();
+  document.querySelectorAll('.board-col.drop-target').forEach(c => c.classList.remove('drop-target'));
+  col.classList.add('drop-target');
+});
+
+document.addEventListener('drop', ev => {
+  if (!DRAG_ORDER_ID) return;
+  const col = ev.target instanceof Element && ev.target.closest('.board-col');
+  if (!col || col.classList.contains('no-drop')) return;
+  ev.preventDefault();
+  const status = col.dataset.status;
+  const id = DRAG_ORDER_ID;
+  DRAG_ORDER_ID = null;
+  document.querySelectorAll('.board-col.drop-target').forEach(c => c.classList.remove('drop-target'));
+  if (status) scheduleStatusMove(id, status);
+});
+
+document.addEventListener('dragend', () => {
+  DRAG_ORDER_ID = null;
+  document.querySelectorAll('.dragging').forEach(c => c.classList.remove('dragging'));
+  document.querySelectorAll('.board-col.drop-target').forEach(c => c.classList.remove('drop-target'));
 });
