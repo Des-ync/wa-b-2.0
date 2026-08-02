@@ -370,6 +370,7 @@ async function loadProducts() {
     ].filter(Boolean).join(' ') || '<span class="muted" style="font-size:12px">—</span>';
     return `
     <tr data-id="${p.id}">
+      <td><input type="checkbox" class="p-select" data-change="onProductSelectionChange" data-el data-args="${dataArgs(p.id)}" aria-label="Select ${esc(p.name)}" ${SELECTED_PRODUCTS.has(p.id) ? 'checked' : ''} /></td>
       <td>${p.image_url ? `<img src="${esc(p.image_url)}" alt="${esc(p.name || 'Product photo')}" class="thumb" data-on-error="hide" />` : '<span class="muted" style="font-size:12px">—</span>'}</td>
       <td><strong>${esc(p.name)}</strong></td>
       <td class="muted">${esc(p.description || '')}</td>
@@ -2209,4 +2210,87 @@ function setOrderStatusFromSelect(orderId, el) {
  */
 function moveCategoryBy(index, direction) {
   moveCategory(CATEGORY_ORDER, index, direction);
+}
+
+
+// ─── bulk product edit ─────────────────────────────────────────────────────
+//
+// One request rather than one per product. On a metered 3G connection the
+// difference between 1 and 40 round trips is the merchant's own money, and a
+// single UPDATE is atomic where a client-side loop can half-finish and leave
+// the catalogue in a state nobody asked for.
+
+/** Ids currently ticked. Survives a re-render; cleared after a bulk edit. */
+const SELECTED_PRODUCTS = new Set();
+
+function onProductSelectionChange(id, el) {
+  if (el.checked) SELECTED_PRODUCTS.add(id);
+  else SELECTED_PRODUCTS.delete(id);
+  renderBulkBar();
+}
+
+function toggleSelectAllProducts(el) {
+  document.querySelectorAll('#productTable tbody .p-select').forEach(box => {
+    box.checked = el.checked;
+    const row = box.closest('tr');
+    const id = row && row.dataset.id;
+    if (!id) return;
+    if (el.checked) SELECTED_PRODUCTS.add(id);
+    else SELECTED_PRODUCTS.delete(id);
+  });
+  renderBulkBar();
+}
+
+function clearProductSelection() {
+  SELECTED_PRODUCTS.clear();
+  document.querySelectorAll('#productTable .p-select, #pSelectAll')
+    .forEach(box => { box.checked = false; });
+  renderBulkBar();
+}
+
+function renderBulkBar() {
+  const bar = document.getElementById('bulkBar');
+  const count = document.getElementById('bulkCount');
+  if (!bar || !count) return;
+  const n = SELECTED_PRODUCTS.size;
+  // Hidden entirely at zero, rather than shown with disabled buttons — there
+  // is nothing to act on and it would only take space from the table.
+  bar.style.display = n ? 'flex' : 'none';
+  count.textContent = n === 1 ? '1 product selected' : `${n} products selected`;
+}
+
+/**
+ * Applies one set of changes to every selected product.
+ *
+ * The server refuses anything outside its own bulk-editable list, so a typo
+ * here fails loudly rather than quietly writing the wrong column.
+ */
+async function bulkSet(changes) {
+  const ids = [...SELECTED_PRODUCTS];
+  if (!ids.length) return;
+  try {
+    const res = await api('/products/bulk', {
+      method: 'PATCH',
+      body: JSON.stringify({ business_id: BIZ.id, product_ids: ids, changes })
+    });
+    // The notified count is surfaced, not swallowed: marking a batch back in
+    // stock messages every customer who asked to be told, and a merchant
+    // should learn that here rather than from the bill.
+    const noun = res.updated === 1 ? 'product' : 'products';
+    toast(res.notified
+      ? `${res.updated} ${noun} updated · ${res.notified} customer${res.notified === 1 ? '' : 's'} told it is back in stock`
+      : `${res.updated} ${noun} updated`);
+    clearProductSelection();
+    await loadProducts();
+  } catch (err) { toast(err.message); }
+}
+
+/** Moves the selection into a different category. */
+async function bulkChangeCategory() {
+  if (!SELECTED_PRODUCTS.size) return;
+  const category = prompt('Move ' + SELECTED_PRODUCTS.size + ' product(s) to which category?');
+  if (category == null) return;
+  const trimmed = category.trim();
+  if (!trimmed) return toast('Enter a category name');
+  await bulkSet({ category: trimmed });
 }

@@ -158,6 +158,114 @@ router.post('/', requirePermission('products', 'write'), async (req, res) => {
 });
 
 /** PATCH /api/products/:id — update any subset of fields. */
+/**
+ * Fields that mean something when applied to MANY products at once.
+ *
+ * Deliberately a short list. Setting every selected product's `name`,
+ * `image_url` or `description` to one value is not an edit, it is data loss;
+ * one `price_ghs` or `stock_qty` across a selection is almost never what
+ * somebody means either — a percentage adjustment or a restock is, and those
+ * are different operations. What is left is the set of flags a merchant
+ * genuinely toggles in groups: everything in a category out of stock for the
+ * day, a handful hidden while they restock.
+ */
+const BULK_EDITABLE = ['in_stock', 'hidden', 'featured', 'category', 'low_stock_threshold', 'supplier_id'];
+
+/** Bounds the statement, and a selection larger than this is a CSV import. */
+const BULK_MAX_IDS = 200;
+
+/**
+ * PATCH /api/products/bulk — body: { business_id?, product_ids: [], changes: {} }
+ *
+ * One request rather than one per product: on a metered 3G connection the
+ * difference between 1 and 40 round trips is the merchant's own money, and a
+ * single UPDATE is atomic where a client-side loop can half-finish.
+ *
+ * MUST be declared before `/:id`, or Express matches this path as a product
+ * whose id is the literal string "bulk".
+ */
+router.patch('/bulk', requirePermission('products', 'write'), async (req, res) => {
+  try {
+    const businessId = req.body?.business_id || req.auth?.businessId;
+    if (!businessId) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
+    if (tenantBlocksBusinessId(req, businessId)) {
+      return respond.forbidden(req, res);
+    }
+
+    const ids = Array.isArray(req.body?.product_ids) ? req.body.product_ids : null;
+    if (!ids || !ids.length) {
+      return respond.invalid(req, res, 'Select at least one product.',
+        { product_ids: 'is required' });
+    }
+    if (ids.length > BULK_MAX_IDS) {
+      return respond.invalid(req, res,
+        `Too many products at once (max ${BULK_MAX_IDS}).`, { product_ids: 'too many' });
+    }
+
+    const rejected = Object.keys(req.body?.changes || {}).filter(k => !BULK_EDITABLE.includes(k));
+    if (rejected.length) {
+      return respond.invalid(req, res,
+        `These cannot be changed in bulk: ${rejected.join(', ')}.`,
+        Object.fromEntries(rejected.map(k => [k, 'not editable in bulk'])));
+    }
+
+    // Validated by the SAME schema as a single edit, so bulk cannot become a
+    // way to write a value the single path would reject.
+    const { errors, out, fields } = validateProductBody(req.body?.changes || {}, { partial: true });
+    if (errors.length) return respond.invalid(req, res, errors.join('; '), fields);
+    if (!Object.keys(out).length) {
+      return respond.invalid(req, res, 'No fields to update');
+    }
+
+    // Scoped by business_id in the statement itself: an id belonging to
+    // another tenant simply does not match, rather than being trusted because
+    // it was in the list.
+    const params = [businessId, ids];
+    const sets = [];
+    for (const [col, val] of Object.entries(out)) {
+      params.push(val);
+      sets.push(`${col} = $${params.length}`);
+    }
+
+    const before = await query(
+      'SELECT id, in_stock FROM products WHERE business_id = $1 AND id = ANY($2::uuid[])',
+      [businessId, ids]
+    );
+    const result = await query(
+      `UPDATE products SET ${sets.join(', ')}
+        WHERE business_id = $1 AND id = ANY($2::uuid[])
+        RETURNING *`,
+      params
+    );
+
+    // Same back-in-stock behaviour as the single edit — those customers asked
+    // to be told, and suppressing it here would mean they never hear. The
+    // count is returned so a merchant who just marked thirty things in stock
+    // finds out that messages went out, rather than discovering it on a bill.
+    const wasOut = new Set(before.rows.filter(r => !r.in_stock).map(r => r.id));
+    const restocked = result.rows.filter(p => p.in_stock && wasOut.has(p.id));
+    let notified = 0;
+    for (const product of restocked) {
+      try {
+        notified += await automations.notifyProductRestocked(product) || 0;
+      } catch (err) {
+        logger.warn('bulk restock notify failed for product %s: %s', product.id, err.message);
+      }
+    }
+
+    return respond.ok(req, res, {
+      updated: result.rowCount,
+      requested: ids.length,
+      notified,
+      changed: Object.keys(out)
+    });
+  } catch (err) {
+    return respond.failInternal(req, res, logger, 'PATCH /products/bulk', err);
+  }
+});
+
 router.patch('/:id', requirePermission('products', 'write'), async (req, res) => {
   try {
     const existing = await query('SELECT * FROM products WHERE id = $1', [req.params.id]);

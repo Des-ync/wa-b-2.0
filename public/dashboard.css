@@ -138,3 +138,18 @@
     .stat-grid { grid-template-columns: repeat(2, 1fr); }
     .row-form { grid-template-columns: 1fr !important; }
   }
+
+/* Bulk-edit bar: appears only while a selection exists, so it never takes
+   space from the table when it has nothing to act on. */
+.bulk-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  background: var(--accent-soft);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.bulk-count { font-weight: 700; font-size: 13px; color: var(--accent-ink); margin-right: 4px; }

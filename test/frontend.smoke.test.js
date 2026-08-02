@@ -400,3 +400,26 @@ test('markup built in JS uses dataArgs() rather than raw interpolation', () => {
   }
   assert.deepEqual(problems, [], problems.join('\n  '));
 });
+
+test('a handler that takes an element declares data-el', () => {
+  // actions.js only appends the element when data-el is present. A handler
+  // whose last parameter is `el` and whose attribute omits it receives
+  // undefined and does nothing — no error, no clue, just a dead control.
+  const problems = [];
+  for (const f of fs.readdirSync(PUBLIC_DIR).filter(n => n.endsWith('.js') || n.endsWith('.html'))) {
+    // A page's attributes live in its .html while the handlers live in its
+    // .js, so the signature has to be looked up across BOTH halves — looking
+    // only at the same file silently skips every static page.
+    const src = f.endsWith('.html') ? readPageSource(f) : readPage(f);
+    for (const m of src.matchAll(/data-(?:click|change|input|enter)="([A-Za-z_$][\w$]*)"([^>]*)/g)) {
+      const [, fn, rest] = m;
+      const sig = src.match(new RegExp(`function\\s+${fn}\\s*\\(([^)]*)\\)`));
+      if (!sig) continue;
+      const params = sig[1].split(',').map(p => p.trim()).filter(Boolean);
+      if (params.length && params[params.length - 1] === 'el' && !rest.includes('data-el')) {
+        problems.push(`${f}: ${fn}() takes an element but its attribute lacks data-el`);
+      }
+    }
+  }
+  assert.deepEqual(problems, [], problems.join('\n  '));
+});

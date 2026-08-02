@@ -80,5 +80,40 @@
   result.onErrorHide = probe.style.display === 'none';
   result.onErrorRemove = !probe2.isConnected;
 
+  // 6. Bulk selection: ticking rows accumulates ids, select-all covers every
+  //    row, the bar appears only when something is selected, and the edit goes
+  //    out as ONE request. Each handler reads its own element, which only
+  //    works because the attribute declares data-el.
+  const boxes = [...document.querySelectorAll('#productTable .p-select')];
+  result.bulk = { checkboxes: boxes.length };
+  if (boxes.length) {
+    boxes[0].checked = true;
+    boxes[0].dispatchEvent(new Event('change', { bubbles: true }));
+    result.bulk.afterOneTick = SELECTED_PRODUCTS.size;
+    result.bulk.barShownForOne = document.getElementById('bulkBar').style.display === 'flex';
+    result.bulk.countText = document.getElementById('bulkCount').textContent;
+
+    const all = document.getElementById('pSelectAll');
+    all.checked = true;
+    all.dispatchEvent(new Event('change', { bubbles: true }));
+    result.bulk.afterSelectAll = SELECTED_PRODUCTS.size;
+
+    const calls = [];
+    api = async function (path, opts) {
+      calls.push({ path, method: (opts && opts.method) || 'GET',
+                   body: opts && opts.body ? JSON.parse(opts.body) : null });
+      // bulkSet reloads the table afterwards; the stub must answer that too,
+      // or the reload throws and masks the success message.
+      if (path.indexOf('/products?') === 0) return { products: PRODUCTS };
+      return { updated: 2, requested: 2, notified: 3 };
+    };
+    window.toast = function (m) { result.bulk.toast = m; };
+
+    await bulkSet({ in_stock: false });
+    result.bulk.patches = calls.filter(c => c.method === 'PATCH');
+    result.bulk.clearedAfter = SELECTED_PRODUCTS.size;
+    result.bulk.barHiddenAfter = document.getElementById('bulkBar').style.display === 'none';
+  }
+
   document.getElementById('out').textContent = JSON.stringify(result, null, 1);
 })();

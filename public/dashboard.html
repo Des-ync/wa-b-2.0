@@ -259,10 +259,21 @@
           <button class="btn btn-ghost btn-sm" data-click-el="pImportFile">Upload list</button>
         </div>
       </div>
+      <div id="bulkBar" class="bulk-bar" style="display:none">
+        <span id="bulkCount" class="bulk-count"></span>
+        <button class="btn btn-ghost btn-xs" data-click="bulkSet" data-args="[{&quot;in_stock&quot;:true}]">Mark in stock</button>
+        <button class="btn btn-ghost btn-xs" data-click="bulkSet" data-args="[{&quot;in_stock&quot;:false}]">Mark out of stock</button>
+        <button class="btn btn-ghost btn-xs" data-click="bulkSet" data-args="[{&quot;hidden&quot;:true}]">Hide</button>
+        <button class="btn btn-ghost btn-xs" data-click="bulkSet" data-args="[{&quot;hidden&quot;:false}]">Show</button>
+        <button class="btn btn-ghost btn-xs" data-click="bulkSet" data-args="[{&quot;featured&quot;:true}]">Feature</button>
+        <button class="btn btn-ghost btn-xs" data-click="bulkSet" data-args="[{&quot;featured&quot;:false}]">Unfeature</button>
+        <button class="btn btn-ghost btn-xs" data-click="bulkChangeCategory">Change category…</button>
+        <button class="btn btn-ghost btn-xs" data-click="clearProductSelection">Clear</button>
+      </div>
       <div class="scroll-x">
         <table id="productTable">
-          <thead><tr><th>Image</th><th>Name</th><th>Description</th><th>Price (GH₵)</th><th>Category</th><th>Stock</th><th>Status</th><th></th></tr></thead>
-          <tbody><tr><td colspan="8" class="muted">Loading…</td></tr></tbody>
+          <thead><tr><th><input type="checkbox" id="pSelectAll" data-change="toggleSelectAllProducts" data-el aria-label="Select all products" /></th><th>Image</th><th>Name</th><th>Description</th><th>Price (GH₵)</th><th>Category</th><th>Stock</th><th>Status</th><th></th></tr></thead>
+          <tbody><tr><td colspan="9" class="muted">Loading…</td></tr></tbody>
         </table>
       </div>
       <div style="margin-top:20px;border-top:1px solid var(--line);padding-top:16px">

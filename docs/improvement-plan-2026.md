@@ -1755,3 +1755,67 @@ the camera is a normal outcome, not an error), a failed upload leaves the produc
 photo rather than pointing at a file that was never stored, and a PNG is declared as PNG
 rather than blindly as JPEG — the server cross-checks the header against the magic bytes
 and refuses a mismatch.
+
+
+---
+
+## 31. Bulk product edit
+
+Select products, apply one change to all of them. `PATCH /api/products/bulk`.
+
+### One request, not one per product
+
+A client-side loop over 40 products is 40 round trips on a metered 3G connection — the
+merchant's own money — and it can half-finish, leaving the catalogue in a state nobody
+asked for. A single `UPDATE … WHERE business_id = $1 AND id = ANY($2)` is one request and
+inherently atomic.
+
+### The safety property is *which fields*
+
+`BULK_EDITABLE` is deliberately short: `in_stock`, `hidden`, `featured`, `category`,
+`low_stock_threshold`, `supplier_id`.
+
+Absent on purpose — and asserted absent by a test — are `name`, `image_url`,
+`description`, `price_ghs`, `stock_qty`, `sort_order`. Setting one value for any of those
+across a selection is not an edit, it is data loss. A percentage price change or a restock
+is a *different operation*, not a special case of this one.
+
+Anything outside the list is **rejected with its name**, not silently dropped, and what
+remains goes through the same `validateProductBody` the single-product PATCH uses — so
+bulk cannot become a route to write a value the single path would refuse.
+
+### Two things that would have been quiet bugs
+
+**Route order.** `PATCH /bulk` must be declared before `PATCH /:id`, or Express matches it
+as a product whose id is the literal string `"bulk"`. A test asserts the ordering, because
+the symptom is a 404 that looks like a missing endpoint.
+
+**Back-in-stock notifications.** The single PATCH fires `notifyProductRestocked` when a
+product returns to stock — messaging every customer who *asked* to be told, up to 500 per
+product. Bulk-marking thirty items in stock therefore sends real WhatsApp messages with a
+real bill. Suppressing them would be wrong; those customers asked. So the endpoint fires
+them exactly as the single path does, only for products that were genuinely out of stock
+before, and **returns the count** — the UI reports "2 products updated · 3 customers told
+it is back in stock", so a merchant learns it here rather than from an invoice.
+
+### Verified with data, not on an empty page
+
+Extended `tools/browser-fixture` and drove the real render:
+
+- ticking one row selects it, shows the bar, and reads "1 product selected";
+- select-all covers every rendered row;
+- the edit leaves as **exactly one** PATCH carrying both ids and the changes;
+- the selection clears and the bar hides afterwards;
+- zero inline handlers, zero unresolved, zero errors.
+
+### A new guard, from a bug caught in the writing
+
+`actions.js` only appends the element when `data-el` is present. Both new handlers read
+their own checkbox, and I wired the first one without `data-el` — which produces
+`undefined`, no error, and a control that does nothing. A test now cross-references every
+handler's signature against its attribute, looking at the `.html` and its `.js` together
+because the attribute and the function live in different files. Mutation-tested.
+
+### Not done
+
+Bulk edit on the Flutter app — the product list there has no multi-select. Separate change.
