@@ -11,6 +11,7 @@ import '../state/session.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/order_action_sheets.dart';
+import 'order_board.dart';
 import 'order_detail.dart';
 
 const orderStatuses = [
@@ -90,7 +91,21 @@ class _OrdersScreenState extends State<OrdersScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Orders')),
+      appBar: AppBar(
+        title: const Text('Orders'),
+        actions: [
+          IconButton(
+            tooltip: 'Order board',
+            onPressed: () async {
+              await Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => const OrderBoardScreen()));
+              // The board changes statuses, so the list behind it is stale.
+              if (mounted) setState(() => _reloadKey++);
+            },
+            icon: const Icon(Icons.view_kanban_outlined),
+          ),
+        ],
+      ),
       body: Column(
         children: [
           SizedBox(

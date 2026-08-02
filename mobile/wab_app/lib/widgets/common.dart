@@ -19,6 +19,15 @@ class AsyncList<T> extends StatelessWidget {
   final List<T> Function(List<T>)? transform;
   final String? emptyFilteredTitle;
 
+  /// When supplied, the list becomes drag-to-reorder.
+  ///
+  /// Opt-in rather than always: a reorderable list needs a stable key per row
+  /// and long-press is no longer free for anything else, so a screen has to
+  /// ask for it. [keyOf] must return something stable per item — an index
+  /// would break the moment two rows swap.
+  final void Function(List<T> reordered)? onReorder;
+  final String Function(T item)? keyOf;
+
   const AsyncList({
     super.key,
     required this.load,
@@ -28,7 +37,10 @@ class AsyncList<T> extends StatelessWidget {
     this.emptyIcon = Icons.inbox_rounded,
     this.transform,
     this.emptyFilteredTitle,
-  });
+    this.onReorder,
+    this.keyOf,
+  }) : assert(onReorder == null || keyOf != null,
+            'onReorder needs keyOf: a reorderable row must have a stable key');
 
   @override
   Widget build(BuildContext context) {
@@ -39,7 +51,9 @@ class AsyncList<T> extends StatelessWidget {
         emptySubtitle: emptySubtitle,
         emptyIcon: emptyIcon,
         transform: transform,
-        emptyFilteredTitle: emptyFilteredTitle);
+        emptyFilteredTitle: emptyFilteredTitle,
+        onReorder: onReorder,
+        keyOf: keyOf);
   }
 }
 
@@ -51,6 +65,8 @@ class _AsyncListBody<T> extends StatefulWidget {
   final IconData emptyIcon;
   final List<T> Function(List<T>)? transform;
   final String? emptyFilteredTitle;
+  final void Function(List<T> reordered)? onReorder;
+  final String Function(T item)? keyOf;
 
   const _AsyncListBody({
     required this.load,
@@ -60,6 +76,8 @@ class _AsyncListBody<T> extends StatefulWidget {
     required this.emptyIcon,
     this.transform,
     this.emptyFilteredTitle,
+    this.onReorder,
+    this.keyOf,
   });
 
   @override
@@ -111,6 +129,33 @@ class _AsyncListBodyState<T> extends State<_AsyncListBody<T>> {
                         : widget.emptyTitle,
                     subtitle: filtered ? '' : widget.emptySubtitle),
               ],
+            ),
+          );
+        }
+        if (widget.onReorder != null) {
+          return RefreshIndicator(
+            onRefresh: _refresh,
+            color: WabColors.accent,
+            child: ReorderableListView.builder(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.all(16),
+              itemCount: items.length,
+              // ReorderableListView needs a key on the direct child, and it
+              // must identify the ITEM — keying by index makes every row look
+              // unchanged after a swap, so the wrong one animates.
+              itemBuilder: (ctx, i) => Padding(
+                key: ValueKey(widget.keyOf!(items[i])),
+                padding: const EdgeInsets.only(bottom: 10),
+                child: widget.itemBuilder(ctx, items[i]),
+              ),
+              // onReorderItem, not the deprecated onReorder: it reports the
+              // index AFTER removal, so the classic "downward moves are one
+              // too high" adjustment is not needed and cannot be got wrong.
+              onReorderItem: (oldIndex, newIndex) {
+                final next = [...items];
+                next.insert(newIndex, next.removeAt(oldIndex));
+                widget.onReorder!(next);
+              },
             ),
           );
         }

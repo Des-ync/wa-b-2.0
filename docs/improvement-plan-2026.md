@@ -2104,3 +2104,70 @@ Five board tests also had to be rewritten: they asserted private internals
 (`commitStatusMove`, `flushPendingMoves`, `pending.from`) that the shared mechanism
 replaced. They now assert the behaviour — that the board goes *through* `deferWithUndo`
 and supplies a revert — which is what actually matters and is less brittle.
+
+
+---
+
+## 37. Flutter parity: bulk edit, duplicate, reorder, order board
+
+The four features built for the dashboard, now on the phone — which is the device most of
+these merchants actually use.
+
+### What is shared and what is not
+
+All four call the same endpoints; `lib/api/product_ops_api.dart` holds the three product
+ones so the paths and body shapes sit together rather than being hand-rolled per screen.
+
+The interactions had to differ:
+
+- **Selection** is long-press, and checkboxes only appear once something is ticked. The
+  list stays uncluttered for the common case of just browsing.
+- **Reorder** is a mode toggled from the app bar, using `ReorderableListView` via a new
+  opt-in `onReorder`/`keyOf` on `AsyncList`. Search is **hidden** while reordering:
+  dragging inside a filtered list would save an order that does not match what the
+  merchant sees, because the hidden rows keep their old positions.
+- **The board** moves cards by menu rather than drag. Dragging between
+  horizontally-scrolling columns is unreliable on a narrow screen, and a menu is the only
+  version reachable with a screen reader.
+
+The undo semantics are identical to the web, because the reason for them is: a status
+change WhatsApps the customer and cannot be unsent. Moving a card is optimistic, the
+request waits six seconds behind an Undo, moving twice sends **one** request for where the
+order ended up, and a failure puts the card back. `cancelled` is not a column; orders
+outside the flow appear under "Other", which offers no move.
+
+### A pre-existing bug this uncovered
+
+The first test to ever render `ProductsScreen` failed with **"A RenderFlex overflowed by 15
+pixels"** — and it reproduces on the untouched screen, so it predates this work entirely.
+The trailing stack (price above a tappable status chip with a 44px target) is taller than a
+`ListTile` allows. Fixed by moving the price into the subtitle rather than shrinking the
+touch target below the accessibility minimum.
+
+### Three ways these tests nearly passed for the wrong reason
+
+Worth recording, because each looked fine:
+
+1. **Tapping a SnackBar that was still animating in.** A single `pump(400ms)` only
+   *schedules* the entrance; the Undo button was still below the viewport at `y=624` in a
+   600-tall screen, so the tap hit nothing and "undo" appeared not to work. Two pumps fix
+   it. `pumpAndSettle` is not an option — it would advance past the six-second window and
+   commit the very request the test says is never sent.
+2. **A `findsNothing` about a column that was never rendered.** The board scrolls
+   horizontally; at the default 800px only the first few columns are built, so "the Other
+   card offers no move" passed while the Other column did not exist. The viewport is now
+   widened.
+3. **Asserting an error toast instead of the behaviour.** `pumpAndSettle` waits out a
+   SnackBar's *display* duration, so the message is gone by the assertion. The test now
+   checks the card actually returned to its old column, which is what "puts the card back"
+   means.
+
+### Verified
+
+215 mobile tests (20 new), analyzer unchanged at its 10 pre-existing, `flutter build apk`
+succeeds, and 910 backend tests still pass.
+
+### Not done
+
+Duplicate and reorder still have no equivalent in the storefront-facing app because they
+do not belong there. `style-src` and decision #13 remain the two open items in the plan.

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../api/catalog_api.dart';
+import '../api/product_ops_api.dart';
 import '../api/client.dart';
 import '../services/offline_cache.dart';
 import '../services/offline_queue.dart';
@@ -32,6 +33,12 @@ class _ProductsScreenState extends State<ProductsScreen> {
   StreamSubscription<List<ConnectivityResult>>? _connSub;
   final _searchCtrl = TextEditingController();
   String _query = '';
+
+  /// Ids ticked for a bulk action. Empty means normal browsing — the selection
+  /// bar and the checkboxes only exist while something is selected, so the
+  /// list stays uncluttered for the common case.
+  final Set<String> _selected = {};
+  bool _reordering = false;
 
   List<Map<String, dynamic>> _filter(List<Map<String, dynamic>> items) {
     if (_query.isEmpty) return items;
@@ -151,6 +158,152 @@ class _ProductsScreenState extends State<ProductsScreen> {
     if (mounted) setState(() => _reloadKey++);
   }
 
+  void _toggleSelected(String id) {
+    setState(() {
+      if (!_selected.remove(id)) _selected.add(id);
+    });
+  }
+
+  /// Applies one change to everything ticked.
+  ///
+  /// The `notified` count is surfaced, not swallowed: marking a batch back in
+  /// stock messages every customer who asked to be told, and a merchant should
+  /// learn that here rather than from the bill.
+  Future<void> _bulkSet(Map<String, dynamic> changes, String label) async {
+    final session = context.read<Session>();
+    final ids = _selected.toList();
+    if (ids.isEmpty) return;
+    try {
+      final res = await session.api.bulkUpdateProducts(session.businessId!,
+          productIds: ids, changes: changes);
+      final updated = res['updated'] ?? ids.length;
+      final notified = (res['notified'] as num?)?.toInt() ?? 0;
+      if (!mounted) return;
+      setState(() {
+        _selected.clear();
+        _reloadKey++;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Semantics(
+          liveRegion: true,
+          child: Text(notified > 0
+              ? '$updated updated · $notified customer${notified == 1 ? '' : 's'} told it is back in stock'
+              : '$updated updated'),
+        ),
+        backgroundColor: WabColors.accentInk,
+      ));
+    } on ApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(e.message), backgroundColor: WabColors.danger));
+      }
+    }
+  }
+
+  /// Copies a product, with its sizes and extras.
+  Future<void> _duplicate(Map<String, dynamic> product) async {
+    final session = context.read<Session>();
+    try {
+      final res = await session.api.duplicateProduct('${product['id']}');
+      final v = (res['variants_copied'] as num?)?.toInt() ?? 0;
+      final a = (res['addons_copied'] as num?)?.toInt() ?? 0;
+      final extras = [
+        if (v > 0) '$v variant${v == 1 ? '' : 's'}',
+        if (a > 0) '$a add-on${a == 1 ? '' : 's'}',
+      ].join(' and ');
+      if (!mounted) return;
+      setState(() => _reloadKey++);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Semantics(
+          liveRegion: true,
+          // The copy is hidden on purpose — it shares the original's price and
+          // photo. Saying so here stops "why is my copy not in the shop".
+          child: Text(extras.isEmpty
+              ? 'Copy created — hidden until you publish it'
+              : 'Copy created with $extras — hidden until you publish it'),
+        ),
+        backgroundColor: WabColors.accentInk,
+      ));
+    } on ApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(e.message), backgroundColor: WabColors.danger));
+      }
+    }
+  }
+
+  Future<void> _saveOrder(List<Map<String, dynamic>> ordered) async {
+    final session = context.read<Session>();
+    try {
+      await session.api.reorderProducts(
+          session.businessId!, ordered.map((p) => '${p['id']}').toList());
+    } on ApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(e.message), backgroundColor: WabColors.danger));
+        // Re-read rather than leave the list in an order that was never
+        // stored — otherwise the screen quietly disagrees with the server.
+        setState(() => _reloadKey++);
+      }
+    }
+  }
+
+  /// Shown only while something is ticked, so the list stays uncluttered for
+  /// the common case of just browsing.
+  Widget _selectionBar() {
+    final n = _selected.length;
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: WabColors.accentSoft,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: WabColors.line),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text('$n selected',
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        color: WabColors.accentInk)),
+              ),
+              TextButton(
+                onPressed: () => setState(_selected.clear),
+                child: const Text('Clear'),
+              ),
+            ],
+          ),
+          Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            children: [
+              OutlinedButton(
+                onPressed: () => _bulkSet({'in_stock': true}, 'in stock'),
+                child: const Text('In stock'),
+              ),
+              OutlinedButton(
+                onPressed: () => _bulkSet({'in_stock': false}, 'out of stock'),
+                child: const Text('Out of stock'),
+              ),
+              OutlinedButton(
+                onPressed: () => _bulkSet({'hidden': true}, 'hidden'),
+                child: const Text('Hide'),
+              ),
+              OutlinedButton(
+                onPressed: () => _bulkSet({'hidden': false}, 'shown'),
+                child: const Text('Show'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _openBundles() async {
     await Navigator.of(context)
         .push(MaterialPageRoute(builder: (_) => const BundlesScreen()));
@@ -165,6 +318,18 @@ class _ProductsScreenState extends State<ProductsScreen> {
           VoiceUpdateButton(
             productsProvider: () => _products,
             onUpdated: () => setState(() => _reloadKey++),
+          ),
+          IconButton(
+            tooltip: _reordering ? 'Done reordering' : 'Reorder products',
+            onPressed: () => setState(() {
+              _reordering = !_reordering;
+              // Reordering and selecting are different modes; leaving ticks
+              // behind would make the bulk bar hover over a list the merchant
+              // is now dragging.
+              if (_reordering) _selected.clear();
+            }),
+            icon: Icon(
+                _reordering ? Icons.check_rounded : Icons.swap_vert_rounded),
           ),
           IconButton(
             tooltip: 'Scan barcode / QR',
@@ -191,16 +356,33 @@ class _ProductsScreenState extends State<ProductsScreen> {
       body: Column(
         children: [
           if (_offline) const OfflineBanner(),
-          SearchField(
-            controller: _searchCtrl,
-            hint: 'Search products',
-            onChanged: (v) => setState(() => _query = v),
-          ),
+          // Search is hidden while reordering: dragging within a filtered
+          // list would save an order that does not match what the merchant
+          // sees, because the hidden rows keep their old positions.
+          if (!_reordering)
+            SearchField(
+              controller: _searchCtrl,
+              hint: 'Search products',
+              onChanged: (v) => setState(() => _query = v),
+            ),
+          if (_reordering)
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 4, 16, 8),
+              child: Text(
+                'Drag to set the order customers see. Featured products still '
+                'come first — and in WhatsApp, what sells most is shown before '
+                'your chosen order.',
+                style: TextStyle(fontSize: 12.5, color: WabColors.muted),
+              ),
+            ),
+          if (_selected.isNotEmpty) _selectionBar(),
           Expanded(
             child: AsyncList<Map<String, dynamic>>(
-              key: ValueKey(_reloadKey),
+              key: ValueKey('$_reloadKey-$_reordering'),
               load: _load,
-              transform: _filter,
+              transform: _reordering ? null : _filter,
+              onReorder: _reordering ? _saveOrder : null,
+              keyOf: _reordering ? (p) => '${p['id']}' : null,
               emptyFilteredTitle: 'No products match "$_query"',
               emptyTitle: 'No products yet',
               emptySubtitle:
@@ -212,8 +394,24 @@ class _ProductsScreenState extends State<ProductsScreen> {
                 final featured = p['featured'] == true;
                 return Card(
                   child: ListTile(
+                    // The trailing stack — price above a tappable status chip
+                    // with a 44px touch target — is taller than a two-line
+                    // tile allows, and overflowed by 15px. That predates the
+                    // menu button; no test had ever rendered this screen.
+                    // Three-line gives it the room without shrinking the
+                    // target or hiding the price.
+                    isThreeLine: true,
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(14)),
+                    // A checkbox only once a selection exists, so the list is
+                    // uncluttered for the common case of just browsing.
+                    leading: _selected.isEmpty
+                        ? null
+                        : Checkbox(
+                            value: _selected.contains('${p['id']}'),
+                            onChanged: (_) => _toggleSelected('${p['id']}'),
+                            activeColor: WabColors.accent,
+                          ),
                     title: Row(
                       children: [
                         if (featured) ...[
@@ -234,18 +432,20 @@ class _ProductsScreenState extends State<ProductsScreen> {
                     ),
                     subtitle: Text(
                         [
+                          ghs(p['price_ghs']),
                           '${p['category'] ?? 'general'}',
                           if (qty != null) '$qty in stock',
                         ].join(' · '),
                         style: const TextStyle(color: WabColors.muted)),
-                    trailing: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.end,
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(ghs(p['price_ghs']),
-                            style: const TextStyle(
-                                fontWeight: FontWeight.w800, fontSize: 15)),
-                        const SizedBox(height: 4),
+                        // Price moved to the subtitle: the old stack of
+                        // price-above-chip was 15px taller than a ListTile
+                        // allows and overflowed — a pre-existing bug, since
+                        // nothing had ever rendered this screen in a test.
+                        // Keeping the chip alone preserves its 44px touch
+                        // target instead of shrinking it to fit.
                         Semantics(
                           button: true,
                           label: inStock
@@ -267,10 +467,32 @@ class _ProductsScreenState extends State<ProductsScreen> {
                             ),
                           ),
                         ),
+                        // Quick edit lost its long-press to selection, so it
+                        // lives here alongside Duplicate.
+                        if (_selected.isEmpty && !_reordering)
+                          PopupMenuButton<String>(
+                            tooltip: 'More for ${p['name']}',
+                            onSelected: (v) {
+                              if (v == 'quick') _quickEdit(p);
+                              if (v == 'duplicate') _duplicate(p);
+                            },
+                            itemBuilder: (_) => const [
+                              PopupMenuItem(
+                                  value: 'quick', child: Text('Quick edit')),
+                              PopupMenuItem(
+                                  value: 'duplicate', child: Text('Duplicate')),
+                            ],
+                          ),
                       ],
                     ),
-                    onTap: () => _editSheet(p),
-                    onLongPress: () => _quickEdit(p),
+                    // Long-press starts a selection. Quick edit moves onto the
+                    // row's own menu, because a merchant reaching for "select
+                    // several" and getting an edit sheet is the more annoying
+                    // of the two mistakes.
+                    onTap: _selected.isEmpty
+                        ? () => _editSheet(p)
+                        : () => _toggleSelected('${p['id']}'),
+                    onLongPress: () => _toggleSelected('${p['id']}'),
                   ),
                 );
               },
