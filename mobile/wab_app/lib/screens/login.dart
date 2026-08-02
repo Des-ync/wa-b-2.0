@@ -1,9 +1,7 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:passkeys/exceptions.dart';
 import 'package:provider/provider.dart';
 
 import '../api/client.dart';
@@ -117,15 +115,19 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       await context.read<Session>().loginViaPasskey();
       // _Gate rebuilds into the main shell.
-    } on PasskeyAuthCancelledException {
-      // Backed out of the OS sheet — no need to scold them for it.
-    } on NoCredentialsAvailableException {
-      _toast('No passkey found for this device. Use another sign-in method.',
-          error: true);
-    } on DomainNotAssociatedException {
-      _toast('Passkeys aren\'t set up for this app yet.', error: true);
     } on ApiException catch (e) {
-      _toast(e.message, error: true);
+      if (e.code == 'link_required') {
+        _toast('Finish setup on the web dashboard first, then log in here.',
+            error: true);
+      } else {
+        _toast(e.message, error: true);
+      }
+    } on PlatformException catch (e) {
+      // 'CANCELED' means the merchant just closed the browser tab — no
+      // need to scold them for it.
+      if (e.code != 'CANCELED') {
+        _toast('Could not sign in with a passkey.', error: true);
+      }
     } catch (_) {
       _toast('Could not sign in with a passkey.', error: true);
     } finally {
@@ -284,18 +286,12 @@ class _LoginScreenState extends State<LoginScreen> {
                   icon: const Icon(Icons.link_rounded, size: 18),
                   label: const Text('Continue with Clerk'),
                 ),
-                // Native passkey login needs an Apple Developer account we
-                // don't have yet on iOS (see docs/MOBILE_SETUP.md) — hidden
-                // there rather than shown disabled, since WhatsApp OTP and
-                // Clerk are both already right above as working options.
-                if (!Platform.isIOS) ...[
-                  const SizedBox(height: 12),
-                  OutlinedButton.icon(
-                    onPressed: _busy ? null : _continueWithPasskey,
-                    icon: const Icon(Icons.fingerprint_rounded, size: 18),
-                    label: const Text('Sign in with a passkey'),
-                  ),
-                ],
+                const SizedBox(height: 12),
+                OutlinedButton.icon(
+                  onPressed: _busy ? null : _continueWithPasskey,
+                  icon: const Icon(Icons.fingerprint_rounded, size: 18),
+                  label: const Text('Sign in with a passkey'),
+                ),
               ] else ...[
                 TextField(
                   controller: _codeCtrl,

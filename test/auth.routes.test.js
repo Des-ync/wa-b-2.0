@@ -1,19 +1,18 @@
 /**
  * src/routes/auth.routes.js is the single highest-risk auth surface in the
- * app: mobile OTP login, Clerk account linking, and WebAuthn/passkey
- * register+login. This file drives it through a real Express app +
- * supertest, mocking only the true collaborators (DB, WhatsApp send, Clerk
- * token verification, WebAuthn ceremony verification) and letting
- * requireAuth/requirePermission run for real so their gating is genuinely
- * exercised.
+ * app: mobile OTP login and Clerk account linking (passkeys are Clerk's own
+ * responsibility now — see public/mobile-clerk-bridge.js — so there's no
+ * WebAuthn ceremony left in this file to test). This file drives it through
+ * a real Express app + supertest, mocking only the true collaborators (DB,
+ * WhatsApp send, Clerk token verification) and letting requireAuth/
+ * requirePermission run for real so their gating is genuinely exercised.
  *
  * ORDERING IS LOAD-BEARING. Several modules destructure their collaborators
  * AT REQUIRE TIME:
  *   - src/middleware/auth.js does `const { query } = require('../config/database')`
  *     and `const { verifyToken } = require('@clerk/backend')`.
  *   - src/routes/auth.routes.js does
- *     `const { verifyClerkSession, ..., issueKey, revokeKey } = require('../middleware/auth')`
- *     and `const { generateRegistrationOptions, ... } = require('@simplewebauthn/server')`.
+ *     `const { verifyClerkSession, ..., issueKey, revokeKey } = require('../middleware/auth')`.
  * Reassigning a mock onto one of these modules' exports AFTER the consuming
  * module has already been required has NO EFFECT on that consumer — it silently
  * keeps whatever function reference it captured at its own require time. So
@@ -32,12 +31,12 @@ const request = require('supertest');
 process.env.CLERK_SECRET_KEY = process.env.CLERK_SECRET_KEY || 'test_clerk_secret_key';
 
 /**
- * Both @clerk/backend and @simplewebauthn/server ship their CJS exports as
- * non-configurable getter-only properties (a common tsup/rollup ESM->CJS
- * output shape) — `mod.someExport = fn` silently no-ops (sloppy mode, no
- * throw) and the real implementation keeps running underneath. The only way
- * to substitute them is to replace the whole module in Node's require
- * cache, keyed by resolved filename, BEFORE anything else requires it.
+ * @clerk/backend ships its CJS exports as a non-configurable getter-only
+ * property (a common tsup/rollup ESM->CJS output shape) — `mod.someExport =
+ * fn` silently no-ops (sloppy mode, no throw) and the real implementation
+ * keeps running underneath. The only way to substitute it is to replace the
+ * whole module in Node's require cache, keyed by resolved filename, BEFORE
+ * anything else requires it.
  */
 function stubModule(id, exportsObj) {
   const resolved = require.resolve(id);
@@ -53,25 +52,6 @@ function stubModule(id, exportsObj) {
 // before middleware/auth.js is ever required.
 let currentVerifyToken = async () => { throw new Error('verifyToken not stubbed for this test'); };
 stubModule('@clerk/backend', { verifyToken: (...args) => currentVerifyToken(...args) });
-
-// --- @simplewebauthn/server ----------------------------------------------
-// Destructured by src/routes/auth.routes.js at ITS require time. Stub
-// before requiring the route file so its bound references point at our
-// swappable stubs, not the real crypto ceremony verifiers.
-let currentGenerateRegistrationOptions = async () => ({ challenge: 'reg-challenge' });
-let currentVerifyRegistrationResponse = async () => ({ verified: true, registrationInfo: null });
-let currentGenerateAuthenticationOptions = async () => ({ challenge: 'login-challenge' });
-let currentVerifyAuthenticationResponse = async () => ({ verified: true, authenticationInfo: { newCounter: 1 } });
-const registrationOptionsCalls = [];
-const verifyRegistrationCalls = [];
-const authenticationOptionsCalls = [];
-const verifyAuthenticationCalls = [];
-stubModule('@simplewebauthn/server', {
-  generateRegistrationOptions: (...args) => { registrationOptionsCalls.push(args[0]); return currentGenerateRegistrationOptions(...args); },
-  verifyRegistrationResponse: (...args) => { verifyRegistrationCalls.push(args[0]); return currentVerifyRegistrationResponse(...args); },
-  generateAuthenticationOptions: (...args) => { authenticationOptionsCalls.push(args[0]); return currentGenerateAuthenticationOptions(...args); },
-  verifyAuthenticationResponse: (...args) => { verifyAuthenticationCalls.push(args[0]); return currentVerifyAuthenticationResponse(...args); }
-});
 
 // --- config/database.query -------------------------------------------------
 // Installed before middleware/auth.js (whose requireAuth/lookupKey/
@@ -134,10 +114,6 @@ function buildApp() {
 }
 
 function resetCalls() {
-  registrationOptionsCalls.length = 0;
-  verifyRegistrationCalls.length = 0;
-  authenticationOptionsCalls.length = 0;
-  verifyAuthenticationCalls.length = 0;
   verifyClerkSessionCalls.length = 0;
   issueKeyCalls.length = 0;
   revokeKeyCalls.length = 0;
@@ -146,10 +122,6 @@ function resetCalls() {
 test.beforeEach(() => {
   resetCalls();
   currentVerifyToken = async () => { throw new Error('verifyToken not stubbed for this test'); };
-  currentGenerateRegistrationOptions = async () => ({ challenge: 'reg-challenge' });
-  currentVerifyRegistrationResponse = async () => ({ verified: true, registrationInfo: null });
-  currentGenerateAuthenticationOptions = async () => ({ challenge: 'login-challenge' });
-  currentVerifyAuthenticationResponse = async () => ({ verified: true, authenticationInfo: { newCounter: 1 } });
   currentVerifyClerkSession = async () => { throw new Error('verifyClerkSession not stubbed for this test'); };
   currentIssueKey = async () => ({ plaintext: 'sk_live_TESTKEY', id: 'key-1' });
   currentRevokeKey = async () => true;
@@ -413,297 +385,6 @@ test('mobile/logout: a Clerk-session caller has nothing to revoke', async () => 
   assert.equal(res.status, 200);
   assert.deepEqual(res.body, { success: true, revoked: false });
   assert.equal(revokeKeyCalls.length, 0, 'must not call revokeKey for a caller with no keyId');
-});
-
-// =========================================================================
-// Passkey: register/options
-// =========================================================================
-
-test('passkey/register/options: a manager-role key is blocked by requirePermission(staff)', async () => {
-  mockTenantKeyQuery([], { role: 'manager' });
-  const res = await request(buildApp())
-    .post('/api/auth/passkey/register/options')
-    .set('Authorization', 'Bearer sk_live_abc');
-  assert.equal(res.status, 403);
-});
-
-test('passkey/register/options: an admin-scoped key is rejected (not a business account)', async () => {
-  mockAdminKeyQuery();
-  const res = await request(buildApp())
-    .post('/api/auth/passkey/register/options')
-    .set('Authorization', 'Bearer sk_admin_abc');
-  assert.equal(res.status, 403);
-  assert.match(res.body.error, /business account/);
-});
-
-test('passkey/register/options: owner role gets options with the configured rpID/rpName', async () => {
-  mockTenantKeyQuery([
-    ['SELECT id, name, owner_name FROM businesses', () => ({ rows: [{ id: 'biz-1', name: 'Kwame Shop', owner_name: 'Kwame' }] })],
-    ['SELECT credential_id, transports FROM webauthn_credentials', () => ({ rows: [] })],
-    ['DELETE FROM webauthn_challenges WHERE expires_at', () => ({ rows: [], rowCount: 0 })],
-    ['INSERT INTO webauthn_challenges', () => ({ rows: [], rowCount: 1 })]
-  ]);
-  const res = await request(buildApp())
-    .post('/api/auth/passkey/register/options')
-    .set('Authorization', 'Bearer sk_live_abc');
-  assert.equal(res.status, 200);
-  assert.equal(res.body.success, true);
-  assert.equal(registrationOptionsCalls.length, 1);
-  assert.equal(registrationOptionsCalls[0].rpID, 'skes.tech');
-  assert.equal(registrationOptionsCalls[0].rpName, 'WA-B');
-});
-
-// =========================================================================
-// Passkey: register/verify
-// =========================================================================
-
-function mockChallengeConsume(businessId) {
-  // NOTE: the real query spans multiple lines ("DELETE FROM
-  // webauthn_challenges\n WHERE challenge = ..."), so the match substring
-  // must not cross that newline — match on the WHERE clause alone, which is
-  // unique to this consume-delete (the other webauthn_challenges DELETE, the
-  // opportunistic sweep, matches on "WHERE expires_at <=" instead).
-  return ['WHERE challenge = $1', () => ({
-    rows: businessId === null ? [] : [{ business_id: businessId }],
-    rowCount: businessId === null ? 0 : 1
-  })];
-}
-
-test('passkey/register/verify: missing challenge or response returns 400', async () => {
-  mockTenantKeyQuery();
-  const res = await request(buildApp())
-    .post('/api/auth/passkey/register/verify')
-    .set('Authorization', 'Bearer sk_live_abc')
-    .send({});
-  assert.equal(res.status, 400);
-});
-
-test('passkey/register/verify: an expired/unknown challenge returns 400', async () => {
-  mockTenantKeyQuery([mockChallengeConsume(null)]);
-  const res = await request(buildApp())
-    .post('/api/auth/passkey/register/verify')
-    .set('Authorization', 'Bearer sk_live_abc')
-    .send({ challenge: 'stale-challenge', response: { id: 'cred-1' } });
-  assert.equal(res.status, 400);
-});
-
-test('passkey/register/verify: a challenge minted for a different business is rejected', async () => {
-  mockTenantKeyQuery([mockChallengeConsume('biz-OTHER')]);
-  const res = await request(buildApp())
-    .post('/api/auth/passkey/register/verify')
-    .set('Authorization', 'Bearer sk_live_abc')
-    .send({ challenge: 'someone-elses-challenge', response: { id: 'cred-1' } });
-  assert.equal(res.status, 400);
-});
-
-test('passkey/register/verify: rejects when verifyRegistrationResponse resolves verified:false', async () => {
-  mockTenantKeyQuery([mockChallengeConsume('biz-1')]);
-  currentVerifyRegistrationResponse = async () => ({ verified: false });
-  const res = await request(buildApp())
-    .post('/api/auth/passkey/register/verify')
-    .set('Authorization', 'Bearer sk_live_abc')
-    .send({ challenge: 'reg-challenge', response: { id: 'cred-1' } });
-  assert.equal(res.status, 400);
-  assert.equal(verifyRegistrationCalls.length, 1);
-  assert.equal(verifyRegistrationCalls[0].expectedRPID, 'skes.tech');
-  assert.deepEqual(verifyRegistrationCalls[0].expectedOrigin, ['https://skes.tech']);
-});
-
-test('passkey/register/verify: a thrown verification error is handled as a 400, not a 500', async () => {
-  mockTenantKeyQuery([mockChallengeConsume('biz-1')]);
-  currentVerifyRegistrationResponse = async () => { throw new Error('bad attestation'); };
-  const res = await request(buildApp())
-    .post('/api/auth/passkey/register/verify')
-    .set('Authorization', 'Bearer sk_live_abc')
-    .send({ challenge: 'reg-challenge', response: { id: 'cred-1' } });
-  assert.equal(res.status, 400);
-});
-
-test('passkey/register/verify: success stores the credential with the caller role', async () => {
-  const inserts = [];
-  mockTenantKeyQuery([
-    mockChallengeConsume('biz-1'),
-    ['INSERT INTO webauthn_credentials', (params) => { inserts.push(params); return { rows: [], rowCount: 1 }; }]
-  ]);
-  currentVerifyRegistrationResponse = async () => ({
-    verified: true,
-    registrationInfo: {
-      credential: { id: 'cred-1', publicKey: Buffer.from('pubkey'), counter: 0, transports: ['internal'] },
-      credentialDeviceType: 'singleDevice',
-      credentialBackedUp: false
-    }
-  });
-  const res = await request(buildApp())
-    .post('/api/auth/passkey/register/verify')
-    .set('Authorization', 'Bearer sk_live_abc')
-    .send({ challenge: 'reg-challenge', response: { id: 'cred-1' }, device_name: 'Kwame iPhone' });
-  assert.equal(res.status, 200);
-  assert.equal(res.body.success, true);
-  assert.equal(inserts.length, 1);
-  assert.equal(inserts[0][0], 'biz-1'); // business_id
-  assert.equal(inserts[0][7], 'owner'); // role stored explicitly from req.auth.role
-});
-
-// =========================================================================
-// Passkey: login/options
-// =========================================================================
-
-test('passkey/login/options: no auth required, returns options with the configured rpID', async () => {
-  currentQuery = makeQueryRouter([
-    ['DELETE FROM webauthn_challenges WHERE expires_at', () => ({ rows: [], rowCount: 0 })],
-    ['INSERT INTO webauthn_challenges', () => ({ rows: [], rowCount: 1 })]
-  ]);
-  const res = await request(buildApp()).post('/api/auth/passkey/login/options').send({});
-  assert.equal(res.status, 200);
-  assert.equal(authenticationOptionsCalls.length, 1);
-  assert.equal(authenticationOptionsCalls[0].rpID, 'skes.tech');
-});
-
-// =========================================================================
-// Passkey: login/verify
-// =========================================================================
-
-test('passkey/login/verify: missing challenge or response.id returns 400', async () => {
-  const res = await request(buildApp()).post('/api/auth/passkey/login/verify').send({ challenge: 'x' });
-  assert.equal(res.status, 400);
-});
-
-test('passkey/login/verify: an expired/unknown challenge returns 400', async () => {
-  currentQuery = makeQueryRouter([mockChallengeConsume(null)]);
-  const res = await request(buildApp())
-    .post('/api/auth/passkey/login/verify')
-    .send({ challenge: 'stale', response: { id: 'cred-1' } });
-  assert.equal(res.status, 400);
-});
-
-test('passkey/login/verify: an unrecognized credential id returns 400', async () => {
-  currentQuery = makeQueryRouter([
-    mockChallengeConsume('biz-1'),
-    ['SELECT * FROM webauthn_credentials WHERE credential_id', () => ({ rows: [] })]
-  ]);
-  const res = await request(buildApp())
-    .post('/api/auth/passkey/login/verify')
-    .send({ challenge: 'login-challenge', response: { id: 'unknown-cred' } });
-  assert.equal(res.status, 400);
-});
-
-test('passkey/login/verify: rejects when verifyAuthenticationResponse resolves verified:false', async () => {
-  currentQuery = makeQueryRouter([
-    mockChallengeConsume('biz-1'),
-    ['SELECT * FROM webauthn_credentials WHERE credential_id', () => ({
-      rows: [{ id: 'row-1', business_id: 'biz-1', credential_id: 'cred-1', public_key: Buffer.from('pk'), counter: 3, transports: null, role: 'owner' }]
-    })]
-  ]);
-  currentVerifyAuthenticationResponse = async () => ({ verified: false });
-  const res = await request(buildApp())
-    .post('/api/auth/passkey/login/verify')
-    .send({ challenge: 'login-challenge', response: { id: 'cred-1' } });
-  assert.equal(res.status, 400);
-  assert.equal(verifyAuthenticationCalls.length, 1);
-  assert.equal(verifyAuthenticationCalls[0].expectedRPID, 'skes.tech');
-  assert.deepEqual(verifyAuthenticationCalls[0].expectedOrigin, ['https://skes.tech']);
-  assert.equal(issueKeyCalls.length, 0);
-});
-
-test('passkey/login/verify: success issues an api_key carrying the credential\'s stored role', async () => {
-  currentQuery = makeQueryRouter([
-    mockChallengeConsume('biz-1'),
-    ['SELECT * FROM webauthn_credentials WHERE credential_id', () => ({
-      rows: [{ id: 'row-1', business_id: 'biz-1', credential_id: 'cred-1', public_key: Buffer.from('pk'), counter: 3, transports: null, role: 'owner' }]
-    })],
-    ['UPDATE webauthn_credentials SET counter', () => ({ rows: [], rowCount: 1 })],
-    ['FROM businesses WHERE id', () => ({ rows: [BUSINESS] })]
-  ]);
-  currentVerifyAuthenticationResponse = async () => ({ verified: true, authenticationInfo: { newCounter: 4 } });
-  const res = await request(buildApp())
-    .post('/api/auth/passkey/login/verify')
-    .send({ challenge: 'login-challenge', response: { id: 'cred-1' }, device_name: 'Kwame iPhone' });
-  assert.equal(res.status, 200);
-  assert.equal(res.body.success, true);
-  assert.equal(res.body.api_key, 'sk_live_TESTKEY');
-  assert.equal(issueKeyCalls.length, 1);
-  assert.equal(issueKeyCalls[0].role, 'owner');
-  assert.equal(issueKeyCalls[0].businessId, 'biz-1');
-});
-
-test('passkey/login/verify: a credential whose business row is gone returns 404', async () => {
-  currentQuery = makeQueryRouter([
-    mockChallengeConsume('biz-1'),
-    ['SELECT * FROM webauthn_credentials WHERE credential_id', () => ({
-      rows: [{ id: 'row-1', business_id: 'biz-1', credential_id: 'cred-1', public_key: Buffer.from('pk'), counter: 3, transports: null, role: 'owner' }]
-    })],
-    ['UPDATE webauthn_credentials SET counter', () => ({ rows: [], rowCount: 1 })],
-    ['FROM businesses WHERE id', () => ({ rows: [] })]
-  ]);
-  const res = await request(buildApp())
-    .post('/api/auth/passkey/login/verify')
-    .send({ challenge: 'login-challenge', response: { id: 'cred-1' } });
-  assert.equal(res.status, 404);
-});
-
-// =========================================================================
-// GET /api/auth/passkey
-// =========================================================================
-
-test('GET /passkey: an admin-scoped key is rejected (not a business account)', async () => {
-  mockAdminKeyQuery();
-  const res = await request(buildApp())
-    .get('/api/auth/passkey')
-    .set('Authorization', 'Bearer sk_admin_abc');
-  assert.equal(res.status, 403);
-});
-
-test('GET /passkey: a manager-role key is blocked by requirePermission(staff)', async () => {
-  mockTenantKeyQuery([], { role: 'manager' });
-  const res = await request(buildApp())
-    .get('/api/auth/passkey')
-    .set('Authorization', 'Bearer sk_live_abc');
-  assert.equal(res.status, 403);
-});
-
-test('GET /passkey: owner role lists this business\'s own passkeys', async () => {
-  mockTenantKeyQuery([
-    ['SELECT id, device_name, created_at, last_used_at', () => ({
-      rows: [{ id: 'pk-1', device_name: 'Kwame iPhone', created_at: new Date(), last_used_at: null }]
-    })]
-  ]);
-  const res = await request(buildApp())
-    .get('/api/auth/passkey')
-    .set('Authorization', 'Bearer sk_live_abc');
-  assert.equal(res.status, 200);
-  assert.equal(res.body.passkeys.length, 1);
-  assert.equal(res.body.passkeys[0].device_name, 'Kwame iPhone');
-});
-
-// =========================================================================
-// DELETE /api/auth/passkey/:id
-// =========================================================================
-
-test('DELETE /passkey/:id: a credential belonging to a different business cannot be deleted (cross-tenant isolation)', async () => {
-  const deleteCalls = [];
-  mockTenantKeyQuery([
-    ['DELETE FROM webauthn_credentials WHERE id', (params) => { deleteCalls.push(params); return { rows: [], rowCount: 0 }; }]
-  ]);
-  const res = await request(buildApp())
-    .delete('/api/auth/passkey/cred-belonging-to-biz-other')
-    .set('Authorization', 'Bearer sk_live_abc');
-  assert.equal(res.status, 404);
-  assert.equal(deleteCalls.length, 1);
-  // The tenant's own business_id was passed as part of the WHERE clause —
-  // the query itself, not just an app-level check, is what scopes the
-  // delete and makes a cross-tenant guess impossible.
-  assert.deepEqual(deleteCalls[0], ['cred-belonging-to-biz-other', 'biz-1']);
-});
-
-test('DELETE /passkey/:id: deleting one\'s own credential succeeds', async () => {
-  mockTenantKeyQuery([
-    ['DELETE FROM webauthn_credentials WHERE id', () => ({ rows: [], rowCount: 1 })]
-  ]);
-  const res = await request(buildApp())
-    .delete('/api/auth/passkey/cred-1')
-    .set('Authorization', 'Bearer sk_live_abc');
-  assert.equal(res.status, 200);
-  assert.equal(res.body.success, true);
 });
 
 /**

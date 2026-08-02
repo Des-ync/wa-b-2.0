@@ -1982,20 +1982,24 @@ async function rotateTeamKey(id) {
   } catch (err) { toast(err.message); }
 }
 
-/* ---------------- Passkeys ---------------- */
+/* ---------------- Passkeys (Clerk-managed) ----------------
+ * Clerk owns the whole WebAuthn ceremony and stores the credential on the
+ * merchant's Clerk account (user.createPasskey() / user.passkeys /
+ * passkey.delete()) — no round-trip through our own API, so there's no
+ * server-side ceremony of ours to keep in sync. */
 
 let PASSKEYS = [];
 
 async function loadPasskeys() {
   const tbody = document.querySelector('#passkeysTable tbody');
   try {
-    const { passkeys } = await api('/auth/passkey');
-    PASSKEYS = passkeys;
-    tbody.innerHTML = passkeys.map(p => `
+    await window.Clerk.load();
+    PASSKEYS = (window.Clerk.user && window.Clerk.user.passkeys) || [];
+    tbody.innerHTML = PASSKEYS.map(p => `
       <tr>
-        <td><strong>${esc(p.device_name || 'Device')}</strong></td>
-        <td class="muted">${new Date(p.created_at).toLocaleDateString()}</td>
-        <td class="muted">${p.last_used_at ? new Date(p.last_used_at).toLocaleString() : 'Never'}</td>
+        <td><strong>${esc(p.name || 'Passkey')}</strong></td>
+        <td class="muted">${new Date(p.createdAt).toLocaleDateString()}</td>
+        <td class="muted">${p.lastUsedAt ? new Date(p.lastUsedAt).toLocaleString() : 'Never'}</td>
         <td style="white-space:nowrap"><button class="btn btn-ghost btn-xs" data-click="revokePasskey" data-args="${dataArgs(p.id)}">Remove</button></td>
       </tr>`).join('') || '<tr><td colspan="4" class="muted">No passkeys yet — add one below.</td></tr>';
   } catch (err) {
@@ -2007,7 +2011,9 @@ async function loadPasskeys() {
 async function revokePasskey(id) {
   if (!confirm('Remove this passkey? That device will need another way to sign in.')) return;
   try {
-    await api('/auth/passkey/' + id, { method: 'DELETE' });
+    const passkey = PASSKEYS.find(p => p.id === id);
+    if (!passkey) throw new Error('Passkey not found');
+    await passkey.delete();
     toast('Passkey removed');
     await loadPasskeys();
   } catch (err) { toast(err.message); }
@@ -2022,15 +2028,18 @@ function guessDeviceName() {
   return 'Browser';
 }
 
+function passkeyErrorMessage(err) {
+  return (err.errors && err.errors[0] && (err.errors[0].longMessage || err.errors[0].message)) || err.message;
+}
+
 /** Shared by both the Team-tab "Add a passkey" button and the post-login
- * prompt — same ceremony, just called from two places. */
+ * prompt — same ceremony, just called from two places. Renamed right after
+ * creation so the list shows a recognizable device instead of Clerk's
+ * generic default name; a failure to rename is purely cosmetic. */
 async function registerPasskeyCeremony() {
-  const { options } = await api('/auth/passkey/register/options', { method: 'POST' });
-  const attResp = await SimpleWebAuthnBrowser.startRegistration({ optionsJSON: options });
-  await api('/auth/passkey/register/verify', {
-    method: 'POST',
-    body: JSON.stringify({ challenge: options.challenge, response: attResp, device_name: guessDeviceName() })
-  });
+  await window.Clerk.load();
+  const passkey = await window.Clerk.user.createPasskey();
+  try { await passkey.update({ name: guessDeviceName() }); } catch (_) { /* cosmetic only */ }
 }
 
 async function addPasskey() {
@@ -2043,7 +2052,7 @@ async function addPasskey() {
   } catch (err) {
     // NotAllowedError covers both "user cancelled" and "timed out" — no
     // need to scold them for backing out of the OS prompt.
-    if (err.name !== 'NotAllowedError') toast('Could not add passkey: ' + err.message);
+    if (err.name !== 'NotAllowedError') toast('Could not add passkey: ' + passkeyErrorMessage(err));
   } finally {
     btn.disabled = false;
   }
@@ -2058,7 +2067,7 @@ async function addPasskeyFromPrompt() {
     toast('Passkey added — you can use it to sign in next time');
     await loadPasskeys();
   } catch (err) {
-    if (err.name !== 'NotAllowedError') toast('Could not add passkey: ' + err.message);
+    if (err.name !== 'NotAllowedError') toast('Could not add passkey: ' + passkeyErrorMessage(err));
   } finally {
     btn.disabled = false;
   }

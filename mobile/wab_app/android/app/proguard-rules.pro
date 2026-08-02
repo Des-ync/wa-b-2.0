@@ -3,21 +3,16 @@
 # Most Flutter plugins (Firebase, local_auth, mobile_scanner, etc.) ship their
 # own consumer-rules.pro bundled in their AAR, which R8 picks up
 # automatically — this file only adds rules for classes that have historically
-# needed them across Flutter/Firebase/Credential Manager projects, as a
-# defensive baseline. VERIFY on a real device after this change: sign-in
-# (Clerk), passkeys, push notifications, barcode scanning, and voice product
-# updates specifically, since these are the reflection/JNI-touching features.
+# needed them across Flutter/Firebase projects, as a defensive baseline.
+# VERIFY on a real device after this change: sign-in (Clerk), push
+# notifications, barcode scanning, and voice product updates specifically,
+# since these are the reflection/JNI-touching features. Passkeys are Clerk's
+# own responsibility now (a WebView, not androidx.credentials) — no rules
+# needed here for them.
 
 # Firebase (some paths use Gson-style reflection for model (de)serialization).
 -keep class com.google.firebase.** { *; }
 -dontwarn com.google.firebase.**
-
-# Credential Manager / Play Services Identity (passkeys — androidx.credentials,
-# used by the `passkeys` plugin under the hood).
--keep class androidx.credentials.** { *; }
--keep class com.google.android.gms.fido.** { *; }
--dontwarn androidx.credentials.**
--dontwarn com.google.android.gms.fido.**
 
 # flutter_local_notifications reflectively references a couple of Gson
 # TypeToken/TypeAdapter classes for scheduled-notification persistence.

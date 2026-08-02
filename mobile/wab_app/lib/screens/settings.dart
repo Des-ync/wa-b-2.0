@@ -1,7 +1,5 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
-import 'package:passkeys/exceptions.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../api/business_api.dart';
@@ -220,20 +218,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 liveRegion: true,
                 child: const Text('Passkey added for this device ✓'))));
       }
-    } on PasskeyAuthCancelledException {
-      // Backed out of the OS sheet — nothing to report.
-    } on DomainNotAssociatedException {
-      if (mounted) {
+    } on PlatformException catch (e) {
+      // 'CANCELED' means the merchant just closed the browser tab — no
+      // need to scold them for it.
+      if (e.code != 'CANCELED' && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
             content: Semantics(
                 liveRegion: true,
-                child: const Text('Passkeys aren\'t set up for this app yet.')),
-            backgroundColor: WabColors.danger));
-      }
-    } on ApiException catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Semantics(liveRegion: true, child: Text(e.message)),
+                child:
+                    const Text('Could not set up a passkey on this device.')),
             backgroundColor: WabColors.danger));
       }
     } catch (_) {
@@ -454,30 +447,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     _sectionTitle('Security'),
                     // Takes effect immediately — not part of the "Save
                     // settings" form submit below.
-                    if (Platform.isIOS) ...[
-                      OutlinedButton.icon(
-                        onPressed: null,
-                        icon: const Icon(Icons.fingerprint_rounded, size: 18),
-                        label: const Text('Passkeys — coming soon on iPhone'),
-                      ),
-                      const SizedBox(height: 6),
-                      const Text(
-                          'Already available on Android. iPhone support needs '
-                          'an Apple Developer account we haven\'t set up yet.',
-                          style:
-                              TextStyle(color: WabColors.muted, fontSize: 13)),
-                    ] else
-                      OutlinedButton.icon(
-                        onPressed: _settingUpPasskey ? null : _setUpPasskey,
-                        icon: _settingUpPasskey
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                    strokeWidth: 2.5, color: WabColors.ink))
-                            : const Icon(Icons.fingerprint_rounded, size: 18),
-                        label: const Text('Set up a passkey for this device'),
-                      ),
+                    OutlinedButton.icon(
+                      onPressed: _settingUpPasskey ? null : _setUpPasskey,
+                      icon: _settingUpPasskey
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2.5, color: WabColors.ink))
+                          : const Icon(Icons.fingerprint_rounded, size: 18),
+                      label: const Text('Set up a passkey for this device'),
+                    ),
                     const SizedBox(height: 28),
                     FilledButton(
                       onPressed: _saving ? null : _save,

@@ -3,11 +3,8 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_web_auth_2/flutter_web_auth_2.dart';
-import 'package:passkeys/authenticator.dart';
-import 'package:passkeys/types.dart';
 
 import '../api/client.dart';
-import '../api/passkey_api.dart';
 import '../services/offline_cache.dart';
 
 enum SessionRole { merchant, admin }
@@ -84,11 +81,16 @@ class Session extends ChangeNotifier {
   /// session token back via a wabapp:// redirect, then exchange it for a
   /// device API key the same way [verifyOtp] does. Throws (ApiException, or
   /// a PlatformException if the user cancels the browser tab) on failure.
-  Future<void> loginViaClerk() async {
+  ///
+  /// [intent] selects what public/mobile-clerk-bridge.js shows first:
+  /// 'signin' (default) mounts the full sign-in form; 'passkey' tries a
+  /// one-tap passkey login before falling back to the same form — see
+  /// [loginViaPasskey].
+  Future<void> loginViaClerk({String intent = 'signin'}) async {
     final deviceName = Platform.isIOS ? 'iPhone' : 'Android';
     final result = await FlutterWebAuth2.authenticate(
       // public/ is served under /wa-b, not the domain root (see server.js).
-      url: '${ApiClient.baseUrl}/wa-b/mobile-clerk-bridge.html',
+      url: '${ApiClient.baseUrl}/wa-b/mobile-clerk-bridge.html?intent=$intent',
       callbackUrlScheme: 'wabapp',
     );
     final token = Uri.parse(result).queryParameters['token'];
@@ -107,46 +109,27 @@ class Session extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Add a passkey for this device to the already-logged-in business. Both
-  /// the options the server generates and the response the platform
-  /// returns are standard WebAuthn JSON, so they pass straight between
-  /// `api/passkey_api.dart` and the `passkeys` package with no reshaping.
-  Future<void> registerPasskey() async {
-    final deviceName = Platform.isIOS ? 'iPhone' : 'Android';
-    final optRes = await api.passkeyRegisterOptions();
-    final options = optRes['options'] as Map<String, dynamic>;
-    final challenge = options['challenge'] as String;
-    final result = await PasskeyAuthenticator()
-        .register(RegisterRequestType.fromJson(options));
-    await api.passkeyRegisterVerify(
-      challenge: challenge,
-      response: result.toJson(),
-      deviceName: deviceName,
-    );
-  }
+  /// Passwordless login via Clerk's own passkey support — same in-app
+  /// browser tab as [loginViaClerk], hinted to try a passkey before showing
+  /// the full form. Throws (ApiException, or a PlatformException if the
+  /// user cancels the browser tab) on failure.
+  Future<void> loginViaPasskey() => loginViaClerk(intent: 'passkey');
 
-  /// Passwordless login: no phone number needed — the OS shows whichever of
-  /// the device's passkeys match our RP ID. Throws (ApiException, or a
-  /// PasskeyAuthCancelledException if the user backs out of the OS sheet)
-  /// on failure.
-  Future<void> loginViaPasskey() async {
-    final deviceName = Platform.isIOS ? 'iPhone' : 'Android';
-    final optRes = await api.passkeyLoginOptions();
-    final options = optRes['options'] as Map<String, dynamic>;
-    final challenge = options['challenge'] as String;
-    final result = await PasskeyAuthenticator()
-        .authenticate(AuthenticateRequestType.fromJson(options));
-    final res = await api.passkeyLoginVerify(
-      challenge: challenge,
-      response: result.toJson(),
-      deviceName: deviceName,
+  /// Add a passkey to this business's Clerk account, via the same in-app
+  /// browser tab as [loginViaClerk] — Clerk owns the whole WebAuthn
+  /// ceremony and stores the credential on the merchant's Clerk account, so
+  /// this is a side operation, not a login: this device's own session
+  /// (however it got signed in) is untouched either way. Throws
+  /// (Exception, or a PlatformException if the user cancels the browser
+  /// tab) on failure.
+  Future<void> registerPasskey() async {
+    final result = await FlutterWebAuth2.authenticate(
+      url: '${ApiClient.baseUrl}/wa-b/mobile-clerk-bridge.html?intent=register',
+      callbackUrlScheme: 'wabapp',
     );
-    api.apiKey = res['api_key'] as String;
-    business = res['business'] as Map<String, dynamic>?;
-    role = SessionRole.merchant;
-    await _storage.write(key: 'api_key', value: api.apiKey);
-    await _storage.write(key: 'role', value: 'merchant');
-    notifyListeners();
+    if (Uri.parse(result).queryParameters['registered'] != '1') {
+      throw Exception('Could not set up a passkey on this device.');
+    }
   }
 
   /// Team login: paste an sk_admin key; validated with a live stats call.

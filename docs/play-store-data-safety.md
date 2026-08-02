@@ -69,11 +69,11 @@ WA-B's servers or to any cloud speech API.
 
 ### Biometric-adjacent (WebAuthn/passkeys, fingerprint/Face unlock)
 
-**Not collected.** Passkey authentication uses the OS-level WebAuthn API —
-the private key and any biometric data never leave the device/secure
-enclave. WA-B's server stores only the passkey's public key and a signature
-counter (see `webauthn_credentials` table), which is standard, non-biometric
-cryptographic material.
+**Not collected.** Passkey authentication runs inside a browser tab against
+Clerk (clerk.skes.tech), not our own servers — the private key and any
+biometric data never leave the device/secure enclave, and the credential
+itself (public key, signature counter) is stored by Clerk on the merchant's
+Clerk account, not in WA-B's own database.
 
 ## Data sharing summary (third parties)
 
@@ -93,8 +93,9 @@ brokers.
   [[project-wab-deployment]] memory).
 - **Data encrypted at rest**: Partially — Postgres itself isn't
   disk-encrypted by this app (relies on the Oracle Cloud VM's underlying
-  storage), but sensitive values (API keys, WebAuthn credentials) are
-  hashed/stored per WebAuthn spec, never in plaintext. On-device: OTP/session
+  storage), but sensitive values (API keys, OTP codes) are hashed, never
+  stored in plaintext. Passkey credentials aren't stored by this app at all
+  — Clerk holds those on its own infrastructure. On-device: OTP/session
   keys are stored via `flutter_secure_storage` (iOS Keychain / Android
   Keystore), not plain SharedPreferences.
 - **Users can request data deletion**: **Resolved (2026-07-30)** —

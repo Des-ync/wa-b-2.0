@@ -8,8 +8,12 @@ user-visible feature changes; patch-level bumps are fine for bug fixes only.
 
 ## Unreleased
 
-- Android release keystore + passkey support wired up (WebAuthn, biometric
-  gate for payouts).
+- Passkey sign-in and setup now go through Clerk's own hosted sign-in (a
+  secure in-app browser tab), not a native `androidx.credentials`/iOS
+  `ASAuthorizationController` WebAuthn ceremony — works on iOS and Android
+  from day one, no Apple Developer account needed. Replaces an
+  Android-release-keystore-dependent native implementation that never
+  shipped. Local biometric gate for payouts is unrelated and unchanged.
 - Security hardening pass: 60s clipboard auto-clear for issued API keys,
   https-only image URLs, offline cache moved to `flutter_secure_storage`.
 - iOS `Info.plist` usage-description strings added for camera/microphone/

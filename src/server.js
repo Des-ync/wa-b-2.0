@@ -1,14 +1,4 @@
 require('dotenv').config();
-// Node <19 only exposes the Web Crypto API globally behind the experimental
-// --experimental-global-webcrypto flag (stable/default since Node 19).
-// @simplewebauthn/server requires globalThis.crypto to generate challenges
-// and verify signatures — without this, every passkey call (web dashboard
-// registration, mobile app login) throws "MissingWebCrypto" and passkeys
-// never work at all on an unflagged Node 18 process. A no-op once the
-// runtime already provides it natively.
-if (!globalThis.crypto) {
-  globalThis.crypto = require('node:crypto').webcrypto;
-}
 const path = require('path');
 const fs = require('fs');
 const express = require('express');
@@ -100,9 +90,8 @@ app.use(requestIdMiddleware);
 // worth keeping on its own merits, and `style-src-attr` is stated explicitly
 // so that the 819 `style="…"` attributes do not depend on style-src's value.
 //
-// 'https:' stays because Clerk and the WebAuthn helper load from CDNs; the
-// policy still blocks http: script injection, plugin embedding and base-tag
-// hijacking.
+// 'https:' stays because Clerk loads from a CDN; the policy still blocks
+// http: script injection, plugin embedding and base-tag hijacking.
 app.use(helmet({
   contentSecurityPolicy: {
     useDefaults: true,
@@ -337,39 +326,6 @@ app.get('/sitemap.xml', (req, res) => {
   res.type('application/xml').send(
     `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>`
   );
-});
-
-// Native passkey domain association files. Both specs require these at the
-// true domain root (never under /wa-b, unlike everything else this app
-// serves) — Apple/Android won't look anywhere else.
-//
-// TODO(LIVE): TEAMID_PLACEHOLDER needs the real 10-character Apple Developer
-// Team ID once this project has an Apple Developer account (it doesn't yet —
-// see docs/MOBILE_SETUP.md). Never guess a real Team ID.
-app.get('/.well-known/apple-app-site-association', (req, res) => {
-  res.set('Content-Type', 'application/json');
-  res.json({
-    webcredentials: { apps: ['TEAMID_PLACEHOLDER.com.wab.wabApp'] }
-  });
-});
-// Fingerprint of mobile/wab_app/android/upload-keystore.jks (alias "upload",
-// generated 2026-07-24) — public by design, this file only exists to be
-// served here. If the keystore is ever rotated, regenerate with
-// `keytool -list -v -keystore upload-keystore.jks -alias upload` and update
-// this value (and WEBAUTHN_ORIGINS's android:apk-key-hash: entry — see
-// .env.example).
-app.get('/.well-known/assetlinks.json', (req, res) => {
-  res.set('Content-Type', 'application/json');
-  res.json([
-    {
-      relation: ['delegate_permission/common.handle_all_urls', 'delegate_permission/common.get_login_creds'],
-      target: {
-        namespace: 'android_app',
-        package_name: 'com.wab.wab_app',
-        sha256_cert_fingerprints: ['6A:8F:24:7A:E7:06:1D:3F:44:DF:18:67:AD:83:D5:FC:D7:5B:0F:B7:8B:16:EC:57:F5:C2:20:D9:ED:A5:80:CE']
-      }
-    }
-  ]);
 });
 
 // Marketing site (public/) — mounted at /wa-b so this app can live alongside

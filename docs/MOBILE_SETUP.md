@@ -34,29 +34,31 @@ localhost.)
 
 ## Passkeys
 
-Merchants can add a passkey (Settings → Security, or "Sign in with a passkey"
-on login) instead of the WhatsApp OTP each time. Same account either way —
-a passkey added on the web dashboard or in the app is tied to the business's
-`whatsapp_number`, not the device.
+Passkeys are entirely Clerk's responsibility, not our own — the app opens
+`public/mobile-clerk-bridge.html` in a secure in-app browser tab (same
+mechanism as "Continue with Clerk") and lets Clerk's own JS SDK run the whole
+WebAuthn ceremony (`user.createPasskey()` to add one, from Settings →
+Security; `signIn.authenticateWithPasskey()` to sign in with one, from
+"Sign in with a passkey" on login). We never see the credential — Clerk
+stores it on the merchant's Clerk account. See `public/mobile-clerk-bridge.js`
+for the `?intent=` handling and `mobile/wab_app/lib/state/session.dart`'s
+`loginViaPasskey`/`registerPasskey`.
 
-- **Android**: works today. `mobile/wab_app/android/upload-keystore.jks` is
-  the real release signing keystore (generated 2026-07-24, git-ignored —
-  make sure it's backed up outside this repo; losing it breaks future Play
-  Store updates under this app identity). Its SHA-256 fingerprint is wired
-  into `src/server.js`'s `/.well-known/assetlinks.json` handler and into
-  production's `WEBAUTHN_ORIGINS`. If the keystore is ever rotated, both
-  need updating together (see the comment above that handler).
-- **iOS**: still blocked. Passkeys need the **Associated Domains**
-  entitlement (already declared in `ios/Runner/Runner.entitlements` —
-  `webcredentials:skes.tech`) plus a real Apple Developer Team ID in
-  `src/server.js`'s `/.well-known/apple-app-site-association` handler, which
-  needs the same Apple Developer Program membership ($99/yr) as iOS push
-  (see below). Until then the passkey button is hidden on the login screen
-  and shown disabled ("coming soon") in Settings — `PasskeyAuthenticator`
-  would otherwise throw `DomainNotAssociatedException`.
+Because it's browser-based (the same "Use passkey instead" flow that already
+works on the web dashboard's login page), it works on **iOS and Android
+today** — no Apple Developer Team ID, Associated Domains entitlement, or
+Android digital-asset-links file needed; those were only required for the
+earlier native-OS-passkey approach (`androidx.credentials` / iOS
+`ASAuthorizationController`) this app used before, which this replaced.
+
+One consequence of routing through Clerk: passkeys are only available to a
+business that's already linked to a Clerk account (the same `link_required`
+gate "Continue with Clerk" already has) — a merchant who has only ever used
+WhatsApp OTP won't see a working passkey option until they link on the web
+dashboard first.
+
 - **Testing on the iOS Simulator**: passkeys need Face ID "enrolled" first —
-  Simulator menu → Features → Face ID → Enrolled — even once the Apple
-  Developer side is sorted out.
+  Simulator menu → Features → Face ID → Enrolled.
 
 ## Team / admin login
 
