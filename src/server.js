@@ -1,4 +1,14 @@
 require('dotenv').config();
+// Node <19 only exposes the Web Crypto API globally behind the experimental
+// --experimental-global-webcrypto flag (stable/default since Node 19).
+// @simplewebauthn/server requires globalThis.crypto to generate challenges
+// and verify signatures — without this, every passkey call (web dashboard
+// registration, mobile app login) throws "MissingWebCrypto" and passkeys
+// never work at all on an unflagged Node 18 process. A no-op once the
+// runtime already provides it natively.
+if (!globalThis.crypto) {
+  globalThis.crypto = require('node:crypto').webcrypto;
+}
 const path = require('path');
 const fs = require('fs');
 const express = require('express');
