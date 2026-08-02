@@ -220,6 +220,71 @@ function copyNameFor(originalName, takenNames) {
  * Declared before `/:id` routes that could shadow it, and wrapped in one
  * transaction so a copy never lands with half its options.
  */
+/** Bounds the statement; a catalogue larger than this is reordered by CSV. */
+const REORDER_MAX = 200;
+
+/**
+ * POST /api/products/reorder — { business_id?, order: [product_id, ...] }
+ *
+ * Sets each product's `sort_order` to its index in the list.
+ *
+ * This is worth having because both customer-facing surfaces already honour
+ * the column — the storefront orders by `featured DESC, sort_order ASC, name`,
+ * and the bot's catalogue by `featured DESC, popularity DESC, category
+ * sort_order, category, p.sort_order, name`. Checked before building, not
+ * assumed: a reorder that only rearranged the merchant's own admin table would
+ * be close to pointless.
+ *
+ * Note what that second ordering means in practice: in the bot, a merchant's
+ * hand-picked order sits BELOW featured and below how often something sells.
+ * Dragging an item to the top does not necessarily put it first there. The UI
+ * says so, because "I moved it and the bot still shows it fourth" is otherwise
+ * a support conversation.
+ *
+ * Declared before `/:id`-shaped routes so "reorder" is never read as an id.
+ */
+router.post('/reorder', requirePermission('products', 'write'), async (req, res) => {
+  try {
+    const businessId = req.body?.business_id || req.auth?.businessId;
+    if (!businessId) {
+      return respond.invalid(req, res, 'business_id required', { business_id: 'is required' });
+    }
+    if (tenantBlocksBusinessId(req, businessId)) return respond.forbidden(req, res);
+
+    const order = Array.isArray(req.body?.order) ? req.body.order.filter(Boolean) : null;
+    if (!order || !order.length) {
+      return respond.invalid(req, res, 'order must be a non-empty array of product ids',
+        { order: 'is required' });
+    }
+    if (order.length > REORDER_MAX) {
+      return respond.invalid(req, res,
+        `Too many products at once (max ${REORDER_MAX}).`, { order: 'too many' });
+    }
+
+    // All-or-nothing: a failure partway through would leave the catalogue in
+    // an order the merchant never chose and cannot easily reconstruct.
+    //
+    // Scoped by business_id in the UPDATE itself, so an id belonging to another
+    // tenant simply matches no row rather than being trusted for appearing in
+    // the list.
+    const updated = await transaction(async client => {
+      let n = 0;
+      for (let i = 0; i < order.length; i++) {
+        const r = await client.query(
+          'UPDATE products SET sort_order = $3 WHERE business_id = $1 AND id = $2',
+          [businessId, order[i], i]
+        );
+        n += r.rowCount;
+      }
+      return n;
+    });
+
+    return respond.ok(req, res, { updated, requested: order.length });
+  } catch (err) {
+    return respond.failInternal(req, res, logger, 'POST /products/reorder', err);
+  }
+});
+
 router.post('/:id/duplicate', requirePermission('products', 'write'), async (req, res) => {
   try {
     const existing = await query('SELECT * FROM products WHERE id = $1', [req.params.id]);

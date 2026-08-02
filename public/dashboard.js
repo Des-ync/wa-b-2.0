@@ -368,8 +368,13 @@ async function loadProducts() {
       (p.available_from || p.available_to) ? `<span class="pill pill-warn">${esc(p.available_from || '00:00')}-${esc(p.available_to || '24:00')}</span>` : ''
     ].filter(Boolean).join(' ') || '<span class="muted" style="font-size:12px">—</span>';
     return `
-    <tr data-id="${p.id}">
+    <tr data-id="${p.id}" draggable="true">
       <td><input type="checkbox" class="p-select" data-change="onProductSelectionChange" data-el data-args="${dataArgs(p.id)}" aria-label="Select ${esc(p.name)}" ${SELECTED_PRODUCTS.has(p.id) ? 'checked' : ''} /></td>
+      <td class="p-order">
+        <span class="drag-handle" aria-hidden="true" title="Drag to reorder">⠿</span>
+        <button class="btn btn-ghost btn-xs" data-click="moveProduct" data-args="${dataArgs(p.id, -1)}" aria-label="Move ${esc(p.name)} up">↑</button>
+        <button class="btn btn-ghost btn-xs" data-click="moveProduct" data-args="${dataArgs(p.id, 1)}" aria-label="Move ${esc(p.name)} down">↓</button>
+      </td>
       <td>${p.image_url ? `<img src="${esc(p.image_url)}" alt="${esc(p.name || 'Product photo')}" class="thumb" data-on-error="hide" />` : '<span class="muted" style="font-size:12px">—</span>'}</td>
       <td><strong>${esc(p.name)}</strong></td>
       <td class="muted">${esc(p.description || '')}</td>
@@ -2316,3 +2321,97 @@ async function duplicateProduct(id, name) {
     await loadProducts();
   } catch (err) { toast(err.message); }
 }
+
+
+// ─── catalogue order ───────────────────────────────────────────────────────
+//
+// `sort_order` is honoured by both customer-facing surfaces, which is why this
+// is worth a UI at all: the storefront orders by `featured DESC, sort_order
+// ASC, name`, and the bot's catalogue by `featured DESC, popularity DESC,
+// category order, category, sort_order, name`.
+//
+// That second one matters for expectations: in the BOT a merchant's chosen
+// order sits below featured and below how often something sells, so dragging
+// an item to the top does not necessarily put it first there. The hint under
+// the table says so.
+//
+// Two ways to reorder, deliberately. Drag is the obvious one with a mouse;
+// HTML5 drag-and-drop does not work on touch, and this dashboard is used on
+// phones. The arrow buttons cover touch AND make reordering reachable from a
+// keyboard, which drag alone never is.
+
+let DRAG_PRODUCT_ID = null;
+
+function currentProductOrder() {
+  return [...document.querySelectorAll('#productTable tbody tr[data-id]')]
+    .map(tr => tr.dataset.id);
+}
+
+/** Persists whatever order the rows are currently in. */
+async function saveProductOrder() {
+  const order = currentProductOrder();
+  if (!order.length) return;
+  try {
+    await api('/products/reorder', {
+      method: 'POST',
+      body: JSON.stringify({ business_id: BIZ.id, order })
+    });
+    toast('Order saved');
+  } catch (err) {
+    toast(err.message);
+    // Re-read from the server rather than leaving the rows in an order that
+    // was never stored — otherwise the screen quietly disagrees with reality.
+    await loadProducts();
+  }
+}
+
+/** Moves one product up (-1) or down (+1) and saves. */
+async function moveProduct(id, direction) {
+  const tbody = document.querySelector('#productTable tbody');
+  const row = tbody && tbody.querySelector(`tr[data-id="${CSS.escape(id)}"]`);
+  if (!row) return;
+  const sibling = direction < 0 ? row.previousElementSibling : row.nextElementSibling;
+  // Already at the end: do nothing rather than sending a no-op request.
+  if (!sibling || !sibling.dataset.id) return;
+  if (direction < 0) tbody.insertBefore(row, sibling);
+  else tbody.insertBefore(sibling, row);
+  await saveProductOrder();
+}
+
+document.addEventListener('dragstart', ev => {
+  const row = ev.target instanceof Element && ev.target.closest('#productTable tbody tr[data-id]');
+  if (!row) return;
+  DRAG_PRODUCT_ID = row.dataset.id;
+  row.classList.add('dragging');
+  ev.dataTransfer.effectAllowed = 'move';
+  // Firefox will not start a drag unless something is set.
+  try { ev.dataTransfer.setData('text/plain', row.dataset.id); } catch (e) { /* ignore */ }
+});
+
+document.addEventListener('dragover', ev => {
+  if (!DRAG_PRODUCT_ID) return;
+  const over = ev.target instanceof Element && ev.target.closest('#productTable tbody tr[data-id]');
+  if (!over || over.dataset.id === DRAG_PRODUCT_ID) return;
+  ev.preventDefault();
+  const tbody = over.parentNode;
+  const dragged = tbody.querySelector(`tr[data-id="${CSS.escape(DRAG_PRODUCT_ID)}"]`);
+  if (!dragged) return;
+  // Insert before or after depending on which half of the row we are over, so
+  // the drop lands where the pointer actually is.
+  const box = over.getBoundingClientRect();
+  const after = (ev.clientY - box.top) > box.height / 2;
+  tbody.insertBefore(dragged, after ? over.nextSibling : over);
+});
+
+document.addEventListener('drop', ev => {
+  if (!DRAG_PRODUCT_ID) return;
+  ev.preventDefault();
+});
+
+document.addEventListener('dragend', async () => {
+  if (!DRAG_PRODUCT_ID) return;
+  const row = document.querySelector(`#productTable tr[data-id="${CSS.escape(DRAG_PRODUCT_ID)}"]`);
+  if (row) row.classList.remove('dragging');
+  DRAG_PRODUCT_ID = null;
+  await saveProductOrder();
+});

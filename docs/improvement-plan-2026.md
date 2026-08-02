@@ -1876,3 +1876,55 @@ proving the `dataArgs()` escaping still holds.
 ### Not done
 
 Duplicate on the Flutter app.
+
+
+---
+
+## 33. Catalogue ordering
+
+`POST /api/products/reorder`, drag-and-drop rows, plus ↑/↓ buttons.
+
+### Checked first: does anything customer-facing honour it?
+
+Yes, and this was worth confirming before building — a reorder that rearranged only the
+merchant's own admin table would be close to pointless:
+
+- storefront: `ORDER BY featured DESC, sort_order ASC, name ASC`
+- bot catalogue: `ORDER BY featured DESC, popularity DESC, category order, category,
+  p.sort_order ASC, name`
+
+Tests now pin both, so a future change to either `ORDER BY` cannot quietly make this
+feature cosmetic.
+
+### The expectation that needed saying out loud
+
+Note where `p.sort_order` sits in that second list: **below featured and below how often
+something sells**. Dragging an item to the top does not necessarily put it first in
+WhatsApp. That is not a defect — popularity is a good default — but "I moved it and the
+bot still shows it fourth" is a support conversation waiting to happen, so the hint under
+the table says it plainly. A test asserts the hint matches the query it describes.
+
+### Two ways to reorder, on purpose
+
+Drag is the obvious gesture with a mouse. **HTML5 drag-and-drop does not work on touch**,
+and this dashboard is used on phones — so the ↑/↓ buttons are not a nicety, they are the
+only way most merchants will actually do this. They also make reordering reachable from a
+keyboard, which drag alone never is, and each carries an `aria-label` naming the product
+it moves.
+
+Both paths converge on one function that builds the request **from the DOM after the
+move**, rather than from an assumption about where the row landed.
+
+### Verified with data
+
+Through `tools/browser-fixture`: moving the second row up inverts the DOM to `[p2, p1]`,
+the posted list **matches the DOM exactly**, and moving the top row up posts nothing
+rather than sending a no-op request. Zero inline handlers, zero unresolved, zero errors,
+and bulk edit still issues exactly one PATCH.
+
+A failed save reloads from the server rather than leaving rows in an order that was never
+stored — otherwise the screen quietly disagrees with reality.
+
+### Not done
+
+Reordering on the Flutter app.

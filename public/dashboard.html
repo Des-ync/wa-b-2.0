@@ -272,10 +272,15 @@
       </div>
       <div class="scroll-x">
         <table id="productTable">
-          <thead><tr><th><input type="checkbox" id="pSelectAll" data-change="toggleSelectAllProducts" data-el aria-label="Select all products" /></th><th>Image</th><th>Name</th><th>Description</th><th>Price (GH₵)</th><th>Category</th><th>Stock</th><th>Status</th><th></th></tr></thead>
-          <tbody><tr><td colspan="9" class="muted">Loading…</td></tr></tbody>
+          <thead><tr><th><input type="checkbox" id="pSelectAll" data-change="toggleSelectAllProducts" data-el aria-label="Select all products" /></th><th><span class="sr-only">Order</span></th><th>Image</th><th>Name</th><th>Description</th><th>Price (GH₵)</th><th>Category</th><th>Stock</th><th>Status</th><th></th></tr></thead>
+          <tbody><tr><td colspan="10" class="muted">Loading…</td></tr></tbody>
         </table>
       </div>
+      <p class="muted order-hint">
+        Drag a row, or use ↑ ↓, to set the order customers see. Featured products
+        still come first — and in WhatsApp, what sells most is shown before your
+        chosen order.
+      </p>
       <div style="margin-top:20px;border-top:1px solid var(--line);padding-top:16px">
         <div class="row-form product-form">
           <div><label for="pName">Name</label><input id="pName" placeholder="Jollof Rice (Large)" /></div>

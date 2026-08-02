@@ -115,5 +115,34 @@
     result.bulk.barHiddenAfter = document.getElementById('bulkBar').style.display === 'none';
   }
 
+  // 7. Ordering. The risk here is posting a list that does not match what the
+  //    merchant sees — the request must be built FROM the DOM after the move,
+  //    not from an assumption about where the row went.
+  result.order = {};
+  {
+    const rows = () => [...document.querySelectorAll('#productTable tbody tr[data-id]')]
+      .map(tr => tr.dataset.id);
+    result.order.before = rows();
+
+    const posted = [];
+    api = async function (path, opts) {
+      if (path === '/products/reorder') posted.push(JSON.parse(opts.body).order);
+      if (path.indexOf('/products?') === 0) return { products: PRODUCTS };
+      return { updated: 2 };
+    };
+    window.toast = function () {};
+
+    // Move the second product up; the DOM order must invert.
+    await moveProduct(result.order.before[1], -1);
+    result.order.afterMoveUp = rows();
+    result.order.posted = posted[0];
+    result.order.postedMatchesDom = JSON.stringify(posted[0]) === JSON.stringify(rows());
+
+    // Moving the first row up again is a no-op and must not post anything.
+    const countBefore = posted.length;
+    await moveProduct(rows()[0], -1);
+    result.order.noOpAtTopPosts = posted.length - countBefore;
+  }
+
   document.getElementById('out').textContent = JSON.stringify(result, null, 1);
 })();
