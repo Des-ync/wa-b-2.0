@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+
 import '../api/client.dart';
+import '../api/upload_api.dart';
 import '../services/offline_cache.dart';
 import '../services/offline_queue.dart';
 import '../state/session.dart';
 import '../theme.dart';
+import 'product_photo_picker.dart';
 
 /// Opens the compact quick-editor sheet for a single product: out-of-stock
 /// toggle, price, and image URL — the three fields a merchant needs to touch
@@ -25,7 +28,13 @@ Future<bool?> showProductQuickEdit(
 
 class ProductQuickEditSheet extends StatefulWidget {
   final Map<String, dynamic> product;
-  const ProductQuickEditSheet({super.key, required this.product});
+
+  /// Overridden in tests. `image_picker` needs a platform channel, which a
+  /// widget test does not have.
+  final ProductPhotoPicker? photoPicker;
+
+  const ProductQuickEditSheet(
+      {super.key, required this.product, this.photoPicker});
 
   @override
   State<ProductQuickEditSheet> createState() => _ProductQuickEditSheetState();
@@ -38,12 +47,70 @@ class _ProductQuickEditSheetState extends State<ProductQuickEditSheet> {
       TextEditingController(text: widget.product['image_url']?.toString());
   late bool _inStock = widget.product['in_stock'] != false;
   bool _busy = false;
+  bool _uploading = false;
+
+  /// Injectable so the sheet can be tested without a platform channel.
+  ProductPhotoPicker get _picker => widget.photoPicker ?? ProductPhotoPicker();
 
   @override
   void dispose() {
     _price.dispose();
     _imageUrl.dispose();
     super.dispose();
+  }
+
+  /// Take or choose a photo, shrink it, upload it, and point the product at it.
+  ///
+  /// The URL is only put in the field after the upload succeeds — a failed
+  /// upload must not leave the merchant looking at a path to a file that was
+  /// never stored.
+  Future<void> _pickPhoto() async {
+    final source = await showPhotoSourceSheet(context);
+    if (source == null || !mounted) return;
+
+    final session = context.read<Session>();
+    final businessId = session.businessId;
+    if (businessId == null) return;
+
+    setState(() => _uploading = true);
+    try {
+      final picked = await _picker.pick(source);
+      // A cancelled pick is a normal outcome, not a failure to report.
+      if (picked == null) return;
+
+      final url = await session.api.uploadProductImage(
+        businessId,
+        picked.bytes,
+        contentType: picked.contentType,
+      );
+      if (!mounted) return;
+      setState(() => _imageUrl.text = url);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Semantics(
+            liveRegion: true,
+            child: Text('Photo added (${(picked.bytes.length / 1024).round()} KB)')),
+        backgroundColor: WabColors.accentInk,
+      ));
+    } on ApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Semantics(liveRegion: true, child: Text(e.message)),
+            backgroundColor: WabColors.danger));
+      }
+    } catch (e) {
+      // A denied camera permission surfaces here as a PlatformException, and
+      // reads as gibberish if shown raw.
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Semantics(
+                liveRegion: true,
+                child: const Text(
+                    'Could not open the camera or gallery. Check the app\'s permissions.')),
+            backgroundColor: WabColors.danger));
+      }
+    } finally {
+      if (mounted) setState(() => _uploading = false);
+    }
   }
 
   Future<void> _save() async {
@@ -100,22 +167,14 @@ class _ProductQuickEditSheetState extends State<ProductQuickEditSheet> {
     }
   }
 
-  /// Only render a thumbnail for an absolute `https` URL.
-  ///
-  /// `image_url` is stored data that any teammate with product-edit access
-  /// (or a catalog import) can set, and rendering it makes this device issue
-  /// an outbound GET to whatever host it names. Requiring https rules out
-  /// cleartext fetches and plain-`http` probes of hosts on the merchant's own
-  /// network; the field is meant to hold a public image link.
-  static bool _isRenderableImageUrl(String value) {
-    final uri = Uri.tryParse(value);
-    return uri != null && uri.isAbsolute && uri.scheme == 'https' && uri.host.isNotEmpty;
-  }
 
   @override
   Widget build(BuildContext context) {
     final rawImageUrl = _imageUrl.text.trim();
-    final imageUrl = _isRenderableImageUrl(rawImageUrl) ? rawImageUrl : '';
+    // resolveImageUrl turns our own relative `/wa-b/uploads/…` into an
+    // absolute URL against the API host, and still refuses any non-https
+    // absolute link — see api/upload_api.dart for why that rule exists.
+    final imageUrl = resolveImageUrl(rawImageUrl);
     return Padding(
       padding: EdgeInsets.fromLTRB(
           24, 24, 24, MediaQuery.of(context).viewInsets.bottom + 24),
@@ -151,14 +210,44 @@ class _ProductQuickEditSheetState extends State<ProductQuickEditSheet> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
-                  child: TextField(
-                    controller: _imageUrl,
-                    onChanged: (_) => setState(() {}),
-                    decoration: const InputDecoration(
-                        labelText: 'Photo URL',
-                        hintText: 'https://…',
-                        helperText:
-                            'Paste a link — there is no in-app photo upload yet'),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Photo',
+                          style: TextStyle(
+                              fontSize: 12, color: WabColors.muted)),
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          OutlinedButton.icon(
+                            onPressed: _uploading ? null : _pickPhoto,
+                            icon: _uploading
+                                ? const SizedBox(
+                                    width: 14,
+                                    height: 14,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2))
+                                : const Icon(Icons.photo_camera_rounded,
+                                    size: 17),
+                            label: Text(_uploading
+                                ? 'Uploading…'
+                                : (rawImageUrl.isEmpty
+                                    ? 'Add photo'
+                                    : 'Replace photo')),
+                          ),
+                          if (rawImageUrl.isNotEmpty)
+                            TextButton(
+                              onPressed: _uploading
+                                  ? null
+                                  : () => setState(() => _imageUrl.clear()),
+                              child: const Text('Remove',
+                                  style: TextStyle(color: WabColors.danger)),
+                            ),
+                        ],
+                      ),
+                    ],
                   ),
                 ),
                 if (imageUrl.isNotEmpty) ...[

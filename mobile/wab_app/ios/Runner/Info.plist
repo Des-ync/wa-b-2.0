@@ -29,7 +29,9 @@
 	<key>NSFaceIDUsageDescription</key>
 	<string>WA-B uses Face ID to confirm it's you before showing payouts and settlement details.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>WA-B uses the camera to scan product barcodes.</string>
+	<string>WA-B uses the camera to scan product barcodes and to take photos of your products.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>WA-B lets you choose a saved photo to show with a product in your catalog.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>WA-B uses the microphone so you can update products by voice.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>

@@ -1699,7 +1699,59 @@ recommended production setting.
 
 ### Not done
 
-**The Flutter app still pastes a URL.** It needs `image_picker`, camera and gallery
-permissions, and the same resize step — a separate change. The dashboard is responsive and
-`<input type="file">` opens the camera on Android, so a merchant on a phone can use this
-today through the browser; the native app is the better experience and does not have it yet.
+Nothing — the Flutter half followed in §30.
+
+
+---
+
+## 30. Photo upload in the Flutter app
+
+The native app's quick-edit sheet had a "Photo URL" field whose helper text read *"Paste a
+link — there is no in-app photo upload yet"*. That is now a camera/gallery button.
+
+### The resize happens in the picker, natively
+
+`image_picker`'s `maxWidth`/`maxHeight`/`imageQuality` resize on the platform side, so the
+file shrinks **before** it is read into memory or sent. On a low-end phone that matters
+twice over: the merchant's data bill, and never materialising a multi-megapixel bitmap.
+The numbers (1200px, q82) match the web dashboard's canvas resize, so a photo looks the
+same whichever surface uploaded it — and no second image library was needed.
+
+`ApiClient.postBytes` sends the raw body with a 90s timeout; the existing 25s is for API
+calls, not uploads on a slow connection.
+
+### The integration bug this would have had
+
+The server returns a **relative** path — `/wa-b/uploads/<biz>/<file>.jpg` — deliberately,
+so the stored value survives a domain change and works directly as a `src` on the web.
+
+But the app's existing thumbnail guard only rendered **absolute https** URLs, so every
+uploaded photo would have been silently blank in the app while looking fine on the web.
+
+`resolveImageUrl()` now resolves our own site-absolute paths against `ApiClient.baseUrl`
+and keeps the https rule for anything already absolute. That rule is not incidental:
+`image_url` is stored data any teammate with product-edit access — or a catalog CSV import
+— can set, and rendering it makes the device fetch whatever host it names. A test also
+covers `//evil.test/x.png`, which starts with `/` but is another host wearing a path's
+clothes.
+
+### Platform configuration
+
+- **Android: no `CAMERA` permission added, on purpose.** `image_picker` delegates to the
+  camera app by intent. Declaring the permission would *add* a runtime-request
+  requirement rather than remove one.
+- **iOS**: `NSPhotoLibraryUsageDescription` added, and `NSCameraUsageDescription` reworded
+  — it said "to scan product barcodes", which is no longer the whole truth, and Apple
+  requires the string to describe actual use.
+
+### Verified
+
+195 mobile tests (13 new), analyzer unchanged at its 10 pre-existing, and
+`flutter build apk` succeeds — a new native plugin can break the Android build in ways no
+Dart test would show.
+
+Tests cover the shapes that fail quietly: a cancelled pick reports nothing (backing out of
+the camera is a normal outcome, not an error), a failed upload leaves the product without a
+photo rather than pointing at a file that was never stored, and a PNG is declared as PNG
+rather than blindly as JPEG — the server cross-checks the header against the magic bytes
+and refuses a mismatch.

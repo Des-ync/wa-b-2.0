@@ -94,6 +94,29 @@ class ApiClient {
           {Map<String, dynamic>? query}) =>
       _send(() => _client.delete(_uri(path, query), headers: _headers));
 
+  /// A POST whose body is raw BYTES rather than JSON — currently the product
+  /// photo upload.
+  ///
+  /// The server reads a Buffer and identifies the image by its magic bytes, so
+  /// neither side needs a multipart parser. [contentType] replaces the usual
+  /// `application/json`, and the timeout is longer than the default 25s
+  /// because this is an upload over a connection that may be slow even after
+  /// the picker has shrunk the photo.
+  Future<Map<String, dynamic>> postBytes(
+    String path,
+    List<int> bytes, {
+    required String contentType,
+    Map<String, dynamic>? query,
+    Duration timeout = const Duration(seconds: 90),
+  }) {
+    final headers = Map<String, String>.from(_headers)
+      ..['Content-Type'] = contentType;
+    return _send(
+      () => _client.post(_uri(path, query), headers: headers, body: bytes),
+      timeout: timeout,
+    );
+  }
+
   /// A GET whose body is a FILE, not an envelope — currently only the data
   /// export, which the server sends as a JSON attachment.
   ///
@@ -131,10 +154,11 @@ class ApiClient {
   }
 
   Future<Map<String, dynamic>> _send(
-      Future<http.Response> Function() run) async {
+      Future<http.Response> Function() run,
+      {Duration timeout = const Duration(seconds: 25)}) async {
     http.Response res;
     try {
-      res = await run().timeout(const Duration(seconds: 25));
+      res = await run().timeout(timeout);
     } on SocketException {
       throw ApiException(
           0, 'No connection. Check your internet and try again.');
