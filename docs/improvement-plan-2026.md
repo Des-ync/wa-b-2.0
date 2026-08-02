@@ -1986,3 +1986,53 @@ asserts that specifically.
 ### Not done
 
 The board on the Flutter app.
+
+
+---
+
+## 35. Packing slip — and a printing bug it uncovered
+
+### The bug found first
+
+`printKitchenTicket` already existed, and triggered printing with an inline
+`<script>window.print()</script>` inside a `document.write`n popup. That has been
+**broken since the CSP work**: a document created by `window.open('')` + `document.write`
+inherits the opener's CSP, and `script-src` no longer allows inline. The window appeared
+with the right ticket and simply never printed — the merchant had to reach for Ctrl+P and
+would have no idea why.
+
+Proven rather than reasoned about: a written child document was given an inline script and
+it did not run, and `/api/csp-report` named it —
+`script-src-elem | blocked: inline | page: about`. That is the reporting endpoint from §24
+earning its keep for the third time.
+
+Printing is now triggered from the **opener** — `win.onload = () => win.print()` — and both
+printable documents share one `printDocument()` helper, so a fix to how printing works
+cannot apply to only one of them. A blocked pop-up now says so instead of doing nothing.
+
+### What makes a packing slip different from a kitchen ticket
+
+A kitchen ticket answers *"what do I make"*: quantities, no money. A packing slip travels
+with the goods, so it answers *"is this the right box, for the right person, and what does
+the rider do on arrival"* — shop name, order number, recipient, delivery address, priced
+lines, total.
+
+The part that is not a receipt reprint: **plenty of these orders are paid on delivery**, in
+cash or MoMo, and the most expensive mistake a rider can make is handing over the parcel
+without collecting. So an unpaid order prints `COLLECT GH₵45.00` in a bordered box, and a
+paid one prints `✔ PAID — collect nothing` **explicitly**. "No box" is not a message, it is
+an absence, and an absence is what somebody in a hurry misreads.
+
+Line options are rendered only when the stored item actually has them. Checked against the
+database rather than assumed: order items carry `name, price_ghs, product_id, quantity`
+and nothing else, so inventing a variant row would print something that was never ordered.
+
+### Verified
+
+Rendered under the real CSP with a fixture: collect box on unpaid, explicit PAID on paid
+with no box, recipient and address present, options shown when present, line totals correct
+(2×20=40), and a `<script>` deliberately planted in the delivery address comes out escaped.
+
+**Not verified end to end:** the actual print dialog. Pop-ups are blocked in the automation
+context, so the trigger is covered by unit assertions and by the empirical proof of *why*
+the old approach failed, not by watching a printer dialog open.

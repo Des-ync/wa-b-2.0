@@ -1017,6 +1017,7 @@ function renderOrderModal(detail) {
 
     <div style="margin-top:20px;border-top:1px solid var(--line);padding-top:14px">
       <button class="btn btn-ghost btn-sm" data-click="printKitchenTicket">🖨️ Print kitchen ticket</button>
+      <button class="btn btn-ghost btn-sm" data-click="printPackingSlip">📦 Print packing slip</button>
     </div>
   `;
 }
@@ -1086,31 +1087,60 @@ async function submitRefund(orderId) {
   } catch (err) { toast(err.message); }
 }
 
+/**
+ * Opens a printable document in a new window and prints it.
+ *
+ * The print call is made from HERE, on the opened window, rather than from an
+ * inline `<script>window.print()</script>` inside the written document. That
+ * technique does not work any more and fails silently: a document created by
+ * `window.open('')` + `document.write` inherits this page's CSP, and
+ * `script-src` no longer allows inline. The window would appear with the right
+ * content and simply never print — verified in a browser, and reported by
+ * /api/csp-report as `script-src-elem | blocked: inline`.
+ *
+ * `onload` rather than an immediate call, because printing a document the
+ * browser has not finished laying out can produce a blank page.
+ */
+function printDocument(title, bodyHtml) {
+  const win = window.open('', '_blank', 'width=420,height=640');
+  if (!win) {
+    toast('Allow pop-ups for this site to print.');
+    return null;
+  }
+  win.document.write(`
+    <html><head><title>${esc(title)}</title>
+    <style>
+      body { font-family: monospace; padding: 16px; font-size: 14px; color: #000; }
+      h2 { margin: 0 0 4px; }
+      .muted { color: #666; font-size: 12px; }
+      .row { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px dashed #999; }
+      .opt { padding-left: 14px; color: #444; font-size: 12px; border: 0; }
+      .collect { margin-top: 12px; padding: 8px; border: 2px solid #000; font-weight: bold; text-align: center; }
+      .paid { margin-top: 12px; text-align: center; }
+      @media print { .noprint { display: none; } }
+    </style></head><body>${bodyHtml}</body></html>`);
+  win.document.close();
+  win.onload = () => win.print();
+  // Some browsers fire onload before document.close() resolves for a written
+  // document; a short fallback covers that without double-printing, since
+  // print() is idempotent from the user's point of view.
+  setTimeout(() => { try { win.print(); } catch (e) { /* window may be closed */ } }, 400);
+  return win;
+}
+
 function printKitchenTicket() {
   if (!currentOrderDetail) return;
   const o = currentOrderDetail.order;
-  const items = (o.items || []).map(i => `<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px dashed #999">
-    <span>${i.quantity || 1}× ${esc(i.name)}</span>
-  </div>`).join('');
-  const win = window.open('', '_blank', 'width=400,height=600');
-  win.document.write(`
-    <html><head><title>${esc(o.order_number)}</title>
-    <style>
-      body { font-family: monospace; padding: 16px; font-size: 14px; }
-      h2 { margin: 0 0 4px; }
-      .muted { color: #666; font-size: 12px; }
-    </style></head><body>
+  const items = (o.items || []).map(i =>
+    `<div class="row"><span>${i.quantity || 1}× ${esc(i.name)}</span></div>`).join('');
+  printDocument(o.order_number, `
       <h2>${esc(o.order_number)}</h2>
-      <div class="muted">${new Date(o.created_at).toLocaleString()}</div>
+      <div class="muted">${esc(new Date(o.created_at).toLocaleString())}</div>
       ${o.delivery_address ? `<div class="muted">Deliver to: ${esc(o.delivery_address)}</div>` : '<div class="muted">Pickup / dine-in</div>'}
       <hr/>
       ${items}
       <hr/>
-      ${o.notes ? `<p><strong>Note:</strong> ${esc(o.notes)}</p>` : ''}
-      <script>window.print();<\/script>
-    </body></html>
-  `);
-  win.document.close();
+      ${o.notes ? `<p><strong>Note:</strong> ${esc(o.notes)}</p>` : ''}`);
 }
 
 /* ---------------- Today stats ---------------- */
@@ -2621,3 +2651,63 @@ document.addEventListener('dragend', () => {
   document.querySelectorAll('.dragging').forEach(c => c.classList.remove('dragging'));
   document.querySelectorAll('.board-col.drop-target').forEach(c => c.classList.remove('drop-target'));
 });
+
+
+/**
+ * The slip that goes in the parcel.
+ *
+ * Different from the kitchen ticket on purpose. A kitchen ticket answers "what
+ * do I make" — quantities, no money. A packing slip travels with the goods, so
+ * it has to answer "is this the right box, for the right person, and what does
+ * the rider do when they arrive".
+ *
+ * That last part is the reason this is not just a receipt reprint. Plenty of
+ * these orders are paid on delivery in cash or MoMo, and the single most
+ * expensive mistake a rider can make is handing over the parcel without
+ * collecting. So an unpaid order prints an amount to collect, in a box, in the
+ * largest thing on the page — and a paid one says so explicitly, because
+ * "no box" is not a message, it is an absence.
+ */
+function printPackingSlip() {
+  if (!currentOrderDetail) return;
+  const o = currentOrderDetail.order;
+  const customer = currentOrderDetail.customer || {};
+  const paid = o.payment_status === 'paid';
+
+  const lines = (o.items || []).map(i => {
+    // Options are rendered only when the stored line actually has them —
+    // older orders carry just name/quantity/price, and inventing a variant
+    // row would put something on the slip that was never ordered.
+    const opts = [i.variant_name, ...(Array.isArray(i.addon_names) ? i.addon_names : [])]
+      .filter(Boolean);
+    return `
+      <div class="row">
+        <span>${i.quantity || 1}× ${esc(i.name)}</span>
+        <span>GH₵${Number((i.price_ghs || 0) * (i.quantity || 1)).toFixed(2)}</span>
+      </div>
+      ${opts.map(t => `<div class="row opt">${esc(t)}</div>`).join('')}`;
+  }).join('');
+
+  printPackingSlipDocument({ o, customer, paid, lines });
+}
+
+/** Split out so the layout can be exercised without a live order modal. */
+function printPackingSlipDocument({ o, customer, paid, lines }) {
+  return printDocument(`Packing slip ${o.order_number}`, `
+      <h2>${esc(BIZ && BIZ.name ? BIZ.name : 'Order')}</h2>
+      <div class="muted">Packing slip · ${esc(o.order_number)}</div>
+      <div class="muted">${esc(new Date(o.created_at).toLocaleString())}</div>
+      <hr/>
+      <div><strong>${esc(customer.display_name || customer.whatsapp_number || 'Customer')}</strong></div>
+      ${customer.whatsapp_number ? `<div class="muted">${esc(customer.whatsapp_number)}</div>` : ''}
+      ${o.delivery_address
+        ? `<div class="muted">${esc(o.delivery_address)}</div>`
+        : '<div class="muted">Pickup / collection</div>'}
+      <hr/>
+      ${lines}
+      <div class="row"><strong>Total</strong><strong>GH₵${Number(o.total_ghs || 0).toFixed(2)}</strong></div>
+      ${paid
+        ? '<div class="paid">✔ PAID — collect nothing</div>'
+        : `<div class="collect">COLLECT GH₵${Number(o.total_ghs || 0).toFixed(2)}</div>`}
+      ${o.notes ? `<p><strong>Note:</strong> ${esc(o.notes)}</p>` : ''}`);
+}
