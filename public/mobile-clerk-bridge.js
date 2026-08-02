@@ -44,7 +44,11 @@
   async function registerPasskeyAndHandOff() {
     statusEl.textContent = 'Setting up your passkey…';
     try {
-      const passkey = await window.Clerk.user.createPasskey();
+      // createPasskey() can come back asking for reverification even in an
+      // active session — withClerkReverification (clerk-theme.js) shows
+      // Clerk's own verification prompt right here in this tab and retries
+      // once it succeeds.
+      const passkey = await withClerkReverification(() => window.Clerk.user.createPasskey());
       try {
         await passkey.update({ name: /iPhone|iPad/.test(navigator.userAgent) ? 'iPhone' : 'Android' });
       } catch (_) { /* cosmetic only */ }

@@ -2035,10 +2035,13 @@ function passkeyErrorMessage(err) {
 /** Shared by both the Team-tab "Add a passkey" button and the post-login
  * prompt — same ceremony, just called from two places. Renamed right after
  * creation so the list shows a recognizable device instead of Clerk's
- * generic default name; a failure to rename is purely cosmetic. */
+ * generic default name; a failure to rename is purely cosmetic.
+ * createPasskey() can come back asking for reverification even in an
+ * active session — withClerkReverification (clerk-theme.js) shows Clerk's
+ * own verification prompt and retries once it succeeds. */
 async function registerPasskeyCeremony() {
   await window.Clerk.load();
-  const passkey = await window.Clerk.user.createPasskey();
+  const passkey = await withClerkReverification(() => window.Clerk.user.createPasskey());
   try { await passkey.update({ name: guessDeviceName() }); } catch (_) { /* cosmetic only */ }
 }
 
