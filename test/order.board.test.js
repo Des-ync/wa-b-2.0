@@ -32,32 +32,43 @@ test('every board status really does message the customer', () => {
 test('the request is deferred, not fired on drop', () => {
   // The card moves immediately; the PATCH waits. That gap is the only thing
   // standing between a slip of the hand and a message that cannot be recalled.
-  assert.match(JS, /const UNDO_MS = \d+/);
-  assert.match(JS, /setTimeout\(\(\) => commitStatusMove\(orderId\), UNDO_MS\)/);
+  // The mechanism itself is shared — see undo.test.js — so what matters here
+  // is that the board goes through it rather than calling api() on drop.
+  const fn = JS.slice(JS.indexOf('function scheduleStatusMove'));
+  assert.match(fn.slice(0, 1200), /deferWithUndo\(\{/);
+  const beforeDefer = fn.slice(0, fn.indexOf('deferWithUndo'));
+  assert.ok(!/api\(/.test(beforeDefer), 'the drop must not issue a request directly');
 });
 
 test('undo cancels the request entirely, so nothing is sent', () => {
-  assert.match(JS, /function undoStatusMove[\s\S]*clearTimeout\(pending\.timer\)/);
-  assert.match(JS, /PENDING_MOVES\.delete\(orderId\)/);
-  assert.match(JS, /Move undone — nothing was sent/);
+  // Owned by the shared mechanism now; asserted there in full.
+  const f = JS.slice(JS.indexOf('function undoPending'));
+  assert.match(f.slice(0, 600), /clearTimeout\(pending\.timer\)/);
+  assert.match(f.slice(0, 600), /nothing was sent/);
 });
 
 test('a second move replaces the first rather than queueing both', () => {
   // Dragging pending → preparing → ready should tell the customer once, about
-  // where the order ended up, not once per column crossed.
-  assert.match(JS, /if \(existing\) clearTimeout\(existing\.timer\)/);
-  assert.match(JS, /const from = existing \? existing\.from : order\.status/);
+  // where the order ended up, not once per column crossed. That falls out of
+  // keying the deferred action per order.
+  const fn = JS.slice(JS.indexOf('function scheduleStatusMove'));
+  assert.match(fn.slice(0, 1200), /key: 'order-status:' \+ orderId/);
+  assert.match(JS, /const firstRevert = existing \? existing\.revert : revert/);
 });
 
 test('pending moves are flushed if the page goes away', () => {
   // Otherwise closing the tab inside the undo window drops a change the
   // merchant already watched happen.
-  assert.match(JS, /function flushPendingMoves/);
-  assert.match(JS, /addEventListener\('pagehide', flushPendingMoves\)/);
+  assert.match(JS, /function flushPendingActions/);
+  assert.match(JS, /addEventListener\('pagehide', flushPendingActions\)/);
 });
 
 test('a failed request puts the card back', () => {
-  assert.match(JS, /order\.status = pending\.from;\s*\n\s*renderOrderBoard\(\)/);
+  // The board supplies the revert; the shared mechanism calls it on failure.
+  const fn = JS.slice(JS.indexOf('function scheduleStatusMove'));
+  assert.match(fn.slice(0, 1200), /revert: \(\) => \{[\s\S]*?o\.status = from;[\s\S]*?renderOrderBoard\(\)/);
+  const commit = JS.slice(JS.indexOf('async function commitPending'));
+  assert.match(commit.slice(0, 700), /catch \(err\)[\s\S]*pending\.revert\(\)/);
 });
 
 test('cancelled is NOT a column', () => {

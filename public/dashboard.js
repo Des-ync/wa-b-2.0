@@ -772,13 +772,28 @@ async function removeProductImage(id) {
   } catch (err) { toast(err.message); }
 }
 
-async function removeProduct(id, name) {
-  if (!confirm('Delete "' + name + '"? Past orders keep their records.')) return;
-  try {
-    await api('/products/' + id, { method: 'DELETE' });
-    toast('Deleted');
-    await loadProducts();
-  } catch (err) { toast(err.message); }
+/**
+ * Deletes a product — after a window in which it can be taken back.
+ *
+ * No confirm dialog. The row disappears immediately, which is the feedback a
+ * confirm was standing in for, and the DELETE only goes out once the undo
+ * window closes. That is strictly safer than asking: a dialog can be clicked
+ * through in half a second and then the product is gone for good.
+ */
+function removeProduct(id, name) {
+  const row = document.querySelector(`#productTable tr[data-id="${CSS.escape(id)}"]`);
+  const marker = document.createComment('pending-delete');
+  if (row) row.replaceWith(marker);
+
+  deferWithUndo({
+    key: 'product-delete:' + id,
+    message: `Deleted "${name}"`,
+    revert: () => { if (marker.parentNode) marker.replaceWith(row); },
+    run: async () => {
+      await api('/products/' + id, { method: 'DELETE' });
+      await loadProducts();
+    }
+  });
 }
 
 /* ---------------- Inventory: suppliers, reorder suggestions, history ---------------- */
@@ -2302,34 +2317,50 @@ function renderBulkBar() {
  * The server refuses anything outside its own bulk-editable list, so a typo
  * here fails loudly rather than quietly writing the wrong column.
  */
-async function bulkSet(changes) {
+function bulkSet(changes) {
   const ids = [...SELECTED_PRODUCTS];
   if (!ids.length) return;
-  try {
-    const res = await api('/products/bulk', {
-      method: 'PATCH',
-      body: JSON.stringify({ business_id: BIZ.id, product_ids: ids, changes })
-    });
-    // The notified count is surfaced, not swallowed: marking a batch back in
-    // stock messages every customer who asked to be told, and a merchant
-    // should learn that here rather than from the bill.
-    const noun = res.updated === 1 ? 'product' : 'products';
-    toast(res.notified
-      ? `${res.updated} ${noun} updated · ${res.notified} customer${res.notified === 1 ? '' : 's'} told it is back in stock`
-      : `${res.updated} ${noun} updated`);
-    clearProductSelection();
-    await loadProducts();
-  } catch (err) { toast(err.message); }
+
+  // The selection stays ticked during the window, so it is visible which
+  // products are about to change — and undo leaves them selected, ready to
+  // try a different action.
+  const describe = Object.entries(changes)
+    .map(([k, v]) => `${k.replace(/_/g, ' ')} → ${v}`).join(', ');
+
+  deferWithUndo({
+    // One key for the whole bulk action: pressing two bulk buttons quickly
+    // sends the second, not both.
+    key: 'bulk-edit',
+    message: `${ids.length} product${ids.length === 1 ? '' : 's'}: ${describe}`,
+    revert: () => {},
+    run: async () => {
+      const res = await api('/products/bulk', {
+        method: 'PATCH',
+        body: JSON.stringify({ business_id: BIZ.id, product_ids: ids, changes })
+      });
+      // Surfaced rather than swallowed: marking a batch back in stock messages
+      // every customer who asked to be told, and a merchant should learn that
+      // here rather than from the bill.
+      const noun = res.updated === 1 ? 'product' : 'products';
+      toast(res.notified
+        ? `${res.updated} ${noun} updated · ${res.notified} customer${res.notified === 1 ? '' : 's'} told it is back in stock`
+        : `${res.updated} ${noun} updated`);
+      clearProductSelection();
+      await loadProducts();
+    }
+  });
 }
 
 /** Moves the selection into a different category. */
-async function bulkChangeCategory() {
+function bulkChangeCategory() {
   if (!SELECTED_PRODUCTS.size) return;
   const category = prompt('Move ' + SELECTED_PRODUCTS.size + ' product(s) to which category?');
   if (category == null) return;
   const trimmed = category.trim();
   if (!trimmed) return toast('Enter a category name');
-  await bulkSet({ category: trimmed });
+  // bulkSet only schedules now — awaiting it would say nothing about whether
+  // the edit was sent, since that happens after the undo window closes.
+  bulkSet({ category: trimmed });
 }
 
 
@@ -2449,6 +2480,100 @@ document.addEventListener('dragend', async () => {
   await saveProductOrder();
 });
 
+// ─── deferred actions with undo ─────────────────────────────────────────────
+//
+// Some actions cannot be taken back once they reach the server: a bulk edit
+// touches dozens of products at once, deleting a product is permanent, and a
+// status change WhatsApps the customer — and a WhatsApp message cannot be
+// unsent.
+//
+// Rather than a confirm dialog on each (which mostly trains people to click
+// through it), the change is shown immediately and the REQUEST waits a few
+// seconds behind an Undo. Undo cancels the timer outright: nothing was ever
+// sent, so there is nothing to reverse.
+//
+// "Send now, reverse later" cannot work here. By then the customer has been
+// messaged, and a second message saying "ignore that" is worse than the first.
+
+const UNDO_MS = 6000;
+
+/** key -> { timer, revert, run }. One pending action per target. */
+const PENDING_ACTIONS = new Map();
+
+/**
+ * Defers `run`, showing an Undo toast for [UNDO_MS].
+ *
+ * Deferring the same `key` again replaces the pending request but KEEPS the
+ * first `revert` — so undoing after two changes returns to where things
+ * started rather than to the intermediate step, and only one request is sent.
+ */
+function deferWithUndo({ key, message, revert, run }) {
+  const existing = PENDING_ACTIONS.get(key);
+  if (existing) clearTimeout(existing.timer);
+  const firstRevert = existing ? existing.revert : revert;
+
+  const timer = setTimeout(() => commitPending(key), UNDO_MS);
+  PENDING_ACTIONS.set(key, { timer, revert: firstRevert, run });
+  showUndoToast(message, () => undoPending(key));
+}
+
+async function commitPending(key) {
+  const pending = PENDING_ACTIONS.get(key);
+  if (!pending) return;
+  PENDING_ACTIONS.delete(key);
+  clearTimeout(pending.timer);
+  try {
+    await pending.run();
+  } catch (err) {
+    toast(err.message);
+    // The request failed, so the screen shows something that never happened.
+    // Put it back rather than leaving the two disagreeing.
+    try { pending.revert(); } catch (e) { /* best effort */ }
+  }
+}
+
+function undoPending(key) {
+  const pending = PENDING_ACTIONS.get(key);
+  if (!pending) return;
+  clearTimeout(pending.timer);
+  PENDING_ACTIONS.delete(key);
+  pending.revert();
+  toast('Undone — nothing was sent');
+}
+
+/**
+ * Sends everything still waiting.
+ *
+ * Without this, closing the tab inside the undo window drops a change the
+ * merchant already watched happen, and the screen disagrees with the server on
+ * the next load.
+ */
+function flushPendingActions() {
+  for (const key of [...PENDING_ACTIONS.keys()]) commitPending(key);
+}
+window.addEventListener('pagehide', flushPendingActions);
+
+/**
+ * A toast carrying an Undo button.
+ *
+ * Built with addEventListener, not an inline handler: script-src-attr is
+ * 'none', so an onclick Undo would silently do nothing — and for THIS button
+ * that means the action commits anyway, the exact opposite of what was asked.
+ */
+function showUndoToast(message, onUndo) {
+  const host = document.getElementById('toast');
+  if (!host) return;
+  host.textContent = message + '  ';
+  const btn = document.createElement('button');
+  btn.className = 'btn btn-ghost btn-xs';
+  btn.textContent = 'Undo';
+  btn.addEventListener('click', () => { onUndo(); host.classList.remove('show'); });
+  host.appendChild(btn);
+  host.classList.add('show');
+  clearTimeout(showUndoToast._t);
+  showUndoToast._t = setTimeout(() => host.classList.remove('show'), UNDO_MS);
+}
+
 // ─── order board ───────────────────────────────────────────────────────────
 //
 // A Kanban makes changing an order's status a casual gesture. It is not one:
@@ -2473,12 +2598,8 @@ const BOARD_COLUMNS = [
   { key: 'delivered', label: 'Delivered' }
 ];
 
-const UNDO_MS = 6000;
-
 let BOARD_ORDERS = [];
 let DRAG_ORDER_ID = null;
-/** orderId -> { timer, from }. One pending move per order. */
-const PENDING_MOVES = new Map();
 
 async function loadOrderBoard() {
   const host = document.getElementById('orderBoard');
@@ -2541,79 +2662,31 @@ function scheduleStatusMove(orderId, toStatus) {
   const order = BOARD_ORDERS.find(o => o.id === orderId);
   if (!order || order.status === toStatus) return;
 
-  // A second move of the same order replaces the first: the customer should
-  // hear one message about where the order actually ended up, not one per
-  // drag along the way.
-  const existing = PENDING_MOVES.get(orderId);
-  const from = existing ? existing.from : order.status;
-  if (existing) clearTimeout(existing.timer);
-
+  const from = order.status;
   order.status = toStatus;
   renderOrderBoard();
 
-  const timer = setTimeout(() => commitStatusMove(orderId), UNDO_MS);
-  PENDING_MOVES.set(orderId, { timer, from });
-
   const label = (BOARD_COLUMNS.find(c => c.key === toStatus) || {}).label || toStatus;
-  showUndoToast(`#${order.order_number} → ${label}`, () => undoStatusMove(orderId));
+  deferWithUndo({
+    // Keyed per order, so dragging the same card twice sends ONE message about
+    // where it ended up rather than one per column crossed.
+    key: 'order-status:' + orderId,
+    message: `#${order.order_number} → ${label}`,
+    revert: () => {
+      const o = BOARD_ORDERS.find(x => x.id === orderId);
+      if (o) o.status = from;
+      renderOrderBoard();
+    },
+    run: () => {
+      const o = BOARD_ORDERS.find(x => x.id === orderId);
+      return api('/orders/' + orderId + '/status', {
+        method: 'PATCH',
+        body: JSON.stringify({ status: o.status })
+      });
+    }
+  });
 }
 
-async function commitStatusMove(orderId) {
-  const pending = PENDING_MOVES.get(orderId);
-  if (!pending) return;
-  PENDING_MOVES.delete(orderId);
-  clearTimeout(pending.timer);
-  const order = BOARD_ORDERS.find(o => o.id === orderId);
-  if (!order) return;
-  try {
-    await api('/orders/' + orderId + '/status', {
-      method: 'PATCH',
-      body: JSON.stringify({ status: order.status })
-    });
-  } catch (err) {
-    toast(err.message);
-    order.status = pending.from;
-    renderOrderBoard();
-  }
-}
-
-function undoStatusMove(orderId) {
-  const pending = PENDING_MOVES.get(orderId);
-  if (!pending) return;
-  clearTimeout(pending.timer);
-  PENDING_MOVES.delete(orderId);
-  const order = BOARD_ORDERS.find(o => o.id === orderId);
-  if (order) order.status = pending.from;
-  renderOrderBoard();
-  toast('Move undone — nothing was sent');
-}
-
-/**
- * Sends every pending move immediately.
- *
- * Without this, closing the tab inside the undo window would drop a change the
- * merchant already saw applied — the board would disagree with the server on
- * the next load.
- */
-function flushPendingMoves() {
-  for (const id of [...PENDING_MOVES.keys()]) commitStatusMove(id);
-}
-window.addEventListener('pagehide', flushPendingMoves);
-
-/** A toast with an Undo affordance, built without inline handlers. */
-function showUndoToast(message, onUndo) {
-  const host = document.getElementById('toast');
-  if (!host) return;
-  host.textContent = message + '  ';
-  const btn = document.createElement('button');
-  btn.className = 'btn btn-ghost btn-xs';
-  btn.textContent = 'Undo';
-  btn.addEventListener('click', () => { onUndo(); host.classList.remove('show'); });
-  host.appendChild(btn);
-  host.classList.add('show');
-  clearTimeout(showUndoToast._t);
-  showUndoToast._t = setTimeout(() => host.classList.remove('show'), UNDO_MS);
-}
 
 document.addEventListener('dragstart', ev => {
   const card = ev.target instanceof Element && ev.target.closest('[data-order-card]');

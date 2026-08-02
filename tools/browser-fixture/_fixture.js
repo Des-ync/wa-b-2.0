@@ -58,9 +58,13 @@
   });
 
   // 4. Clicking really dispatches, with the right values.
+  const REAL = {};
   ['toggleStock','editPrice','editCostPrice','editStockQty','quickRestock','editThreshold',
    'manageOptions','removeProduct','editImage','toggleFeatured','toggleHidden','editAvailability'
   ].forEach(fn => {
+    // Kept so a later section can exercise the real implementation — stubbing
+    // a function and then "testing" the stub proves nothing.
+    REAL[fn] = window[fn];
     window[fn] = function () { result.dispatched.push({ fn, args: [...arguments] }); };
   });
   document.querySelectorAll('#productTable [data-click]').forEach(el => el.click());
@@ -109,10 +113,16 @@
     };
     window.toast = function (m) { result.bulk.toast = m; };
 
-    await bulkSet({ in_stock: false });
-    result.bulk.patches = calls.filter(c => c.method === 'PATCH');
-    result.bulk.clearedAfter = SELECTED_PRODUCTS.size;
-    result.bulk.barHiddenAfter = document.getElementById('bulkBar').style.display === 'none';
+    // bulkSet defers now: nothing is sent, and the selection stays ticked so
+    // it is visible which products are about to change. Committing is what
+    // sends the request and clears the selection.
+    bulkSet({ in_stock: false });
+    result.bulk.patchesWhilePending = calls.filter(c => c.method === 'PATCH').length;
+    result.bulk.selectionKeptWhilePending = SELECTED_PRODUCTS.size;
+    await commitPending('bulk-edit');
+    result.bulk.patchesAfterCommit = calls.filter(c => c.method === 'PATCH');
+    result.bulk.clearedAfterCommit = SELECTED_PRODUCTS.size;
+    result.bulk.barHiddenAfterCommit = document.getElementById('bulkBar').style.display === 'none';
   }
 
   // 7. Ordering. The risk here is posting a list that does not match what the
@@ -177,7 +187,7 @@
     result.board.cardMovedImmediately =
       document.querySelector('.board-col[data-status="ready"] [data-order-card="o1"]') !== null;
     result.board.requestsBeforeUndo = sent.length;
-    undoStatusMove('o1');
+    undoPending('order-status:o1');
     result.board.cardRestored =
       document.querySelector('.board-col[data-status="pending"] [data-order-card="o1"]') !== null;
     result.board.requestsAfterUndo = sent.length;
@@ -186,10 +196,51 @@
     // where it ended up.
     scheduleStatusMove('o2', 'ready');
     scheduleStatusMove('o2', 'delivered');
-    flushPendingMoves();
+    flushPendingActions();
     await new Promise(r => setTimeout(r, 50));
     result.board.requestsAfterTwoMoves = sent.filter(s => s.path.indexOf('o2') > -1).length;
     result.board.finalStatusSent = (sent.find(s => s.path.indexOf('o2') > -1) || {}).body;
+  }
+
+  // 9. Undo. The property that matters is that an undone action NEVER reaches
+  //    the server — not that it is reversed afterwards. For a status change
+  //    the customer would already have been messaged; for a delete there would
+  //    be nothing left to reverse.
+  result.undo = {};
+  {
+    const sent = [];
+    api = async function (path, opts) {
+      if (path.indexOf('/products?') === 0) return { products: PRODUCTS };
+      sent.push({ path, method: (opts && opts.method) || 'GET' });
+      return { updated: 2, notified: 0 };
+    };
+    window.toast = function () {};
+
+    // Delete, then undo: the row must come back in its original position.
+    // The real one — section 4 replaced it with a recording stub.
+    window.removeProduct = REAL.removeProduct;
+    const rowsBefore = [...document.querySelectorAll('#productTable tbody tr[data-id]')].map(r => r.dataset.id);
+    removeProduct(rowsBefore[0], 'first');
+    result.undo.rowRemovedImmediately =
+      !document.querySelector(`#productTable tr[data-id="${rowsBefore[0]}"]`);
+    result.undo.requestsBeforeUndo = sent.length;
+    undoPending('product-delete:' + rowsBefore[0]);
+    const rowsAfter = [...document.querySelectorAll('#productTable tbody tr[data-id]')].map(r => r.dataset.id);
+    result.undo.rowsRestoredInOrder = JSON.stringify(rowsAfter) === JSON.stringify(rowsBefore);
+    result.undo.requestsAfterUndo = sent.length;
+
+    // Bulk edit, then undo: nothing sent, selection still ticked.
+    SELECTED_PRODUCTS.add(rowsBefore[0]);
+    bulkSet({ in_stock: false });
+    result.undo.bulkRequestsBeforeUndo = sent.length;
+    undoPending('bulk-edit');
+    result.undo.bulkRequestsAfterUndo = sent.length;
+    result.undo.selectionKeptAfterUndo = SELECTED_PRODUCTS.size;
+
+    // And committing really does send it.
+    bulkSet({ in_stock: true });
+    await commitPending('bulk-edit');
+    result.undo.requestsAfterCommit = sent.filter(x => x.path === '/products/bulk').length;
   }
 
   document.getElementById('out').textContent = JSON.stringify(result, null, 1);

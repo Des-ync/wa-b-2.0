@@ -2036,3 +2036,71 @@ with no box, recipient and address present, options shown when present, line tot
 **Not verified end to end:** the actual print dialog. Pop-ups are blocked in the automation
 context, so the trigger is covered by unit assertions and by the empirical proof of *why*
 the old approach failed, not by watching a printer dialog open.
+
+
+---
+
+## 36. Undo
+
+One mechanism, three actions.
+
+### Defer the request — do not send and reverse
+
+The board (§34) already deferred status changes. Bulk edit and delete did not, and those
+are the two that most needed it: a bulk edit touches dozens of products from one click,
+and a delete is permanent.
+
+"Send now, reverse later" cannot work for any of them. By the time a compensating write
+could run the customer has already been WhatsApped, and a second message saying "ignore
+that" is worse than the first. For a delete there is nothing left to reverse at all. So
+the change is shown immediately and the **request** waits behind an Undo; undo cancels the
+timer outright and nothing was ever sent.
+
+`deferWithUndo({ key, message, revert, run })` is now the single implementation — the board
+was refactored onto it rather than left as a second copy. Re-deferring the same `key`
+replaces the pending request but keeps the **first** `revert`, so undoing after two changes
+returns to the start rather than the middle, and only one request is ever sent.
+
+### Delete has no confirm dialog now, deliberately
+
+A confirm gets clicked through in half a second and then the product is gone for good. The
+row disappearing *is* the feedback the dialog was standing in for, and it comes with six
+seconds to change your mind. A comment node holds the row's position so undo restores it
+**where it was**, not appended at the end.
+
+### Bulk keeps the selection ticked while pending
+
+So it stays visible which products are about to change, and an undo leaves them selected to
+try something else. The selection clears only on commit. This also means an undone bulk
+edit sends **no** back-in-stock notifications, because those fire server-side when the
+request lands.
+
+### Verified
+
+Through `tools/browser-fixture`, against a real clock:
+
+| | requests before undo | after undo | after commit |
+|---|---|---|---|
+| delete | 0 | 0 | — |
+| bulk edit | 0 | 0 | 1 |
+| board move | 0 | 0 | 1 (final status only, after two moves) |
+
+Plus: the row is removed immediately and restored **in its original position**, and the
+bulk selection survives an undo.
+
+### Two bugs the fixture caught in the writing
+
+**A too-wide slice deleted three functions.** Refactoring the board removed
+`loadOrderBoard`, `renderOrderBoard` and `boardCard` along with the private undo
+machinery — `node --check` was perfectly happy, since nothing referenced them at parse
+time. The fixture failed with `loadOrderBoard is not defined`.
+
+**The fixture was testing its own stub.** An earlier section replaces `removeProduct` with
+a recorder to check dispatch; the undo section then called that stub and concluded the row
+was never removed. Stubbing a function and then testing the stub proves nothing, so the
+originals are now kept and restored.
+
+Five board tests also had to be rewritten: they asserted private internals
+(`commitStatusMove`, `flushPendingMoves`, `pending.from`) that the shared mechanism
+replaced. They now assert the behaviour — that the board goes *through* `deferWithUndo`
+and supplies a revert — which is what actually matters and is less brittle.
