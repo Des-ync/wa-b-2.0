@@ -384,7 +384,7 @@ async function loadProducts() {
         <button class="btn btn-ghost btn-xs" data-click="editStockQty" data-args="${dataArgs(p.id, p.stock_qty == null ? null : p.stock_qty)}">Qty</button>
         <button class="btn btn-ghost btn-xs" data-name="${esc(p.name)}" data-click="quickRestock" data-args="${dataArgs(p.id, p.name)}">Add stock</button>
         <button class="btn btn-ghost btn-xs" data-click="editThreshold" data-args="${dataArgs(p.id, threshold)}">Low-stock at</button>
-        <button class="btn btn-ghost btn-xs" data-image-url="${esc(p.image_url || '')}" data-click="editImage" data-args="${dataArgs(p.id, p.image_url || '')}">Image</button>
+        <button class="btn btn-ghost btn-xs" data-click="editImage" data-args="${dataArgs(p.id)}">${p.image_url ? 'Replace photo' : 'Add photo'}</button>${p.image_url ? `<button class="btn btn-ghost btn-xs" data-click="removeProductImage" data-args="${dataArgs(p.id)}">Remove photo</button>` : ''}
         <button class="btn btn-ghost btn-xs" data-click="toggleFeatured" data-args="${dataArgs(p.id, !p.featured)}">${p.featured ? 'Unfeature' : 'Feature'}</button>
         <button class="btn btn-ghost btn-xs" data-click="toggleHidden" data-args="${dataArgs(p.id, !p.hidden)}">${p.hidden ? 'Unhide' : 'Hide'}</button>
         <button class="btn btn-ghost btn-xs" data-from="${esc(p.available_from || '')}" data-to="${esc(p.available_to || '')}" data-click="editAvailability" data-args="${dataArgs(p.id, p.available_from || '', p.available_to || '')}">Hours</button>
@@ -655,13 +655,112 @@ async function editStockQty(id, current) {
   } catch (err) { toast(err.message); }
 }
 
-async function editImage(id, current) {
-  const v = prompt('Image URL (leave blank to remove):', current || '');
-  if (v == null) return;
+/**
+ * Shrinks a photo in the browser before it is uploaded.
+ *
+ * This is the part that matters on a Ghanaian connection. The merchant pays
+ * for every megabyte they send, so the megabytes are spent here instead.
+ *
+ * Measured with tools/browser-fixture/_shrink: a 6.6 MB source came out at
+ * 377 KB, a 94% reduction, capped at 1200px on the long edge. That source is
+ * random noise — the worst case JPEG can be handed. A real photograph has far
+ * more redundancy and lands lower. An image already under the cap is left at
+ * its own size rather than scaled up.
+ */
+function shrinkImage(file, maxEdge = 1200, quality = 0.82) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const scale = Math.min(1, maxEdge / Math.max(img.width, img.height));
+      const w = Math.max(1, Math.round(img.width * scale));
+      const h = Math.max(1, Math.round(img.height * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      // White behind the image: a transparent PNG flattened to JPEG would
+      // otherwise come out with black where the transparency was.
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, w, h);
+      ctx.drawImage(img, 0, 0, w, h);
+      canvas.toBlob(
+        blob => blob ? resolve(blob) : reject(new Error('Could not process that image.')),
+        'image/jpeg',
+        quality
+      );
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('That file is not an image we can read.'));
+    };
+    img.src = url;
+  });
+}
+
+/**
+ * Uploads already-shrunk bytes as the raw request body.
+ *
+ * Not multipart: the server reads a Buffer and identifies it by magic bytes,
+ * so neither side needs a parser or an image library.
+ */
+async function uploadProductImage(blob) {
+  const token = await window.Clerk.session.getToken();
+  const res = await fetch('/api/uploads/product-image?business_id=' + encodeURIComponent(BIZ.id), {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': blob.type || 'image/jpeg' },
+    body: blob
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok || body.success === false) {
+    throw new Error(body.message || body.error || ('Upload failed (' + res.status + ')'));
+  }
+  return body.url;
+}
+
+/** Sets (or clears) a product's photo. */
+async function setProductImage(id, url) {
+  await api('/products/' + id, { method: 'PATCH', body: JSON.stringify({ image_url: url || null }) });
+  await loadProducts();
+}
+
+/**
+ * The photo picker for one product.
+ *
+ * Opens the file chooser directly — on a phone that is the camera or the
+ * gallery, which is where the merchant's photo actually is. The old flow asked
+ * for a URL, which assumed the image was already hosted somewhere.
+ */
+function editImage(id) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/jpeg,image/png,image/webp';
+  input.addEventListener('change', async () => {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    toast('Preparing photo…');
+    try {
+      const blob = await shrinkImage(file);
+      const url = await uploadProductImage(blob);
+      await setProductImage(id, url);
+      const saved = Math.max(0, file.size - blob.size);
+      toast(saved > 20000
+        ? `Photo added (${Math.round(blob.size / 1024)} KB, ${Math.round(saved / 1024)} KB saved)`
+        : 'Photo added');
+    } catch (err) {
+      toast(err.message);
+    }
+  });
+  input.click();
+}
+
+/** Clears a product's photo. The stored file is left in place. */
+async function removeProductImage(id) {
+  if (!confirm('Remove this photo?')) return;
   try {
-    await api('/products/' + id, { method: 'PATCH', body: JSON.stringify({ image_url: v.trim() || null }) });
-    toast('Image updated');
-    await loadProducts();
+    await setProductImage(id, null);
+    toast('Photo removed');
   } catch (err) { toast(err.message); }
 }
 

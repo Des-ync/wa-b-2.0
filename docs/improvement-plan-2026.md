@@ -1630,3 +1630,76 @@ asserts no `_`-prefixed file is left behind.
 ### Not done
 
 `style-src` (Clerk) and the 819 style attributes. Decision #13 stays partially addressed.
+
+
+---
+
+## 29. Product photo upload
+
+Merchants could only paste a URL — which assumes the image is already hosted somewhere.
+That is a fair assumption for a developer and a poor one for a shop owner photographing
+shito on a phone. Both surfaces had the same gap: the dashboard used `prompt()`, the
+Flutter app a text field.
+
+### No new dependency on either side
+
+The browser resizes through a canvas and posts the resulting **raw bytes** as the request
+body. The server reads a Buffer. So there is no multipart parser, and no native `sharp`
+build on the VM.
+
+More importantly the resize happens on the *phone*, before the upload. The merchant pays
+for every megabyte they send, and this is where those megabytes are saved.
+
+Measured, not asserted — `tools/browser-fixture/_shrink`:
+
+| | |
+|---|---|
+| source | 6.6 MB |
+| uploaded | **377 KB** (94% smaller) |
+| long edge | capped at 1200px |
+
+The source is random noise, the worst case JPEG can be handed, so that saving is a floor.
+A real photograph lands lower. An image already under the cap is left alone rather than
+scaled up.
+
+### The client is not trusted
+
+Uploaded files are served back from our own origin, so a file the browser decides is HTML
+would be same-origin script. Therefore:
+
+- **Type comes from the magic bytes, not the `Content-Type` header.** A header is a claim.
+- **SVG is deliberately not allowed.** It is an image, and it can carry `<script>`.
+- The **filename is generated**, never taken from the request — no path, no traversal, no
+  chosen extension.
+- Stored under `UPLOAD_DIR/<business_id>/`, outside `public/`, served through its own
+  mount with `nosniff` and `Content-Disposition: inline`. Traversal and directory listing
+  both 404, verified.
+- Owner/manager only (`requirePermission('products','write')`), rate-limited, 2 MB cap.
+
+### A bug the CSP reporting caught before a user did
+
+The first run of the resize fixture failed with "That file is not an image we can read".
+The cause was not the code: `img-src` did not allow `blob:`, so
+`URL.createObjectURL` → `<img>` was refused, and **every upload would have failed in
+production** with that misleading message.
+
+`/api/csp-report` named it directly:
+
+    directive: img-src | blocked: blob | page: /wa-b/_shrink.html
+
+That endpoint was built two sections ago for exactly this and has now paid for itself. A
+test asserts `img-src` keeps `blob:`.
+
+### Storage
+
+`uploads/` is gitignored, so `git reset --hard` during deploy leaves it alone. Worth
+knowing: adding `git clean -fd` to the deploy script would delete every merchant's photos.
+Setting `UPLOAD_DIR` to a path outside the repo removes that footgun entirely and is the
+recommended production setting.
+
+### Not done
+
+**The Flutter app still pastes a URL.** It needs `image_picker`, camera and gallery
+permissions, and the same resize step — a separate change. The dashboard is responsive and
+`<input type="file">` opens the camera on Android, so a merchant on a phone can use this
+today through the browser; the native app is the better experience and does not have it yet.

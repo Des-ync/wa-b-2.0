@@ -96,3 +96,13 @@ test('an unparseable report body is swallowed, not turned into a 500', () => {
   assert.ok(m, 'no error handler mounted for /api/csp-report');
   assert.match(m[0], /res\.status\(204\)/, 'the csp-report error handler must answer 204');
 });
+
+test('img-src allows blob:, which the photo upload depends on', () => {
+  // The picker resizes through a canvas, so the chosen file is loaded into an
+  // <img> via URL.createObjectURL. Without blob: that load is refused and the
+  // merchant sees "not an image we can read" for a perfectly good photo —
+  // caught by the CSP report endpoint while building the feature, not by a
+  // user.
+  assert.ok(directive('img-src').includes('blob:'),
+    'img-src dropped blob: — photo upload resizing will fail silently');
+});

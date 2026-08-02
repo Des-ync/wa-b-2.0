@@ -42,6 +42,7 @@ const contactRoutes = require('./routes/contact.routes');
 const auditlogRoutes = require('./routes/auditlog.routes');
 const cspReportRoutes = require('./routes/cspreport.routes');
 const clientErrorRoutes = require('./routes/clienterror.routes');
+const uploadRoutes = require('./routes/upload.routes');
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
@@ -100,7 +101,12 @@ app.use(helmet({
       'script-src-attr': ["'none'"],
       'style-src': ["'self'", "'unsafe-inline'", 'https:'],
       'style-src-attr': ["'unsafe-inline'"],
-      'img-src': ["'self'", 'data:', 'https:'],
+      // `blob:` is required by the photo upload: the picker resizes through a
+      // canvas, which means loading the chosen file into an <img> via
+      // URL.createObjectURL. Without it the resize fails and the merchant is
+      // told their photo "is not an image we can read". A blob: URL is minted
+      // by this page for its own bytes and cannot be injected cross-origin.
+      'img-src': ["'self'", 'data:', 'blob:', 'https:'],
       'connect-src': ["'self'", 'https:'],
       'font-src': ["'self'", 'data:', 'https:'],
       'frame-src': ['https:'],
@@ -151,6 +157,25 @@ app.use(
   '/api/payments/hubtel/callback',
   express.raw({ type: '*/*', limit: '1mb' })
 );
+
+// Product photos arrive as RAW image bytes, not multipart: the browser resizes
+// with a canvas and posts the resulting blob directly. That keeps a multipart
+// parser and a native image library out of the dependency tree entirely.
+app.use('/api/uploads', express.raw({
+  type: ['image/jpeg', 'image/png', 'image/webp'],
+  limit: '2mb'
+}));
+app.use('/api/uploads', (err, _req, res, next) => {
+  // An oversized body throws in the parser, before the route can answer with
+  // its own message. Answer in the shape the client already handles.
+  if (err && err.type === 'entity.too.large') {
+    return res.status(400).json({
+      success: false,
+      error: 'That image is too large. Please choose a smaller photo.'
+    });
+  }
+  return next(err);
+});
 
 // CSP reports arrive as application/csp-report (legacy) or
 // application/reports+json (Reporting API); express.json() would ignore both
@@ -339,6 +364,22 @@ app.get('/.well-known/assetlinks.json', (req, res) => {
 
 // Marketing site (public/) — mounted at /wa-b so this app can live alongside
 // other projects on the same domain instead of owning the domain root.
+// Uploaded product photos. Filenames are random and content-addressed by
+// nothing else, so they can be cached hard — an image never changes under a
+// given name; a replacement gets a new one.
+app.use('/wa-b/uploads', express.static(uploadRoutes.UPLOAD_DIR, {
+  maxAge: '30d',
+  immutable: true,
+  index: false,
+  dotfiles: 'deny',
+  // Only ever serve what we wrote. Belt-and-braces next to the magic-byte
+  // check at write time.
+  setHeaders: (res) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Disposition', 'inline');
+  }
+}));
+
 app.use('/wa-b', express.static(path.join(__dirname, '..', 'public')));
 
 // Lightweight request logger (skip noisy webhook polling)
@@ -385,6 +426,15 @@ const cspReportLimiter = rateLimit({
   // A rate-limited browser must not be answered with JSON it did not ask for.
   handler: (_req, res) => res.status(204).end()
 });
+const uploadLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: 'Too many uploads, please slow down.' }
+});
+app.use('/api/uploads', uploadLimiter, uploadRoutes);
+
 app.use('/api/csp-report', cspReportLimiter, cspReportRoutes);
 app.use('/api/client-error', cspReportLimiter, clientErrorRoutes);
 

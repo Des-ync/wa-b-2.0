@@ -20,3 +20,7 @@ build/
 *.swo
 .nyc_output/
 improvement-prompt.md
+
+# Uploaded product photos — user data, never committed. Survives deploys
+# because 'git reset --hard' leaves untracked files alone.
+uploads/

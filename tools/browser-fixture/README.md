@@ -46,3 +46,19 @@ Other loaders (`loadOrders`, `loadCustomers`, `loadPromos`, …) need their own
 fixture rows and the DOM containers they write into. `BIZ` is assigned by bare
 assignment, not `window.BIZ` — `let` at script top level lives in the global
 lexical environment, which `window` does not expose.
+
+## `_shrink` — does the photo resize actually save data?
+
+The value of client-side resizing is a number, so it is measured rather than
+asserted. Copy `_shrink.*` into `public/`, run the server, and open
+`/wa-b/_shrink.html`.
+
+It checks that a camera-sized source shrinks, that the long edge is capped, that
+a **non-image is rejected** rather than uploaded as garbage, and that an image
+already under the cap is **not scaled up**.
+
+This fixture caught a bug that would have shipped: `img-src` did not allow
+`blob:`, so `URL.createObjectURL` → `<img>` was refused by CSP and every upload
+failed with "That file is not an image we can read". The CSP report endpoint
+named it directly. The source image is random noise on purpose — the worst case
+JPEG can be given — so the measured saving is a floor, not a flattering number.
