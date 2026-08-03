@@ -1,3 +1,5 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -222,9 +224,12 @@ class _KentePainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
-/// One pulsing placeholder bar/block. Built entirely on core Flutter
-/// (AnimationController + Opacity) — no shimmer package needed. Respects
-/// the OS "reduce motion" setting by skipping the pulse entirely.
+/// One "fuzzy" shimmering placeholder bar/block — a soft highlight band
+/// sweeps across a flat base color, the standard loading-skeleton treatment
+/// that reads as "content is on its way" rather than a bare gray box. Built
+/// entirely on core Flutter (AnimationController + ShaderMask) — no shimmer
+/// package needed. Respects the OS "reduce motion" setting by skipping the
+/// sweep entirely.
 class Skeleton extends StatefulWidget {
   final double? width;
   final double height;
@@ -244,18 +249,16 @@ class _SkeletonState extends State<Skeleton>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 900),
+    duration: const Duration(milliseconds: 1400),
   );
-  late final Animation<double> _opacity = Tween<double>(begin: 0.4, end: 1.0)
-      .animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (MediaQuery.maybeOf(context)?.disableAnimations ?? false) {
-      _controller.value = 0.6;
+      _controller.stop();
     } else if (!_controller.isAnimating) {
-      _controller.repeat(reverse: true);
+      _controller.repeat();
     }
   }
 
@@ -274,8 +277,38 @@ class _SkeletonState extends State<Skeleton>
 
   @override
   Widget build(BuildContext context) {
-    if (MediaQuery.maybeOf(context)?.disableAnimations ?? false) return _box();
-    return FadeTransition(opacity: _opacity, child: _box());
+    final box = _box();
+    if (MediaQuery.maybeOf(context)?.disableAnimations ?? false) return box;
+    return AnimatedBuilder(
+      animation: _controller,
+      child: box,
+      builder: (context, child) => ShaderMask(
+        blendMode: BlendMode.srcATop,
+        shaderCallback: (rect) => LinearGradient(
+          colors: const [WabColors.bg2, WabColors.paper, WabColors.bg2],
+          stops: const [0.35, 0.5, 0.65],
+          begin: Alignment.centerLeft,
+          end: Alignment.centerRight,
+          // Slides the highlight band from off-screen-left to
+          // off-screen-right over one cycle — the actual "sweep".
+          transform: _SlidingGradientTransform(-1.5 + _controller.value * 3),
+        ).createShader(rect),
+        child: child,
+      ),
+    );
+  }
+}
+
+/// Shifts a gradient horizontally by a fraction of the shape's own width —
+/// how [_SkeletonState] moves the highlight band across each frame without
+/// re-solving the gradient's stops every time.
+class _SlidingGradientTransform extends GradientTransform {
+  final double slidePercent;
+  const _SlidingGradientTransform(this.slidePercent);
+
+  @override
+  Matrix4? transform(Rect bounds, {ui.TextDirection? textDirection}) {
+    return Matrix4.translationValues(bounds.width * slidePercent, 0, 0);
   }
 }
 

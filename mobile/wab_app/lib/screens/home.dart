@@ -270,61 +270,72 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
         ],
       ),
-      body: _loading
-          ? _loadingBody()
-          : _error != null
-              ? ErrorRetry(message: _error!, onRetry: _load)
-              : RefreshIndicator(
-                  onRefresh: _load,
-                  color: WabColors.accent,
-                  child: ListView(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    padding: const EdgeInsets.all(16),
-                    children: [
-                      if (_offline) ...[
-                        const OfflineBanner(),
-                        const SizedBox(height: 16),
-                      ],
-                      if (_onboarding?['all_complete'] == false) ...[
-                        _setupBanner(),
-                        const SizedBox(height: 16),
-                      ],
-                      TaskCenter(tasks: tasks),
-                      if (tasks.isNotEmpty) const SizedBox(height: 24),
-                      // Named so it reads as a distinct section from the Task
-                      // Center above it: that one is what to DO, this is how
-                      // today is going.
-                      const Text("Today's snapshot",
-                          style: TextStyle(
-                              fontSize: 17,
-                              fontWeight: FontWeight.w800,
-                              color: WabColors.ink)),
-                      const SizedBox(height: 12),
-                      _statGrid(),
-                      const SizedBox(height: 24),
-                      const Text('Recent orders',
-                          style: TextStyle(
-                              fontSize: 17,
-                              fontWeight: FontWeight.w800,
-                              color: WabColors.ink)),
-                      const SizedBox(height: 12),
-                      if (_recentOrders.isEmpty)
-                        const Padding(
-                          padding: EdgeInsets.only(top: 32),
-                          child: EmptyState(
-                              icon: Icons.receipt_long_rounded,
-                              title: 'No orders yet today',
-                              subtitle:
-                                  'When customers order on WhatsApp, they show up here instantly.'),
-                        )
-                      else
-                        ..._recentOrders.map((o) => Padding(
-                              padding: const EdgeInsets.only(bottom: 10),
-                              child: _orderTile(o as Map<String, dynamic>),
-                            )),
-                    ],
+      // A fade instead of an instant swap — the very first thing a merchant
+      // sees post-login shouldn't visibly "pop" from skeleton to real data.
+      body: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 320),
+        child: _loading
+            ? KeyedSubtree(
+                key: const ValueKey('loading'), child: _loadingBody())
+            : _error != null
+                ? KeyedSubtree(
+                    key: const ValueKey('error'),
+                    child: ErrorRetry(message: _error!, onRetry: _load))
+                : KeyedSubtree(
+                    key: const ValueKey('content'),
+                    child: RefreshIndicator(
+                      onRefresh: _load,
+                      color: WabColors.accent,
+                      child: ListView(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        padding: const EdgeInsets.all(16),
+                        children: [
+                          if (_offline) ...[
+                            const OfflineBanner(),
+                            const SizedBox(height: 16),
+                          ],
+                          if (_onboarding?['all_complete'] == false) ...[
+                            _setupBanner(),
+                            const SizedBox(height: 16),
+                          ],
+                          TaskCenter(tasks: tasks),
+                          if (tasks.isNotEmpty) const SizedBox(height: 24),
+                          // Named so it reads as a distinct section from the
+                          // Task Center above it: that one is what to DO,
+                          // this is how today is going.
+                          const Text("Today's snapshot",
+                              style: TextStyle(
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w800,
+                                  color: WabColors.ink)),
+                          const SizedBox(height: 12),
+                          _statGrid(),
+                          const SizedBox(height: 24),
+                          const Text('Recent orders',
+                              style: TextStyle(
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w800,
+                                  color: WabColors.ink)),
+                          const SizedBox(height: 12),
+                          if (_recentOrders.isEmpty)
+                            const Padding(
+                              padding: EdgeInsets.only(top: 32),
+                              child: EmptyState(
+                                  icon: Icons.receipt_long_rounded,
+                                  title: 'No orders yet today',
+                                  subtitle:
+                                      'When customers order on WhatsApp, they show up here instantly.'),
+                            )
+                          else
+                            ..._recentOrders.map((o) => Padding(
+                                  padding: const EdgeInsets.only(bottom: 10),
+                                  child: _orderTile(o as Map<String, dynamic>),
+                                )),
+                        ],
+                      ),
+                    ),
                   ),
-                ),
+      ),
     );
   }
 

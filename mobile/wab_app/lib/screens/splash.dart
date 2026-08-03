@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 
 import '../theme.dart';
@@ -80,9 +82,21 @@ class _SplashScreenState extends State<SplashScreen>
             children: [
               AnimatedBuilder(
                 animation: _logoController,
+                // The logo comes into focus rather than just fading in —
+                // blur sigma runs from soft down to 0 in step with opacity,
+                // so it visually "resolves" instead of appearing already sharp.
                 builder: (context, child) => Opacity(
                   opacity: _logoOpacity.value,
-                  child: Transform.scale(scale: _logoScale.value, child: child),
+                  child: Transform.scale(
+                    scale: _logoScale.value,
+                    child: ImageFiltered(
+                      imageFilter: ImageFilter.blur(
+                        sigmaX: (1 - _logoOpacity.value) * 8,
+                        sigmaY: (1 - _logoOpacity.value) * 8,
+                      ),
+                      child: child,
+                    ),
+                  ),
                 ),
                 child: const WabLogo(height: 44, color: Colors.white),
               ),
