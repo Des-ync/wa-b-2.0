@@ -23,7 +23,7 @@ class ChatScreen extends StatefulWidget {
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
-class _ChatScreenState extends State<ChatScreen> {
+class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   List<Map<String, dynamic>> _messages = [];
   Map<String, dynamic>? _customer;
   bool _paused = false;
@@ -35,19 +35,42 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _paused = widget.botPaused;
     _load();
-    // Light polling keeps the thread fresh while the merchant is looking at it.
-    _poll =
-        Timer.periodic(const Duration(seconds: 8), (_) => _load(quiet: true));
+    _startPolling();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _poll?.cancel();
     _textCtrl.dispose();
     _scrollCtrl.dispose();
     super.dispose();
+  }
+
+  // Polling a chat thread every 8s is fine while the merchant is actually
+  // looking at it, but pointless (and a battery/data drain) once the app is
+  // backgrounded — nobody is reading the messages it would fetch.
+  void _startPolling() {
+    _poll ??=
+        Timer.periodic(const Duration(seconds: 8), (_) => _load(quiet: true));
+  }
+
+  void _stopPolling() {
+    _poll?.cancel();
+    _poll = null;
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _load(quiet: true); // catch up on whatever arrived while backgrounded
+      _startPolling();
+    } else if (state == AppLifecycleState.paused) {
+      _stopPolling();
+    }
   }
 
   Future<void> _load({bool quiet = false}) async {

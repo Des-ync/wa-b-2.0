@@ -1,6 +1,6 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-
 
 import '../api/client.dart';
 import '../api/upload_api.dart';
@@ -254,20 +254,36 @@ class _ProductQuickEditSheetState extends State<ProductQuickEditSheet> {
                   const SizedBox(width: 12),
                   ClipRRect(
                     borderRadius: BorderRadius.circular(10),
-                    child: Image.network(
-                      imageUrl,
+                    child: CachedNetworkImage(
+                      imageUrl: imageUrl,
                       width: 48,
                       height: 48,
                       fit: BoxFit.cover,
                       // Decode at display size, not the source image's full
                       // resolution — this is a 48dp thumbnail, no reason to
                       // hold a multi-megapixel bitmap in memory for it.
-                      cacheWidth: (48 * MediaQuery.of(context).devicePixelRatio)
-                          .round(),
-                      cacheHeight:
+                      // Cached to disk too (flutter_cache_manager), so
+                      // re-opening this product doesn't re-download a photo
+                      // that hasn't changed since last time.
+                      memCacheWidth:
                           (48 * MediaQuery.of(context).devicePixelRatio)
                               .round(),
-                      errorBuilder: (_, __, ___) => Container(
+                      memCacheHeight:
+                          (48 * MediaQuery.of(context).devicePixelRatio)
+                              .round(),
+                      placeholder: (_, __) => Container(
+                        width: 48,
+                        height: 48,
+                        color: WabColors.bg2,
+                        child: const Center(
+                          child: SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        ),
+                      ),
+                      errorWidget: (_, __, ___) => Container(
                         width: 48,
                         height: 48,
                         color: WabColors.bg2,

@@ -28,6 +28,13 @@ class _MainShellState extends State<MainShell> {
   static const _pageCount = 5;
 
   int _index = 0;
+  // Tabs build lazily and stay built once visited (state — scroll position,
+  // in-flight edits — survives switching away). Without this, IndexedStack
+  // would construct all 5 pages up front, firing Home's, Orders', Inbox's
+  // and Products' initState loads as four concurrent API calls the instant
+  // the merchant logs in, right when the Home screen's own load is racing
+  // to paint first.
+  final Set<int> _visited = {0};
   StreamSubscription? _tapSub;
   StreamSubscription? _tabSub;
 
@@ -40,7 +47,7 @@ class _MainShellState extends State<MainShell> {
     // of it stacked over Home.
     _tabSub = shellTabRequests.stream.listen((i) {
       if (!mounted || i < 0 || i >= _pageCount) return;
-      setState(() => _index = i);
+      _goTo(i);
     });
   }
 
@@ -50,6 +57,11 @@ class _MainShellState extends State<MainShell> {
     _tabSub?.cancel();
     super.dispose();
   }
+
+  void _goTo(int i) => setState(() {
+        _index = i;
+        _visited.add(i);
+      });
 
   /// Deep-link from a notification tap into the relevant screen.
   void _handleTap(Map<String, String> data) {
@@ -62,7 +74,7 @@ class _MainShellState extends State<MainShell> {
           Navigator.of(context).push(MaterialPageRoute(
               builder: (_) => OrderDetailScreen(orderId: id)));
         } else {
-          setState(() => _index = 1);
+          _goTo(1);
         }
       case 'message':
       case 'handoff':
@@ -73,20 +85,23 @@ class _MainShellState extends State<MainShell> {
           Navigator.of(context).push(MaterialPageRoute(
               builder: (_) => ChatScreen(customerId: customerId)));
         } else {
-          setState(() => _index = 2);
+          _goTo(2);
         }
       case 'product':
-        setState(() => _index = 3);
+        _goTo(3);
       default:
-        setState(() => _index = 0);
+        _goTo(0);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final session = context.watch<Session>();
+    // select, not watch: this build only branches on the role, so a
+    // notifyListeners() for anything else on Session (fcmToken updates,
+    // business refresh) shouldn't retrigger it.
+    final role = context.select<Session, SessionRole?>((s) => s.role);
 
-    if (session.role == SessionRole.admin) {
+    if (role == SessionRole.admin) {
       return const AdminHomeScreen();
     }
 
@@ -99,10 +114,20 @@ class _MainShellState extends State<MainShell> {
     ];
 
     return Scaffold(
-      body: IndexedStack(index: _index, children: pages),
+      body: IndexedStack(
+        index: _index,
+        // Build only tabs that have actually been visited — an unvisited
+        // tab gets a cheap placeholder instead of mounting its screen (and
+        // firing its initState network load) purely because it shares the
+        // stack with whichever tab IS showing.
+        children: [
+          for (var i = 0; i < _pageCount; i++)
+            if (_visited.contains(i)) pages[i] else const SizedBox.shrink(),
+        ],
+      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
-        onDestinationSelected: (i) => setState(() => _index = i),
+        onDestinationSelected: _goTo,
         destinations: const [
           NavigationDestination(
               icon: Icon(Icons.home_outlined),

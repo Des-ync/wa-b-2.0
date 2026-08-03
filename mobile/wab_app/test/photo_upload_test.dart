@@ -35,6 +35,20 @@ class _FakePicker extends ProductPhotoPicker {
   }
 }
 
+/// Once a product has an `image_url`, the sheet mounts a CachedNetworkImage,
+/// which kicks off a real disk-cache lookup (flutter_cache_manager) with no
+/// platform-channel mock in this test binding — that lookup never resolves,
+/// so `pumpAndSettle()` would wait for it forever. These tests don't care
+/// about the thumbnail's own load state, only the surrounding button text,
+/// which updates synchronously — a bounded number of pumps is enough to
+/// flush everything else (the mocked upload's Future, the bottom sheet's
+/// pop animation) without waiting on the image.
+Future<void> pumpABit(WidgetTester tester) async {
+  for (var i = 0; i < 10; i++) {
+    await tester.pump(const Duration(milliseconds: 50));
+  }
+}
+
 void main() {
   group('resolveImageUrl', () {
     test('resolves our own relative upload path against the API host', () {
@@ -161,7 +175,7 @@ void main() {
       await tester.pumpWidget(app(okClient(), _FakePicker(null),
           product: {'id': 'p1', 'name': 'Shito', 'price_ghs': 25,
                     'image_url': '/wa-b/uploads/biz-1/old.jpg'}));
-      await tester.pumpAndSettle();
+      await pumpABit(tester);
 
       expect(find.text('Replace photo'), findsOneWidget);
       expect(find.text('Remove'), findsOneWidget);
@@ -193,7 +207,7 @@ void main() {
       await tester.tap(find.text('Add photo'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Choose from gallery'));
-      await tester.pumpAndSettle();
+      await pumpABit(tester);
 
       expect(picker.usedSource, ImageSource.gallery);
       expect(find.text('Replace photo'), findsOneWidget);

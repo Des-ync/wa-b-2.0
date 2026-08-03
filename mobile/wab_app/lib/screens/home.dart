@@ -101,7 +101,26 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _openNotifications() async {
     await Navigator.of(context)
         .push(MaterialPageRoute(builder: (_) => const NotificationsScreen()));
-    _load();
+    // The notifications screen only changes read-state — re-running the
+    // full four-endpoint _load() just to refresh the unread badge would
+    // triple the cost of every bell-icon tap for nothing today's stats,
+    // recent orders or onboarding banner care about.
+    _refreshUnreadCount();
+  }
+
+  Future<void> _refreshUnreadCount() async {
+    final session = context.read<Session>();
+    final bid = session.businessId;
+    if (bid == null) return;
+    try {
+      final res = await session.api.getNotifications(bid, limit: 1);
+      if (!mounted) return;
+      setState(() {
+        _unreadNotifications = (res['unread_count'] as num?)?.toInt() ?? 0;
+      });
+    } catch (_) {
+      // Best-effort — the badge just stays at its last known value.
+    }
   }
 
   /// Fetch the low-stock drill-down list. Called when the sheet opens, not on

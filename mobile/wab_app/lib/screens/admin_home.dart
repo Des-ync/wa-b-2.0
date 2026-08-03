@@ -19,7 +19,17 @@ class AdminHomeScreen extends StatefulWidget {
 
 class _AdminHomeScreenState extends State<AdminHomeScreen> {
   int _tab = 0;
+  // Same reasoning as MainShell: build each admin tab only once visited, so
+  // logging in as admin doesn't fire Stats/Businesses/Messages/Issues/Ops
+  // loads as five concurrent requests before anyone has looked at anything
+  // past Overview.
+  final Set<int> _visited = {0};
   final _businessesKey = GlobalKey<_AdminBusinessesState>();
+
+  void _goTo(int i) => setState(() {
+        _tab = i;
+        _visited.add(i);
+      });
 
   @override
   Widget build(BuildContext context) {
@@ -60,7 +70,13 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
           ),
         ],
       ),
-      body: IndexedStack(index: _tab, children: pages),
+      body: IndexedStack(
+        index: _tab,
+        children: [
+          for (var i = 0; i < pages.length; i++)
+            if (_visited.contains(i)) pages[i] else const SizedBox.shrink(),
+        ],
+      ),
       floatingActionButton: _tab == 1
           ? FloatingActionButton.extended(
               onPressed: () async {
@@ -80,7 +96,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
           : null,
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tab,
-        onDestinationSelected: (i) => setState(() => _tab = i),
+        onDestinationSelected: _goTo,
         destinations: const [
           NavigationDestination(
               icon: Icon(Icons.dashboard_outlined),
