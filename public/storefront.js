@@ -427,7 +427,7 @@ async function loadStore() {
     }
     document.getElementById('head').innerHTML = `
       ${SHOP.logo_url ? `<img class="store-logo" src="${esc(SHOP.logo_url)}" alt="" data-on-error="hide" />` : ''}
-      <h1>${esc(SHOP.name)}</h1>
+      <h1>${esc(SHOP.name)}${SHOP.verified ? '<span class="verified-badge" title="Verified by WA-B Solutions">✓ Verified</span>' : ''}</h1>
       ${SHOP.welcome_message ? `<div class="muted">${esc(SHOP.welcome_message)}</div>` : ''}
       <span class="store-open ${SHOP.open_now ? 'open-yes' : 'open-no'}">${SHOP.open_now ? 'Open now' : 'Currently closed'}</span>
     `;

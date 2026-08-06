@@ -37,7 +37,7 @@ router.get('/:id', async (req, res) => {
               o.delivery_address, o.estimated_ready_at, o.estimated_delivery_at,
               o.rider_name, o.rider_phone, o.delivery_status, o.delivery_proof_url,
               b.name AS business_name, b.support_phone, b.whatsapp_number AS business_whatsapp,
-              b.logo_url AS business_logo_url, b.refund_policy,
+              b.logo_url AS business_logo_url, b.refund_policy, b.verified_at AS business_verified_at,
               c.display_name AS customer_name, c.whatsapp_number AS customer_phone
          FROM orders o
          JOIN businesses b ON b.id = o.business_id
@@ -89,6 +89,7 @@ router.get('/:id', async (req, res) => {
         business_name: row.business_name,
         business_support_phone: row.support_phone || row.business_whatsapp,
         business_logo_url: row.business_logo_url,
+        business_verified: !!row.business_verified_at,
         refund_policy: row.refund_policy || DEFAULT_REFUND_POLICY,
         customer_name: row.customer_name,
         customer_phone_masked: maskedPhone

@@ -62,7 +62,7 @@ router.get('/businesses', async (req, res) => {
     const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
     const result = await query(
       `SELECT b.id, b.name, b.owner_name, b.whatsapp_number, b.wa_phone_number_id,
-              b.industry, b.status, b.trial_ends_at, b.created_at, b.updated_at,
+              b.industry, b.status, b.trial_ends_at, b.created_at, b.updated_at, b.verified_at,
               (SELECT s.status FROM subscriptions s WHERE s.business_id = b.id
                 ORDER BY s.created_at DESC LIMIT 1) AS subscription_status,
               (SELECT p.display_name FROM subscriptions s
@@ -402,6 +402,52 @@ router.patch('/businesses/:id', async (req, res) => {
       return respond.fail(req, res, { code: respond.CODES.CONFLICT, message: 'That storefront handle is already taken' });
     }
     return respond.failInternal(req, res, logger, 'PATCH /admin/businesses/:id', err);
+  }
+});
+
+/**
+ * POST /api/admin/businesses/:id/verify — grant the verified-shop badge.
+ * Manual admin review only (decisions-needed.md #3) — there is deliberately
+ * no auto-derivation from onboarding completion and no KYC document check.
+ * verified_by records the admin key so the audit trail (and a future "who
+ * approved this" question) doesn't rely on parsing the audit_log detail.
+ */
+router.post('/businesses/:id/verify', async (req, res) => {
+  try {
+    const result = await query(
+      `UPDATE businesses SET verified_at = NOW(), verified_by = $2, updated_at = NOW()
+        WHERE id = $1 RETURNING id, name, verified_at`,
+      [req.params.id, req.auth?.keyId || null]
+    );
+    const business = result.rows[0];
+    if (!business) return respond.notFound(req, res, 'Business');
+    recordAudit({
+      actorType: 'admin', actorId: req.auth?.keyId, businessId: business.id,
+      action: 'business.verify', detail: {}
+    });
+    return respond.ok(req, res, { business });
+  } catch (err) {
+    return respond.failInternal(req, res, logger, 'POST /admin/businesses/:id/verify', err);
+  }
+});
+
+/** POST /api/admin/businesses/:id/unverify — revoke the badge. */
+router.post('/businesses/:id/unverify', async (req, res) => {
+  try {
+    const result = await query(
+      `UPDATE businesses SET verified_at = NULL, verified_by = NULL, updated_at = NOW()
+        WHERE id = $1 RETURNING id, name, verified_at`,
+      [req.params.id]
+    );
+    const business = result.rows[0];
+    if (!business) return respond.notFound(req, res, 'Business');
+    recordAudit({
+      actorType: 'admin', actorId: req.auth?.keyId, businessId: business.id,
+      action: 'business.unverify', detail: {}
+    });
+    return respond.ok(req, res, { business });
+  } catch (err) {
+    return respond.failInternal(req, res, logger, 'POST /admin/businesses/:id/unverify', err);
   }
 });
 

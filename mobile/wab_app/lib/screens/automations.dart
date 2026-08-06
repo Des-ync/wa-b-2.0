@@ -12,6 +12,8 @@ const _configField = {
   'win_back': ('inactive_days', 'Days inactive'),
   'post_purchase_review': ('delay_hours', 'Hours after delivery'),
   'delivery_feedback': ('delay_hours', 'Hours after delivery'),
+  'payment_reminder': ('reminder_hours', 'Hours after an unpaid order'),
+  'payment_auto_cancel': ('cancel_hours', 'Hours before auto-cancelling'),
 };
 
 const _icons = {
@@ -19,6 +21,8 @@ const _icons = {
   'win_back': Icons.favorite_rounded,
   'post_purchase_review': Icons.star_rounded,
   'delivery_feedback': Icons.local_shipping_rounded,
+  'payment_reminder': Icons.notifications_active_rounded,
+  'payment_auto_cancel': Icons.cancel_schedule_send_rounded,
 };
 
 /// Toggle list for the lifecycle-automation templates (src/services/

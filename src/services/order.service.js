@@ -493,8 +493,8 @@ async function getLastPaymentReminderAt(orderId) {
   return res.rows[0]?.created_at || null;
 }
 
-async function recordPaymentReminderSent(orderId) {
-  await logOrderEvent(orderId, 'payment:reminder_sent', { changedBy: 'merchant' });
+async function recordPaymentReminderSent(orderId, changedBy = 'merchant') {
+  await logOrderEvent(orderId, 'payment:reminder_sent', { changedBy });
 }
 
 /**

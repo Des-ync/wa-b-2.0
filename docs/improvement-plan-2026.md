@@ -2,6 +2,10 @@
 
 **Status:** Phases 0–7 complete (§5–§11); Phases 8 and 9 started (§13, §12). Phase 3's envelope migration covers 22 of 26 route
 groups; the four left out are deliberate. Phases 5–9 not started.
+**2026-08-05:** all remaining items in [decisions-needed.md](./decisions-needed.md) that
+were still open going into this round — #1, #2, #3, #5, #6, #8, #9, #13 — are now answered.
+See §38 for what each unblocks. The three that create new work (badge, payment-reminder
+automation, live MoMo test charge) are scheduled as **Phase 10**, not yet started.
 **Produced:** 2026-07-30, at commit `4d8d48b`.
 **Supersedes:** `improvement-prompt.md` as the execution plan. That file remains the
 statement of intent; this file is the version corrected against the actual code.
@@ -131,7 +135,9 @@ Most of the original Phase 3 is shipped. What is genuinely missing:
 
 Receipts are done (logo, timeline, refund policy, real share). What remains:
 
-- **Verified shop badge** — no schema column, no UI. **BLOCKED** (decision 3).
+- **Verified shop badge** — no schema column, no UI. **Unblocked 2026-08-05** (decision #3:
+  manual admin review). Needs a schema column (`businesses.verified_at`/`verified_by`), an
+  admin review queue/UI, and a badge placed on the storefront/receipt — see §38.
 - **Customer Account Lite** (phone + WhatsApp OTP → orders, receipts, reorder, points,
   opt-out) — not built.
 - **Storefront depth** — `public/storefront.html` is 419 lines and has no product detail
@@ -171,6 +177,24 @@ loading skeletons, bulk actions, undo.
   (347 lines); audit it against the plan's list before building.
 - `public/dashboard.html` is **2,879 lines**. Decompose incrementally, as each area is
   touched. CSP tightening is sequenced *after* that, as the plan correctly states.
+
+### Phase 10 — Decision-driven builds: badge, reminders, live test charge (**M**) — *new, added 2026-08-05*
+
+Not part of the original corrected plan — these three items had no spec to build against
+until the [decisions-needed.md](./decisions-needed.md) round closed in §38. Independent of
+each other and of Phase 9; sequenced last because each is genuinely new work rather than
+wiring an existing backend into a client, which is what most phases above turned out to be.
+
+| Task | Files | Acceptance |
+|---|---|---|
+| 10.1 Verified-shop badge: schema (`verified_at`, `verified_by` on `businesses`), admin approve/revoke action, badge rendered on storefront + receipt. ✅ shipped — see §39 | `src/models/migrate.js`, `src/routes/admin.routes.js`, `mobile/wab_app/lib/screens/admin_business_detail.dart` (corrected from `admin_ops.dart`, which is server ops, not a business-detail screen), `public/storefront.js`, `public/receipt.js`, `public/admin.js` | Admin can flip a business to verified from `admin_business_detail.dart`; the badge renders on the public storefront and receipt for a verified shop and not otherwise; the action writes an `audit_log` row per decision #3 (manual review). |
+| 10.2 Payment-reminder automation: first automatic WhatsApp reminder at T+1h on an unpaid order, auto-cancel at T+24h if still unpaid. ✅ shipped — see §39 | `src/services/automations.js` (two new template keys, `payment_reminder`/`payment_auto_cancel`, on the existing engine), `src/models/migrate.js` (widened the `automations.key` CHECK constraint), `src/services/order.service.js` (`recordPaymentReminderSent` now takes a `changedBy`) | An order unpaid for 1h gets exactly one automatic reminder (scoped to momo/card — cash orders are untouched); still unpaid at 24h auto-cancels with the existing customer-facing cancellation message; a paid, cash, or already-cancelled order never fires either. Coexists with the manual `POST /orders/:id/payment-reminder` rather than replacing it. Auto-cancel never restocks — these orders were never paid, so nothing was ever decremented. |
+| 10.3 Live ₵1 MoMo test charge in onboarding: real charge-and-refund-back, replacing the config-presence-only `payment_provider` step. | `src/routes/onboarding.routes.js`, `src/services/paystack.service.js`, `mobile/wab_app/lib/screens/onboarding_checklist.dart` | Tapping "test payment setup" charges ₵1 to the merchant's configured MoMo via the active gateway (Paystack), confirms via webhook, immediately reverses it, and the checklist step completes only on confirmed success — not on charge-initiated. |
+
+**Blocked in this phase:** none — all three decisions are answered (§38). **10.3 is the
+highest-risk task** (real money movement in a new code path, touching the same webhook
+machinery Phase 1 just finished hardening) — review and ship it separately from 10.1/10.2,
+not bundled into one PR.
 
 ---
 
@@ -486,8 +510,8 @@ lines of the same product staying separate in the cart.
 
 ### Not done
 
-- **Verified shop badge — BLOCKED on decision #3.** No schema, no criteria, no approver.
-  Not guessed at.
+- **Verified shop badge — was BLOCKED on decision #3, now unblocked (2026-08-05).**
+  Manual admin review, as recommended. Still needs building — see §38.
 - **Customer Account Lite** (phone + WhatsApp OTP → orders, receipts, reorder, points,
   opt-out). Genuinely large; it is its own phase, not a tail on this one.
 - **PWA + full WCAG 2.1 AA audit.** The new controls are labelled (`role="dialog"`,
@@ -598,8 +622,10 @@ is now the argument for decisions-needed #13 (error tracking).
 
 ### Not done
 
-- **Error tracking** — blocked on decisions-needed #13, now the highest-value item on that
-  list.
+- **Error tracking** — **decision #13 answered 2026-08-05: stay on first-party only**
+  (already built: §24/§25's CSP + client-error reporting). No Sentry/GlitchTip. Source
+  maps, release tracking, breadcrumbs and a search UI are now explicitly out of scope
+  rather than pending a vendor call — see §38.
 - **`public/dashboard.html` decomposition** (2,879 lines) and the CSP tightening that
   depends on it.
 - **Staff roles and permissions UI** — the backend RBAC exists (`utils/permissions.js`,
@@ -2170,4 +2196,115 @@ succeeds, and 910 backend tests still pass.
 ### Not done
 
 Duplicate and reorder still have no equivalent in the storefront-facing app because they
-do not belong there. `style-src` and decision #13 remain the two open items in the plan.
+do not belong there. `style-src` remains open (Clerk-blocked, see §23). Decision #13 is
+now answered — see §38.
+
+
+---
+
+## 39. Phase 10.1 and 10.2 — shipped vs planned
+
+Branch not yet created; changes made directly. **Both tasks shipped.** 10.3 (live ₵1 MoMo
+test charge) is unstarted — it is the highest-risk of the three and was deliberately kept
+separate, per §2's note to ship it in its own PR.
+
+### 10.1 — Verified-shop badge
+
+| Piece | Where |
+|---|---|
+| Schema | `businesses.verified_at` / `verified_by` (FK to `api_keys`, `ON DELETE SET NULL` — a revoked admin key must not un-verify a shop) |
+| Admin actions | `POST /api/admin/businesses/:id/verify`, `.../unverify` — dedicated endpoints, not folded into the generic `PATCH /businesses/:id`, matching how `/impersonate` is already its own privileged action with its own `audit_log` entry |
+| Public exposure | `GET /api/storefront/:slug` → `shop.verified`; `GET /api/receipts/:id` → `receipt.business_verified` |
+| Web | `storefront.js`/`receipt.js` render a badge next to the shop name (new shared `.verified-badge` class in `styles.css`, themed via the existing `--accent-soft`/`--accent-ink` tokens — no new colors invented); `admin.js`'s business modal gets a grant/revoke section, and the all-businesses table shows a small ✓ |
+| Mobile | `admin_business_detail.dart` — an `Icons.verified_rounded` mark next to the status chip, and a "Verify shop"/"Revoke badge" action chip. Granting (not revoking) is gated behind a confirm dialog, since the whole point of manual review is that it shouldn't be a one-tap accident |
+
+**Two things worth stating precisely:**
+
+- **This is `admin_business_detail.dart`, not `admin_ops.dart`.** §2's Phase 10 task table
+  named the wrong file — `admin_ops.dart` is server/webhook/billing ops, not a
+  per-business screen. Corrected while building, once the actual business-detail screen
+  was located.
+- **Only the badge display and the admin toggle are built.** There is no review *queue* —
+  an admin has to already be looking at a specific business (via the existing all-businesses
+  list/search) to grant or revoke. Decision #3 didn't ask for a queue, and the existing
+  incomplete-setup list (`admin.routes.js`) is a separate, already-shipped concept; building
+  a dedicated "shops awaiting verification" view was out of scope here.
+
+### 10.2 — Payment-reminder automation (1h reminder / 24h auto-cancel)
+
+Two new keys on the existing `automations` engine (`payment_reminder`,
+`payment_auto_cancel`) rather than a bespoke cron — the same reasoning `automations.js`'s
+own header comment already gives for not repeating the `cart_nudge`/`loyalty_birthday`
+pattern a third and fourth time.
+
+| Design choice | Why |
+|---|---|
+| Two keys, not one | `automation_sends` dedups per (key, order_id). One key for both the reminder and the cancel would mean the reminder firing blocks the cancel from ever running for that order. |
+| Scoped to `payment_method IN ('momo','card')` | A cash-on-delivery order is unpaid *by design* until handover — reminding or auto-cancelling it would be acting against a customer who did nothing wrong. This was not explicit in decisions-needed.md #2, but follows directly from what "unpaid" means for a cash order vs. an online one. |
+| Reminder reuses `notification.notifyPaymentReminder`, not `sendAutomationMessage` | The manual "Send reminder" button sends interactive retry/cancel buttons (`retrypay_<id>`/`cancelord_<id>`) that route into an already-tested flow in `conversation.handler.js`. `sendAutomationMessage` (used by the other four templates) sends plain text with an SMS fallback — the wrong shape here, since a plain-text reminder with no buttons would give the customer nothing to tap. |
+| Cancel reuses `orderService.updateOrderStatus` + the existing `notifyOrderStatusChange('cancelled')` hook | No new i18n template — this is the exact message a merchant-initiated cancellation already sends. `changedBy: 'system'` distinguishes it in `order_status_history` from a merchant tap. |
+| Never restocks on auto-cancel | These orders are unpaid, so `markOrderPaid` never decremented their stock. Restocking only applies to a refund on a *paid* order (`refund_restocks_inventory`) — there's nothing to reverse here. |
+| Reminder also logs via `orderService.recordPaymentReminderSent(orderId, 'system')` | So it shows up in the order's payment timeline (`order_detail.dart`, §1/§Phase 1.2) exactly like a manual reminder, just tagged differently — a merchant looking at an order's history shouldn't see a gap where an automatic reminder fired. |
+
+**Verified:** 19 new/updated backend tests (`test/automations.paymentReminder.test.js`,
+`test/admin.verifiedBadge.test.js`, plus the pre-existing `automations.routes.test.js`
+updated from asserting 4 templates to 6 — an update that would have been missed without
+running the full suite, since that assertion doesn't mention the new keys by name). 903
+backend tests pass; `npm run lint` clean; `flutter analyze` back at its pre-existing 10
+info-level issues (one new `use_build_context_synchronously` was introduced and fixed
+during this work — a `mounted` check was missing after the confirm dialog's `await`, the
+same class of bug §37 also had to fix); 217 mobile tests pass unchanged (no new mobile
+tests were written for either screen — `admin_business_detail.dart` and `automations.dart`
+have no existing widget-test coverage to extend, and standing up that harness from zero
+was out of scope for this pass).
+
+### Not done
+
+- **10.3** (live ₵1 MoMo test charge) — unstarted, the highest-risk piece, deliberately
+  kept out of this pass.
+- **A verification review queue** on either surface (see the 10.1 note above).
+- **Mobile widget tests** for `admin_business_detail.dart`/`automations.dart` — logic is
+  covered indirectly by the backend tests; the screens themselves are not.
+- Nothing pushed or merged.
+
+
+---
+
+## 38. Decisions closed — 2026-08-05
+
+All items in [decisions-needed.md](./decisions-needed.md) still open at the start of this
+round are now answered by the product owner. Recorded here in the same form as the
+`#11`/`#12` closures in §6, because each one changes what the plan below it means.
+
+| # | Decision | Answer | What it unblocks |
+|---|---|---|---|
+| 1 | Auto-retry failed MoMo payments | Stay customer-initiated | Nothing changes — confirms the existing `retrypay_<id>` flow is the final shape, not a placeholder. |
+| 2 | Payment-reminder cadence / auto-cancel | Aggressive — first reminder at T+1h, auto-cancel at T+24h | A new automation template: scheduled reminder + cancel, built on the existing manual `POST /orders/:id/payment-reminder` rather than replacing it. Slots into Phase 7's template list (§11). |
+| 3 | Verified-shop badge criteria | Manual admin review | Unblocks Phase 6's last open item (§10, §489 above). Needs: `businesses.verified_at`/`verified_by` columns, an admin review queue (natural fit alongside `admin_ops.dart`, §13), and a badge surfaced on the storefront and receipt. |
+| 5 | Live MoMo test payment in onboarding | Real ₵1 charge | Replaces the config-presence-only `payment_provider` onboarding step with an actual sandbox/live charge-and-refund-back flow. Not started — no charge-and-refund endpoint exists yet. |
+| 6 | Mobile vs. web scope | Mobile primary, web stays for power-user tasks only | Confirms the direction every phase since Phase 4 has already taken (§8 onward). No corrective work — this closes the ambiguity the original decisions doc raised, retroactively validating §17/§18/§19/§20's "why mobile, not web" framing. |
+| 8 | Historical `payment_status` backfill approach | Backfill `payment_status`/GMV only, not loyalty | The script (§Phase 1.4, `src/jobs/reconcile.paidStatus.js`) already implements exactly this split — dry-run is safe to run now. **Still not run against production** — that's an operational step, not a code change. |
+| 9 | Raw gateway failure code disclosure | Collapsed "technical details" disclosure | Already built this way (§Phase 1.2). Decision retroactively confirms the shipped behaviour was the intended one — no change. |
+| 13 | Error tracking vendor | Stay on first-party only, no Sentry/GlitchTip | Closes what §21–§25 left as "partially addressed pending a vendor call". The CSP-violation and client-error reporting built there (§24, §25) is now the accepted floor, not an interim measure. Source maps, release tracking, breadcrumbs, session context and a search/aggregation UI are **out of scope**, not blocked — reopen only if another undetected-hang incident like §11's 18 hanging endpoints happens again. |
+
+### What's newly buildable that wasn't before
+
+Two genuinely new pieces of work exist now that didn't have a spec to build against:
+
+- **Verified-shop badge** (decision #3) — schema + admin queue + badge placement.
+- **Payment-reminder automation** (decision #2) — a scheduled version of the existing
+  manual reminder, with the 1h/24h cadence now fixed.
+- **Live MoMo test charge** (decision #5) — genuinely new payment plumbing (charge +
+  refund-back), not just UI wiring like most of Phases 4–8 turned out to be.
+
+Everything else in this batch **confirms shipped behaviour** rather than requesting new
+work — the pattern this whole program keeps finding (§0, §7, §19): checking a decision
+against the code before building against it usually finds the code already agrees.
+
+### Remaining open items after this round
+
+- `style-src` (§23) — blocked on Clerk, not on a product decision.
+- Decision #7 (refund-policy edit surface) and #14 (`.env` awareness for Phase 9 secret
+  scanning) — neither blocks anything; left open in `decisions-needed.md`.
+- The three newly-buildable items above are now scheduled as **Phase 10** (§2). 10.1 and
+  10.2 shipped 2026-08-05 — see §39. 10.3 (live MoMo test charge) not started.

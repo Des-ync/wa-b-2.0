@@ -89,7 +89,7 @@ async function loadReceipt() {
     cardEl.innerHTML = `
       <div class="receipt-head">
         ${logoHtml}
-        <h1>${esc(r.business_name)}</h1>
+        <h1>${esc(r.business_name)}${r.business_verified ? '<span class="verified-badge" title="Verified by WA-B Solutions">✓ Verified</span>' : ''}</h1>
         <div class="muted">Order ${esc(r.order_number)}</div>
         <span class="receipt-status ${statusClass(r.payment_status)}">${esc(r.payment_status)}</span>
       </div>

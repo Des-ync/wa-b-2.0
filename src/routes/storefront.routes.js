@@ -25,7 +25,7 @@ async function findPublicBusiness(slug) {
   if (!SLUG_RE.test(s)) return null;
   const bizRes = await query(
     `SELECT id, name, industry, whatsapp_number, welcome_message, open_time, close_time,
-            status, closed_at, logo_url, banner_url, delivery_fee_ghs, delivery_zones
+            status, closed_at, logo_url, banner_url, delivery_fee_ghs, delivery_zones, verified_at
        FROM businesses WHERE slug = $1`,
     [s]
   );
@@ -125,6 +125,7 @@ router.get('/:slug', async (req, res) => {
         open_now: isWithinBusinessHours(business.open_time, business.close_time),
         logo_url: business.logo_url,
         banner_url: business.banner_url,
+        verified: !!business.verified_at,
         delivery_fee_ghs: business.delivery_fee_ghs,
         delivery_zones: business.delivery_zones
       },

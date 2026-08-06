@@ -25,7 +25,7 @@ function withKeyLookup(handler) {
   };
 }
 
-test('GET /automations returns all four templates, defaulting to disabled with default config', async () => {
+test('GET /automations returns all six templates, defaulting to disabled with default config', async () => {
   withKeyLookup(async (sql) => {
     if (sql === 'SELECT * FROM automations WHERE business_id = $1') return { rows: [] };
     return { rows: [] };
@@ -38,12 +38,19 @@ test('GET /automations returns all four templates, defaulting to disabled with d
     .set('Authorization', 'Bearer sk_live_abc');
 
   assert.equal(res.status, 200);
-  assert.equal(res.body.automations.length, 4);
+  // reorder_reminder, win_back, post_purchase_review, delivery_feedback,
+  // plus payment_reminder/payment_auto_cancel added for decisions-needed #2.
+  assert.equal(res.body.automations.length, 6);
   const reorder = res.body.automations.find(a => a.key === 'reorder_reminder');
   assert.equal(reorder.enabled, false);
   assert.equal(reorder.config.delay_days, 14);
   const winBack = res.body.automations.find(a => a.key === 'win_back');
   assert.equal(winBack.config.inactive_days, 30);
+  const paymentReminder = res.body.automations.find(a => a.key === 'payment_reminder');
+  assert.equal(paymentReminder.enabled, false);
+  assert.equal(paymentReminder.config.reminder_hours, 1);
+  const paymentAutoCancel = res.body.automations.find(a => a.key === 'payment_auto_cancel');
+  assert.equal(paymentAutoCancel.config.cancel_hours, 24);
 });
 
 test('GET /automations merges a stored row over the default', async () => {

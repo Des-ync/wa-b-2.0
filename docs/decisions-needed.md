@@ -9,27 +9,18 @@ Answer format: edit this file in place, or reply with the numbers.
 
 ## A. Carried over from `improvement-prompt.md` §Blocked decisions
 
-### 1. Should failed MoMo payments auto-retry?
-If yes: how many attempts, at what interval?
-**Blocks:** nothing in Phase 1–5; would become a Phase 7 automation template.
-**Context found:** all retry today is customer-initiated via the `retrypay_<id>` button
-(`conversation.handler.js:1039`). Unattended re-charging of a customer's MoMo wallet
-without fresh consent is a compliance question, not just an engineering one.
-**Recommendation:** keep it customer-initiated. The retry prompt already fires
-automatically on failure with a humanized reason; that covers most of the value.
+### 1. Should failed MoMo payments auto-retry? ✅ RESOLVED 2026-08-05
+**Decided:** keep it customer-initiated, as recommended. No unattended re-charging.
 
-### 2. Payment-reminder cadence, and when does an unpaid order auto-cancel?
-**Blocks:** a Phase 7 automation template.
-**Context found:** merchant-triggered reminders already exist —
-`POST /api/orders/:id/payment-reminder` (`order.routes.js:379`), rate-limited to one per
-10 minutes per order. There is no *automatic* cadence and no auto-cancel anywhere.
-**Needed:** (a) first automatic reminder at T+? hours; (b) how many total; (c) auto-cancel
-at T+? or never.
+### 2. Payment-reminder cadence, and when does an unpaid order auto-cancel? ✅ RESOLVED 2026-08-05
+**Decided:** aggressive cadence — first automatic reminder at T+1 hour, order auto-cancels
+at T+24 hours if still unpaid. Builds on the existing merchant-triggered
+`POST /api/orders/:id/payment-reminder` (`order.routes.js:379`) rather than replacing it.
 
-### 3. Verified-shop badge — criteria, and who approves?
-**Blocks:** Phase 6 entirely for this item. No schema column, no UI, nothing to build against.
-**Needed:** manual admin review / auto-derived from onboarding completion / KYC document
-check — and who the approver is.
+### 3. Verified-shop badge — criteria, and who approves? ✅ RESOLVED 2026-08-05
+**Decided:** manual admin review. Needs a schema column (e.g. `businesses.verified_at`/
+`verified_by`), an admin review queue/UI, and a badge on the storefront/receipt — nothing
+built yet, this just unblocks starting the work.
 
 ### 4. Should refunds auto-restock inventory? ✅ RESOLVED — implemented 2026-07-30
 **Blocks:** a small change in `order.service.js#createRefund`.
@@ -45,19 +36,15 @@ they covered. Applied by a BEFORE INSERT trigger rather than at the INSERT sites
 the one-time backfill only covered businesses that already existed — a chop bar onboarded
 later would otherwise have started restocking refunded food.
 
-### 5. Live MoMo test payment during onboarding — real ₵1 charge, or simulated?
-**Blocks:** one onboarding checklist step. Everything else in onboarding is shipped.
-**Context found:** the `payment_provider` step is a configuration-presence check only
-(`onboarding.routes.js:32–36`). No live test-charge endpoint exists anywhere.
+### 5. Live MoMo test payment during onboarding — real ₵1 charge, or simulated? ✅ RESOLVED 2026-08-05
+**Decided:** real ₵1 test charge. The onboarding `payment_provider` step needs a genuine
+sandbox/live charge-and-refund-back flow, not just the current config-presence check
+(`onboarding.routes.js:32–36`).
 
-### 6. Mobile-vs-web scope: full parity, or is web the "back office"?
-**Blocks:** the scope of Phases 4 and 8.
-**Context found — this has changed materially since the audit.** The mobile app is no
-longer a thin subset: 36 screens / 9,106 lines, including accounting, categories, bundles,
-automations, audit log, notifications, onboarding checklist and admin ops. The remaining
-web-only surfaces are narrow. **Recommendation:** declare mobile primary and complete, and
-keep `public/dashboard.html` as a power-user surface for bulk/CSV/export work only — which
-also reduces the Phase 9 decomposition burden.
+### 6. Mobile-vs-web scope: full parity, or is web the "back office"? ✅ RESOLVED 2026-08-05
+**Decided:** mobile primary, as recommended — declare the Flutter app the complete
+day-to-day merchant experience, keep `public/dashboard.html` for power-user tasks only
+(bulk/CSV/export, accounting reports, rare admin actions), not full parity.
 
 ### 7. Refund and cancellation policy — platform default, or merchant-authored?
 **Already answered by the code — confirm it.** `receipt.routes.js` reads
@@ -70,17 +57,17 @@ whether merchants can currently edit `refund_policy` from mobile (they cannot to
 
 ## B. New decisions surfaced during Phase 0 verification
 
-### 8. Does the historical "mark paid" bug need remediating in production data?
-**Blocks:** Phase 1.4.
-The bug is fixed in code, but any order a merchant flipped to `paid` through the old
-`PATCH /:id/status` path **before** the fix still has `payment_status` stuck at
-`pending`/`unpaid` — permanently missing from GMV, analytics and loyalty.
-**Needed:** (a) run the dry-run report? (b) if the damage is non-zero, do we backfill
-`payment_status` and the loyalty ledger, or accept the historical gap and only fix
-forward? Backfilling loyalty means retroactively granting customers points/stamps they
-were never told about, which may generate support load.
-**Recommendation:** run the report; backfill `payment_status` and GMV (silent, corrects
-the books) but **not** loyalty rewards (customer-visible, would need a message).
+### 8. Does the historical "mark paid" bug need remediating in production data? ✅ RESOLVED 2026-08-05 (approach); report still needs to be run
+**Decided:** as recommended — backfill `payment_status` and GMV only (silent, corrects the
+books), do **not** backfill loyalty points/stamps (customer-visible, would need a message
+and risks support load). This decision doesn't unblock itself: the report still needs to
+be run against production once this branch is deployed —
+
+```
+cd /opt/wa-b-2.0 && node src/jobs/reconcile.paidStatus.js
+```
+
+— to know whether the damage is zero or non-zero before the backfill (`--apply`) step.
 
 **Status 2026-07-30 — still open, blocked on access, not on a decision.** The script
 exists and is verified. It was run against the **local** `whatsapp_saas` database, which
@@ -98,12 +85,9 @@ That is **read-only** — it prints affected orders, per-business counts and the
 GMV total, and changes nothing. Only re-running it with `--apply` mutates anything, and
 that remains a separate, explicit decision once the size of the damage is known.
 
-### 9. Raw gateway failure codes in the merchant UI — how raw?
-**Blocks:** Phase 1.2.
-`NOT_ENOUGH_FUNDS` is legible. Paystack's `gateway_response` free text can be far less so,
-and occasionally contains PII-adjacent detail.
-**Needed:** show the raw string verbatim, or show it only behind a "technical details"
-disclosure? **Recommendation:** disclosure, defaulting collapsed.
+### 9. Raw gateway failure codes in the merchant UI — how raw? ✅ RESOLVED 2026-08-05
+**Decided:** disclosure, defaulting collapsed, as recommended. Show a humanized reason by
+default; raw gateway string available behind a "technical details" tap.
 
 ### 10. Should `loyalty.jobs.js` (birthday coupons) be folded into the automations engine?
 **Blocks:** Phase 7 scope.
@@ -132,17 +116,12 @@ request produces no error log, no 5xx, and no alert. Error tracking would have s
 them the first time a merchant's dashboard spun.
 
 **Blocks:** Phase 9.
-Sentry's free tier is generous but is a third-party data processor, which interacts with
-the existing `data-processing.html` commitments. **Needed:** approval of the vendor, or a
-self-hosted alternative (GlitchTip), or a decision to stay on log-grepping.
 
-**Partially addressed, still open.** `/api/csp-report` (§24) and `/api/client-error`
-(§25) now cover blocked resources and uncaught JavaScript exceptions, first-party, with
-no third-party processor involved — so the question is no longer "anything vs nothing".
-What a real product still adds: source maps (a minified stack is currently unreadable),
-release tracking, breadcrumbs leading up to the error, user/session context, and a search
-and aggregation UI instead of one WhatsApp message and a log line. **Still needed:** the
-vendor decision, now against a floor rather than against zero.
+**✅ RESOLVED 2026-08-05 — stay on first-party only (logs + `/api/csp-report` +
+`/api/client-error`), no third-party vendor for now.** No new data-processing-agreement
+question to resolve. Revisit if another undetected-hang incident like the 18 hanging
+endpoints happens again — that's the concrete trigger for reopening this, not a fixed
+timeline.
 
 ### 13b. CSRF — closed, no decision needed
 Verified as not applicable: no cookie auth anywhere, header-based Bearer/`x-api-key` only,

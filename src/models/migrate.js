@@ -979,6 +979,17 @@ ALTER TABLE businesses ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ;
 ALTER TABLE businesses ADD COLUMN IF NOT EXISTS closure_reason TEXT;
 
 -- =========================================================================
+-- Verified-shop badge (decisions-needed.md #3, resolved 2026-08-05: manual
+-- admin review — no auto-derivation from onboarding completion, no KYC
+-- pipeline). verified_at is the single source of truth for "does this shop
+-- show the badge"; verified_by is who approved it, purely a record — ON
+-- DELETE SET NULL because a revoked/deleted admin key must not un-verify a
+-- shop or break this row.
+-- =========================================================================
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ;
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS verified_by UUID REFERENCES api_keys(id) ON DELETE SET NULL;
+
+-- =========================================================================
 -- impersonation_sessions: time-boxed, read-only admin support-mode access to
 -- a merchant's dashboard. Modeled on api_keys (hashed token, shown once) but
 -- deliberately separate — an impersonation token is NEVER merchant-issuable
@@ -1195,6 +1206,21 @@ CREATE TABLE IF NOT EXISTS product_watchers (
 );
 CREATE INDEX IF NOT EXISTS idx_product_watchers_pending
   ON product_watchers(product_id) WHERE notified_at IS NULL;
+
+-- =========================================================================
+-- Payment-reminder automation (decisions-needed.md #2, resolved 2026-08-05:
+-- aggressive cadence — first reminder at T+1h, auto-cancel at T+24h if still
+-- unpaid). Two new keys on the existing automations engine rather than a
+-- bespoke cron, per the same reasoning documented on the table above.
+-- Deliberately two keys, not one: a reminder and a cancellation are
+-- different events with independent dedup — collapsing them into one key
+-- would mean automation_sends' one-row-per-order dedup blocks the
+-- auto-cancel forever once the reminder has fired for that order.
+-- =========================================================================
+ALTER TABLE automations DROP CONSTRAINT IF EXISTS automations_key_check;
+ALTER TABLE automations ADD CONSTRAINT automations_key_check
+  CHECK (key IN ('reorder_reminder','win_back','post_purchase_review','delivery_feedback',
+                 'payment_reminder','payment_auto_cancel'));
 
 -- =========================================================================
 -- updated_at trigger

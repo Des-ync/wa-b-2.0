@@ -228,7 +228,7 @@ async function loadAllBusinesses() {
     document.getElementById('allBizCount').textContent = businesses.length + (businesses.length === 1 ? ' business' : ' businesses');
     tbody.innerHTML = businesses.map(b => `
       <tr>
-        <td><strong>${esc(b.name)}</strong>${b.owner_name ? `<div class="muted" style="font-size:12px">${esc(b.owner_name)}</div>` : ''}</td>
+        <td><strong>${esc(b.name)}</strong>${b.verified_at ? '<span class="verified-badge" title="Verified">✓</span>' : ''}${b.owner_name ? `<div class="muted" style="font-size:12px">${esc(b.owner_name)}</div>` : ''}</td>
         <td>${esc(b.whatsapp_number || '—')}</td>
         <td><span class="pill ${b.status === 'active' || b.status === 'trial' ? 'pill-ok' : (b.status === 'grace' ? 'pill-warn' : 'pill-off')}">${esc(b.status)}</span></td>
         <td>${esc(b.plan_name || '—')}</td>
@@ -257,9 +257,10 @@ async function openBizModal(id) {
   const body = document.getElementById('bizModalBody');
   body.innerHTML = '<p class="muted">Loading…</p>';
   try {
-    const [{ health_score, factors }, { usage }] = await Promise.all([
+    const [{ health_score, factors }, { usage }, { business }] = await Promise.all([
       api('/admin/businesses/' + id + '/health-score'),
-      api('/admin/businesses/' + id + '/usage')
+      api('/admin/businesses/' + id + '/usage'),
+      api('/admin/businesses/' + id)
     ]);
     const factorLabels = {
       whatsapp_connected: 'WhatsApp connected', whatsapp_activity: 'WhatsApp activity',
@@ -289,7 +290,9 @@ async function openBizModal(id) {
           <div style="font-size:15px;font-weight:700;margin-top:2px">${usage.broadcasts_sent_this_month}</div>
         </div>
       </div>
-      <h3 style="font-size:14px;margin-bottom:10px">Support-mode access (read-only)</h3>
+      <h3 style="font-size:14px;margin:20px 0 10px">Verified-shop badge</h3>
+      <div id="verifiedSection">${verifiedSectionHtml(business)}</div>
+      <h3 style="font-size:14px;margin:20px 0 10px">Support-mode access (read-only)</h3>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <input id="impReason" placeholder="Reason (required, e.g. support ticket #123)" style="flex:1;min-width:220px" />
         <button class="btn btn-primary btn-sm" data-click="startImpersonation" data-args="${dataArgs(id)}">Start read-only session</button>
@@ -298,6 +301,38 @@ async function openBizModal(id) {
     `;
   } catch (err) {
     body.innerHTML = '<p class="muted">Could not load: ' + esc(err.message) + '</p>';
+  }
+}
+
+/** Manual admin review only (decisions-needed.md #3) — no auto-derivation, no KYC. */
+function verifiedSectionHtml(business) {
+  if (business.verified_at) {
+    return `
+      <p class="muted" style="font-size:13px;margin-bottom:8px">Verified since ${fmtDateTime(business.verified_at)}.</p>
+      <button class="btn btn-ghost btn-sm" data-click="unverifyBusiness" data-args="${dataArgs(business.id)}">Revoke badge</button>
+    `;
+  }
+  return `
+    <p class="muted" style="font-size:13px;margin-bottom:8px">Not verified. Only grant this after manually confirming the shop is a genuine, active business.</p>
+    <button class="btn btn-primary btn-sm" data-click="verifyBusiness" data-args="${dataArgs(business.id)}">Grant verified badge</button>
+  `;
+}
+
+async function verifyBusiness(businessId) {
+  await toggleVerified(businessId, 'verify');
+}
+
+async function unverifyBusiness(businessId) {
+  await toggleVerified(businessId, 'unverify');
+}
+
+async function toggleVerified(businessId, action) {
+  const section = document.getElementById('verifiedSection');
+  try {
+    const { business } = await api('/admin/businesses/' + businessId + '/' + action, { method: 'POST' });
+    section.innerHTML = verifiedSectionHtml(business);
+  } catch (err) {
+    section.innerHTML = '<p class="muted" style="color:var(--danger,#c0392b)">' + esc(err.message) + '</p>';
   }
 }
 

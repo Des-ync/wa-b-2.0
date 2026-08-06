@@ -251,6 +251,52 @@ class _AdminBusinessDetailScreenState extends State<AdminBusinessDetailScreen> {
     }
   }
 
+  /// Verified-shop badge: manual admin review only (decisions-needed.md #3)
+  /// — no auto-derivation from onboarding completion, no KYC pipeline. A
+  /// dedicated endpoint rather than folding into `_patch`, matching how the
+  /// web admin panel treats this as its own privileged action with its own
+  /// audit_log entry, not a generic profile-field edit.
+  Future<void> _toggleVerified() async {
+    final verifying = _business?['verified_at'] == null;
+    if (verifying) {
+      final confirm = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Grant verified badge?'),
+          content: const Text(
+              'Only do this after manually confirming the shop is a genuine, active business. It will show a "Verified" badge on their storefront and receipts.'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel')),
+            FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Grant badge')),
+          ],
+        ),
+      );
+      if (confirm != true) return;
+      if (!mounted) return;
+    }
+    try {
+      final action = verifying ? 'verify' : 'unverify';
+      await context
+          .read<Session>()
+          .api
+          .post('/api/admin/businesses/${widget.businessId}/$action');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content:
+              Text(verifying ? 'Verified badge granted' : 'Badge revoked'),
+          backgroundColor: WabColors.accentInk));
+      await _load();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$e'), backgroundColor: WabColors.danger));
+    }
+  }
+
   Future<void> _editProfile() async {
     final b = _business!;
     final changed = await Navigator.push<bool>(
@@ -307,6 +353,11 @@ class _AdminBusinessDetailScreenState extends State<AdminBusinessDetailScreen> {
                               style: const TextStyle(
                                   fontWeight: FontWeight.w700, fontSize: 16)),
                         ),
+                        if (b['verified_at'] != null) ...[
+                          const Icon(Icons.verified_rounded,
+                              size: 16, color: WabColors.accentInk),
+                          const SizedBox(width: 6),
+                        ],
                         StatusChip('${b['status']}'),
                       ],
                     ),
@@ -357,6 +408,16 @@ class _AdminBusinessDetailScreenState extends State<AdminBusinessDetailScreen> {
                     avatar: const Icon(Icons.vpn_key_rounded, size: 18),
                     label: const Text('Issue API key'),
                     onPressed: _issueApiKey),
+                ActionChip(
+                    avatar: Icon(
+                        b['verified_at'] != null
+                            ? Icons.verified_rounded
+                            : Icons.verified_outlined,
+                        size: 18),
+                    label: Text(b['verified_at'] != null
+                        ? 'Revoke badge'
+                        : 'Verify shop'),
+                    onPressed: _toggleVerified),
               ],
             ),
             const SizedBox(height: 20),
